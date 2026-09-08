@@ -109,7 +109,8 @@ SQL: pipe over stdin, never `-f /tmp/…` (that reads the container FS):
 | enrollment port, no cert | `curl -sk -o /dev/null -w '%{http_code}' -X POST https://127.0.0.1:9444/agent/v1/enroll` | proxied (`502` before 001.10); any other path `404` |
 | agent API hidden on public port | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/agent/v1/heartbeat` | `404` |
 | secrets readable by the role | `$C run --rm --no-deps -T api sh -c 'id -u; for f in /run/secrets/*; do [ -r "$f" ] && echo "$f $(wc -c < "$f") bytes"; done'` | `10001`, then every file with a non-zero size (never print the contents) |
-| database roles | `docker exec control-plane-postgres-1 psql -U postgres -d control_plane -Atc "select rolname, rolsuper from pg_roles where rolname like 'app_%'"` | after 001.03: four `app_*` roles, none superuser; before: empty |
+| database roles | `docker exec control-plane-postgres-1 psql -U postgres -d control_plane -Atc "select rolname, rolsuper from pg_roles where rolname like 'app_%'"` | four `app_*` roles, none superuser (created by `initdb.d/10-roles.sh`) |
+| migrations applied at api start | `docker logs control-plane-api-1 2>&1 \| grep migrate:` | `migrate: применено — N, всего в источнике — N` before the uvicorn lines |
 
 ### Tests from the Mac against the stand's database
 
@@ -118,10 +119,12 @@ SQL: pipe over stdin, never `-f /tmp/…` (that reads the container FS):
 ```bash
 VM_IP=$(ssh -G vm | awk '/^hostname /{print $2}')
 PG_DSN="postgresql://app_rw:app@$VM_IP:15432/control_plane" \
+MIGRATE_DSN="postgresql://app_migrate:app@$VM_IP:15432/control_plane" \
 REDIS_URL="redis://$VM_IP:16379/0" make test-py
 ```
 
-(`app_rw` and the other roles appear with the migration of task 001.03; dev passwords are `app`.)
+(dev passwords are `app`; the roles are created by `initdb.d/10-roles.sh` on a fresh volume —
+an old volume needs `down -v` (confirm first) or the manual SQL from `secrets/README.md`.)
 
 ## 5. Safety Boundaries
 
@@ -134,6 +137,9 @@ REDIS_URL="redis://$VM_IP:16379/0" make test-py
 - MUST single-quote remote commands containing `{{…}}` templates or `$C`:
   `ssh vm 'docker ps --format "{{.Names}}"'`.
 - Secrets stay on the VM; never `cat` a key into a transcript, report, or commit.
+- `psql` run inside the postgres container against `127.0.0.1` uses `trust` (`pg_hba` of the
+  image) and never checks a role's password; to prove a password works, connect through the
+  published port from the Mac (`psycopg`/`psql` to `$VM_IP:15432`).
 
 ## 6. Rationalization Table
 

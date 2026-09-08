@@ -1,0 +1,72 @@
+-- Роли базы по docs/architectures/data-model.md §4.6 — кластерные объекты, поэтому не миграция yoyo:
+-- выполняется один раз под суперпользователем при инициализации кластера
+-- (deploy/compose/postgres/initdb.d/10-roles.sh) или в CI перед тестами. Повторный запуск безопасен.
+--
+-- Переменные psql: :db — имя базы; :rw, :mig, :bk — пароли app_rw, app_migrate, app_backup.
+--   psql -v ON_ERROR_STOP=1 -v db=control_plane -v rw=... -v mig=... -v bk=... -f roles.sql
+--
+--   app_owner   — владелец базы и всех объектов, без входа; миграции выполняют SET LOCAL ROLE app_owner
+--   app_rw      — C-01…C-03, только DML (привилегии на объекты — миграциями)
+--   app_migrate — миграции yoyo; член app_owner
+--   app_backup  — только чтение, для C-11
+
+\set ON_ERROR_STOP on
+
+-- Пустой (или из одних пробелов) пароль PostgreSQL молча превращает в NULL — роль с LOGIN без
+-- пароля; здесь это ошибка.
+-- Отсутствующая переменная даёт синтаксическую ошибку сама по себе.
+SELECT length(btrim(:'rw')) > 0 AS rw_ok, length(btrim(:'mig')) > 0 AS mig_ok,
+       length(btrim(:'bk')) > 0 AS bk_ok \gset
+\if :rw_ok
+\else
+DO $$ BEGIN RAISE EXCEPTION 'roles.sql: пустой пароль app_rw (переменная rw)'; END $$;
+\endif
+\if :mig_ok
+\else
+DO $$ BEGIN RAISE EXCEPTION 'roles.sql: пустой пароль app_migrate (переменная mig)'; END $$;
+\endif
+\if :bk_ok
+\else
+DO $$ BEGIN RAISE EXCEPTION 'roles.sql: пустой пароль app_backup (переменная bk)'; END $$;
+\endif
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_owner') THEN
+        CREATE ROLE app_owner NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_rw') THEN
+        CREATE ROLE app_rw NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_migrate') THEN
+        CREATE ROLE app_migrate NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backup') THEN
+        CREATE ROLE app_backup NOLOGIN;
+    END IF;
+END
+$$;
+
+ALTER ROLE app_rw      WITH LOGIN PASSWORD :'rw';
+ALTER ROLE app_migrate WITH LOGIN PASSWORD :'mig';
+ALTER ROLE app_backup  WITH LOGIN PASSWORD :'bk';
+
+-- Миграции создают объекты от имени app_owner (SET LOCAL ROLE); app_migrate наследует его права.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+                   JOIN pg_roles g ON g.oid = m.member
+                   WHERE r.rolname = 'app_owner' AND g.rolname = 'app_migrate') THEN
+        GRANT app_owner TO app_migrate;
+    END IF;
+END
+$$;
+
+-- Владелец базы — app_owner: вместе с базой ему принадлежит схема public (pg_database_owner).
+ALTER DATABASE :"db" OWNER TO app_owner;
+-- Подключаться могут только роли приложения, не любая роль кластера.
+REVOKE CONNECT ON DATABASE :"db" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"db" TO app_rw, app_migrate, app_backup;
+GRANT USAGE ON SCHEMA public TO app_rw, app_backup;
+-- Служебные таблицы yoyo (_yoyo_migration, _yoyo_log, yoyo_lock) создаёт сам app_migrate.
+GRANT USAGE, CREATE ON SCHEMA public TO app_migrate;

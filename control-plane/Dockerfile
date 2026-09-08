@@ -24,6 +24,10 @@ RUN pip install --only-binary=:all: -r requirements.lock \
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY app ./app
+# Миграции применяет роль api при старте (`python -m app.cli migrate`, §10.2); yoyo.ini — для
+# ручного запуска CLI yoyo внутри контейнера.
+COPY migrations ./migrations
+COPY yoyo.ini ./
 
 # Без USER: точка входа стартует от root ради секретов Compose (права файлов хоста) и сразу
 # переключается на app через setpriv — процесс роли всегда работает от uid 10001.

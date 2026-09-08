@@ -1,0 +1,281 @@
+"""Сквозная проверка задачи 001.03 (TC-E2E-01): миграция 0001 применяется, откатывается и
+применяется снова командой ``python -m app.cli migrate`` под ролью ``app_migrate``.
+
+Нужна база стенда с созданными ролями (``migrations/bootstrap/roles.sql``): ``MIGRATE_DSN`` —
+подключение ``app_migrate`` (с паролем или ``MIGRATE_PASSWORD_FILE``), ``PG_DSN`` — ``app_rw``
+для проверок. Без базы тест падает с ошибкой подключения, а не пропускается.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import asyncpg
+import psycopg
+import pytest
+from app.cli import migrate_dsn
+
+CONTROL_PLANE_DIR = Path(__file__).resolve().parents[2]
+
+# Перечисления §4.2 модели данных: имя → значения в порядке объявления.
+EXPECTED_ENUMS: dict[str, list[str]] = {
+    "user_status": ["active", "blocked", "deleted"],
+    "admin_role": ["super_admin", "admin", "operator", "support"],
+    "admin_status": ["active", "blocked"],
+    "email_token_kind": ["verify", "reset"],
+    "auth_event_kind": ["register", "login", "logout", "reset"],
+    "plan_status": ["active", "archived"],
+    "inbound_profile": ["vless_raw_vision", "vless_xhttp", "trojan_reality"],
+    "node_status": [
+        "pending",
+        "provisioning",
+        "active",
+        "degraded",
+        "offline",
+        "maintenance",
+        "disabled",
+        "suspended",
+    ],
+    "user_node_state": ["active", "suspended_quota", "suspended_admin", "expired", "removed"],
+    "command_type": ["restart_xray", "rotate_credentials", "collect_diagnostics", "update_agent"],
+    "command_status": ["issued", "delivered", "applied", "failed", "expired"],
+    "subscription_state": ["none", "active", "suspended_quota", "suspended_admin", "expired"],
+    "period_source": ["redeem", "admin", "order"],
+    "balance_source": ["report", "adjustment", "bonus", "late_report"],
+    "code_kind": ["redeem", "promo"],
+    "report_status": ["accepted", "duplicate", "rejected_time", "held_anomaly"],
+    "reconciliation_kind": ["arithmetic", "cross_source", "continuity"],
+    "event_type": [
+        "subscription_activated",
+        "subscription_expiring",
+        "subscription_expired",
+        "traffic_80",
+        "traffic_95",
+        "traffic_exhausted",
+        "node_address_changed",
+        "node_offline",
+        "node_recovered",
+        "node_suspended_by_provider",
+        "reconciliation_mismatch",
+        "node_report_buffer_full",
+    ],
+    "delivery_status": ["pending", "sent", "bounced", "failed"],
+    "job_queue": ["critical", "background"],
+    "job_status": ["pending", "running", "done", "failed", "dead"],
+    "actor_type": ["admin", "user", "system"],
+}
+EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
+EXPECTED_ROLES = {"app_owner", "app_rw", "app_migrate", "app_backup"}
+# Служебные таблицы yoyo — единственные объекты, которыми в public владеет app_migrate.
+YOYO_TABLES = {"_yoyo_migration", "_yoyo_log", "_yoyo_version", "yoyo_lock"}
+MIGRATIONS_DIR = CONTROL_PLANE_DIR / "migrations"
+
+
+@pytest.fixture(scope="session")
+def migrate_env() -> dict[str, str]:
+    """Окружение CLI миграций: ``MIGRATE_DSN`` по умолчанию — стенд разработки под app_migrate."""
+    env = dict(os.environ)
+    env.setdefault("MIGRATE_DSN", "postgresql://app_migrate:app@127.0.0.1:5432/control_plane")
+    return env
+
+
+def run_cli(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    """Запустить ``python -m app.cli`` из каталога control-plane и вернуть результат."""
+    return subprocess.run(  # noqa: S603 — аргументы фиксированы тестом
+        [sys.executable, "-m", "app.cli", *args],
+        cwd=CONTROL_PLANE_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def _acl_by_scope(rows: list[asyncpg.Record]) -> dict[tuple[str, str], set[str]]:
+    """Записи pg_default_acl по (тип объекта, область): область — имя схемы или «global»."""
+    return {(r["kind"], r["scope"]): set(r["acl"]) for r in rows}
+
+
+async def db_state(pg_dsn: str) -> dict[str, object]:
+    """Снимок объектов базы глазами ``app_rw``: расширения, перечисления, владельцы, роли, ACL."""
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        extension_rows = await conn.fetch(
+            "select extname, pg_get_userbyid(extowner) as owner from pg_extension "
+            "where extname = any($1)",
+            list(EXPECTED_EXTENSIONS),
+        )
+        extensions = {r["extname"] for r in extension_rows}
+        enum_rows = await conn.fetch(
+            "select t.typname, pg_get_userbyid(t.typowner) as owner, "
+            "array(select enumlabel::text from pg_enum e where e.enumtypid = t.oid "
+            "order by e.enumsortorder) as labels from pg_type t "
+            "join pg_namespace n on n.oid = t.typnamespace "
+            "where t.typtype = 'e' and n.nspname = 'public'"
+        )
+        # Владельцы объектов схемы public (таблицы, последовательности, типы, функции), кроме
+        # членов расширений: у trusted-расширений они принадлежат bootstrap-суперпользователю.
+        owner_rows = await conn.fetch(
+            "select c.relname as name, pg_get_userbyid(c.relowner) as owner from pg_class c "
+            "join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' "
+            "and c.relkind in ('r', 'p', 'S', 'v', 'm') and not exists (select 1 from pg_depend d "
+            "where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e') "
+            "union all select p.proname, pg_get_userbyid(p.proowner) from pg_proc p "
+            "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' "
+            "and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass "
+            "and d.objid = p.oid and d.deptype = 'e') "
+            "union all select t.typname, pg_get_userbyid(t.typowner) from pg_type t "
+            "join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' "
+            "and t.typtype = 'e' and not exists (select 1 from pg_depend d "
+            "where d.classid = 'pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')"
+        )
+        # Умолчания app_owner: глобальные (namespace 0 — только они могут отозвать встроенное
+        # право PUBLIC) и для схемы public. Встроенные умолчания PostgreSQL здесь не хранятся.
+        default_acl = await conn.fetch(
+            "select defaclobjtype::text as kind, defaclacl::text[] as acl, "
+            "case when defaclnamespace = 0 then 'global' else defaclnamespace::regnamespace::text "
+            "end as scope from pg_default_acl d "
+            "join pg_roles r on r.oid = d.defaclrole where r.rolname = 'app_owner'"
+        )
+        roles = await conn.fetch(
+            "select rolname, rolsuper, rolcanlogin from pg_roles where rolname like 'app\\_%'"
+        )
+        owned_by_rw = await conn.fetchval(
+            "select (select count(*) from pg_class c join pg_roles r on r.oid = c.relowner "
+            "where r.rolname = 'app_rw') + (select count(*) from pg_type t join pg_roles r "
+            "on r.oid = t.typowner where r.rolname = 'app_rw')"
+        )
+        return {
+            "extensions": extensions,
+            "extension_owners": {r["owner"] for r in extension_rows},
+            "enums": {r["typname"] for r in enum_rows},
+            "enum_labels": {r["typname"]: list(r["labels"]) for r in enum_rows},
+            "enum_owners": {r["owner"] for r in enum_rows},
+            "foreign_owned": {
+                (r["name"], r["owner"])
+                for r in owner_rows
+                if r["owner"] != "app_owner" and r["name"] not in YOYO_TABLES
+            },
+            "default_acl": _acl_by_scope(default_acl),
+            "roles": {r["rolname"] for r in roles},
+            "superusers": {r["rolname"] for r in roles if r["rolsuper"]},
+            "login_roles": {r["rolname"] for r in roles if r["rolcanlogin"]},
+            "owned_by_rw": owned_by_rw,
+        }
+    finally:
+        await conn.close()
+
+
+def assert_public_cannot_execute_owner_functions(migrate_env: dict[str, str]) -> None:
+    """Операционный страж L-1: функция, созданная app_owner (как в миграциях), недоступна
+    app_backup и доступна app_rw. Пробная функция живёт только внутри откатываемой транзакции."""
+    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
+    with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        with conn.transaction(), conn.cursor() as cur:
+            cur.execute("SET LOCAL ROLE app_owner")
+            cur.execute("CREATE FUNCTION _acl_probe() RETURNS int LANGUAGE sql AS 'select 1'")
+            cur.execute(
+                "SELECT has_function_privilege('app_backup', '_acl_probe()', 'EXECUTE'), "
+                "has_function_privilege('app_rw', '_acl_probe()', 'EXECUTE'), "
+                "(SELECT proacl::text[] FROM pg_proc WHERE proname = '_acl_probe')"
+            )
+            row = cur.fetchone()
+            assert row is not None
+            backup_can, rw_can, proacl = row
+            assert backup_can is False, f"app_backup выполняет функцию app_owner: acl={proacl}"
+            assert rw_can is True, f"app_rw не может выполнить функцию app_owner: acl={proacl}"
+            assert not any(a.startswith("=X") for a in proacl), proacl
+            raise psycopg.Rollback  # пробная функция не переживает транзакцию
+
+
+async def test_migration_0001_apply_rollback_apply(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """TC-E2E-01: apply → объекты есть; rollback → их нет, роли остались; apply → снова есть."""
+    applied = run_cli(migrate_env, "migrate")
+    assert applied.returncode == 0, applied.stderr
+    assert_migrated_state(await db_state(pg_dsn), migrate_env)
+
+    rolled_back = run_cli(migrate_env, "migrate", "--rollback-all")
+    assert rolled_back.returncode == 0, rolled_back.stderr
+    state = await db_state(pg_dsn)
+    assert state["extensions"] == set()
+    assert state["enums"] == set()
+    assert state["default_acl"] == {}, "откат возвращает умолчания PostgreSQL"
+    assert state["roles"] == EXPECTED_ROLES, "роли создаёт bootstrap, откат их не трогает"
+
+    # Повторное применение проверяется тем же набором: первый `migrate` на мигрированной базе
+    # ничего не применяет, и только здесь текущие файлы миграций реально выполняются.
+    reapplied = run_cli(migrate_env, "migrate")
+    assert reapplied.returncode == 0, reapplied.stderr
+    assert "применено — 1" in reapplied.stdout
+    assert_migrated_state(await db_state(pg_dsn), migrate_env)
+
+
+def assert_migrated_state(state: dict[str, object], migrate_env: dict[str, str]) -> None:
+    """Инварианты мигрированной базы: объекты, владельцы, роли, умолчания привилегий."""
+    assert state["extensions"] == EXPECTED_EXTENSIONS
+    assert state["extension_owners"] == {"app_owner"}, "владелец расширений — app_owner (§4.6)"
+    assert state["enums"] == set(EXPECTED_ENUMS)
+    assert state["enum_labels"] == EXPECTED_ENUMS, "значения перечислений — побуквенно по §4.2"
+    assert state["enum_owners"] == {"app_owner"}, "владелец типов — app_owner (§4.6)"
+    assert state["foreign_owned"] == set(), (
+        "в public всё принадлежит app_owner, кроме служебных таблиц yoyo: "
+        "миграция без SET LOCAL ROLE app_owner"
+    )
+    assert state["roles"] == EXPECTED_ROLES
+    assert state["superusers"] == set(), "роли приложения не суперпользователи"
+    assert state["login_roles"] == EXPECTED_ROLES - {"app_owner"}
+    assert state["owned_by_rw"] == 0, "app_rw не владеет объектами (AC 001.03)"
+    acl = state["default_acl"]
+    assert isinstance(acl, dict)
+    assert acl.get(("r", "public")) == {"app_rw=arwd/app_owner", "app_backup=r/app_owner"}, (
+        "будущие таблицы app_owner: app_rw — DML, app_backup — только SELECT"
+    )
+    assert acl.get(("S", "public")) == {"app_rw=rU/app_owner"}
+    assert acl.get(("f", "public")) == {"app_rw=X/app_owner"}
+    # Отзыв EXECUTE у PUBLIC виден только как глобальная запись без «=X» и с одним app_owner;
+    # без REVOKE записи нет вовсе (встроенное умолчание в pg_default_acl не хранится).
+    assert acl.get(("f", "global")) == {"app_owner=X/app_owner"}, (
+        "EXECUTE у PUBLIC на функции app_owner отозван глобальной записью pg_default_acl"
+    )
+    assert_public_cannot_execute_owner_functions(migrate_env)
+
+
+def test_migrate_is_idempotent(migrate_env: dict[str, str]) -> None:
+    """Второй запуск подряд применяет 0 и завершается кодом 0 (старт api, §10.2); порядок тестов
+    значения не имеет: первый запуск внутри теста приводит базу к «всё применено»."""
+    first = run_cli(migrate_env, "migrate")
+    assert first.returncode == 0, first.stderr
+    second = run_cli(migrate_env, "migrate")
+    assert second.returncode == 0, second.stderr
+    assert "применено — 0" in second.stdout
+
+
+def test_every_migration_sets_owner_role() -> None:
+    """Статический страж соглашения §4.6: каждая миграция и её откат начинаются с
+    ``SET LOCAL ROLE app_owner`` — иначе объекты достанутся app_migrate, и app_rw их не увидит."""
+    python_migrations = sorted(MIGRATIONS_DIR.glob("*.py"))
+    assert not python_migrations, f"миграции только SQL (страж владения): {python_migrations}"
+    files = sorted(p for p in MIGRATIONS_DIR.glob("*.sql") if p.parent == MIGRATIONS_DIR)
+    assert files, "миграций нет"
+    for path in files:
+        statements = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("--")
+        ]
+        assert statements and statements[0] == "SET LOCAL ROLE app_owner;", (
+            f"{path.name}: первый оператор должен быть SET LOCAL ROLE app_owner;"
+        )
+
+
+def test_admin_create_is_a_stub(migrate_env: dict[str, str]) -> None:
+    """``admin create`` до 001.47 честно отказывает кодом 69, а не притворяется выполненным."""
+    result = run_cli(migrate_env, "admin", "create")
+    assert result.returncode == 69
+    assert "001.47" in result.stderr

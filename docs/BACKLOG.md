@@ -77,4 +77,5 @@ resolution.
 
 ## Closed
 
+- **WI-2** [Builder-side guards need a planted regression before trust](backlog/wi-2-builder-side-guards-need-a-planted-regression-before-trust.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08
 - **WI-1** [Test gate 'no tests → skip' must derive from runner discovery rules](backlog/wi-1-test-gate-no-tests-skip-must-derive-from-runner-discovery-rules.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08

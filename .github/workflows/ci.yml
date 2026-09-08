@@ -25,16 +25,18 @@ jobs:
     needs: lint
     services:
       postgres:
-        # Роли app_rw/app_migrate создаёт миграция задачи 001.03; до неё тесты ходят под владельцем.
-        image: postgres:18
-        env: { POSTGRES_USER: app_owner, POSTGRES_PASSWORD: app, POSTGRES_DB: control_plane }
+        # Суперпользователь postgres только для bootstrap ролей (шаг ниже); тесты ходят под
+        # app_rw и app_migrate, как на стенде (control-plane/migrations/bootstrap/roles.sql).
+        image: postgres:18.6
+        env: { POSTGRES_PASSWORD: app, POSTGRES_DB: control_plane }
         ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U app_owner" --health-interval 5s --health-timeout 5s --health-retries 10
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:8
+        image: redis:8.10
         ports: ["6379:6379"]
     env:
-      PG_DSN: postgresql://app_owner:app@127.0.0.1:5432/control_plane
+      PG_DSN: postgresql://app_rw:app@127.0.0.1:5432/control_plane
+      MIGRATE_DSN: postgresql://app_migrate:app@127.0.0.1:5432/control_plane
       REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v5
@@ -44,6 +46,12 @@ jobs:
         with: { go-version: "1.27" }
       - uses: actions/setup-node@v5
         with: { node-version-file: .nvmrc, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Роли базы (bootstrap, как initdb.d на стенде)
+        run: |
+          docker exec -i ${{ job.services.postgres.id }} \
+            psql -U postgres -d control_plane -v ON_ERROR_STOP=1 \
+            -v db=control_plane -v rw=app -v mig=app -v bk=app -f - \
+            < control-plane/migrations/bootstrap/roles.sql
       - run: make setup
       - run: make tools test
 

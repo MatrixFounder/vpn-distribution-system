@@ -5,6 +5,7 @@
 | Каталог | Назначение | Задача плана |
 | :--- | :--- | :--- |
 | `compose/` | `docker-compose.yml` (стенд) + `docker-compose.dev.yml` (разработка); `.env.example`; `secrets/README.md` — перечень Docker secrets и сертификатов | 001.02, 001.66 |
+| `compose/postgres/` | Обёртка точки входа postgres и скрипт initdb.d, создающий роли базы из `control-plane/migrations/bootstrap/roles.sql` | 001.03 |
 | `nginx/` | Обратный прокси: TLS для публичных доменов, `server` агентов с mTLS, `server` enrollment без клиентского сертификата, исключение `/s/` из журнала | 001.02, 001.66 |
 | `node/` | Bootstrap-скрипт ноды, юниты systemd для Xray и Node Agent, базовый набор nftables, контрольная сумма Xray-core | 001.61 |
 | `prometheus/` | Конфигурация Prometheus и Alertmanager, правила алертов §17.4 постановки | 001.68 |

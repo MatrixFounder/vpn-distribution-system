@@ -17,10 +17,10 @@ name: control-plane
 
 # Общее окружение ролей: адреса внутри сети Compose; пароли и ключи — только файлами секретов
 # (§10.3). Роль процесса задаёт APP_ROLE (control-plane/docker-entrypoint.sh).
-# Роли базы (data-model.md §4.6): приложение ходит под app_rw, миграции — под app_migrate;
-# суперпользователь образа остаётся `postgres` (секрет pg_password) и нужен только задаче 001.03
-# для создания ролей с паролями из pg_app_rw_password / pg_app_migrate_password; app_owner —
-# владелец объектов без входа приложения, его создаёт миграция.
+# Роли базы (data-model.md §4.6): приложение ходит под app_rw, миграции — под app_migrate,
+# app_owner — владелец объектов без входа. Роли создаёт postgres/initdb.d/10-roles.sh при
+# инициализации кластера (пароли из pg_app_*_password); суперпользователь образа `postgres`
+# (секрет pg_password) приложением не используется.
 x-app-env: &app-env
   PG_DSN: postgresql://app_rw@postgres:5432/control_plane
   PG_PASSWORD_FILE: /run/secrets/pg_app_rw_password
@@ -52,6 +52,9 @@ x-app: &app
 services:
   postgres:
     image: postgres:18.6
+    # Обёртка точки входа: секреты паролей ролей → /run/pg-secrets для пользователя postgres
+    # (скрипты initdb.d выполняются не от root), затем штатный docker-entrypoint.sh образа.
+    entrypoint: ["/bin/bash", "/opt/control-plane/entrypoint.sh"]
     # archive_mode = on с локальным архивом на томе (Н-9, §9.2): сегменты копируются в
     # /var/lib/postgresql/wal_archive. Рост ограничен: сегменты старше 3 суток удаляются той же
     # командой (при активности archive_timeout=900 даёт до ~96 сегментов × 16 МиБ в сутки).
@@ -65,15 +68,22 @@ services:
       - -c
       - archive_command=${PG_ARCHIVE_COMMAND:-mkdir -p /var/lib/postgresql/wal_archive && test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f && find /var/lib/postgresql/wal_archive -type f -mtime +3 -delete}
     environment:
-      # Суперпользователь образа — `postgres` (умолчание); роли приложения создаёт 001.03.
+      # Суперпользователь образа — `postgres` (умолчание). Роли приложения создаёт
+      # postgres/initdb.d/10-roles.sh при инициализации кластера (только на пустом томе).
       POSTGRES_DB: control_plane
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     secrets:
       - pg_password
+      - pg_app_rw_password
+      - pg_app_migrate_password
+      - pg_app_backup_password
     volumes:
       # Образ postgres:18 хранит данные в /var/lib/postgresql/18/docker — том монтируется на
       # родительский каталог, иначе данные остаются в контейнере.
       - pg_data:/var/lib/postgresql
+      - ./postgres/entrypoint.sh:/opt/control-plane/entrypoint.sh:ro
+      - ./postgres/initdb.d/10-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+      - ../../control-plane/migrations/bootstrap/roles.sql:/opt/control-plane/roles.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d control_plane"]
       interval: 5s
@@ -173,6 +183,8 @@ secrets:
     file: ./secrets/pg_app_rw_password
   pg_app_migrate_password:
     file: ./secrets/pg_app_migrate_password
+  pg_app_backup_password:
+    file: ./secrets/pg_app_backup_password
   app_encryption_key:
     file: ./secrets/app_encryption_key
   ca_key:

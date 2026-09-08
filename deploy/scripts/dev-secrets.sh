@@ -10,7 +10,7 @@
 #   DEV_TLS_SAN — дополнительные SAN серверных сертификатов через запятую,
 #                 например DEV_TLS_SAN="IP:10.211.55.3,DNS:vm" (по умолчанию localhost и 127.0.0.1)
 #   PG_PASSWORD     — пароль суперпользователя postgres вместо «app»
-#   PG_APP_PASSWORD — пароль ролей app_rw и app_migrate вместо «app»
+#   PG_APP_PASSWORD — пароль ролей app_rw, app_migrate и app_backup вместо «app»
 # Результат: секреты в каталоге, серверные сертификаты в tls/ (монтируются в nginx),
 # клиентский сертификат ноды для проверки mTLS — в dev/ (в nginx не попадает).
 set -euo pipefail
@@ -43,6 +43,7 @@ need() {
 if need pg_password; then printf '%s' "${PG_PASSWORD:-app}" > "$dir/pg_password"; fi
 if need pg_app_rw_password; then printf '%s' "${PG_APP_PASSWORD:-app}" > "$dir/pg_app_rw_password"; fi
 if need pg_app_migrate_password; then printf '%s' "${PG_APP_PASSWORD:-app}" > "$dir/pg_app_migrate_password"; fi
+if need pg_app_backup_password; then printf '%s' "${PG_APP_PASSWORD:-app}" > "$dir/pg_app_backup_password"; fi
 if need app_encryption_key; then openssl rand -base64 32 | tr -d '\n' > "$dir/app_encryption_key"; fi
 if need smtp_password; then : > "$dir/smtp_password"; fi
 if need pgbackrest_key; then openssl rand -hex 32 | tr -d '\n' > "$dir/pgbackrest_key"; fi

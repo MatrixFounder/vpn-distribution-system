@@ -2,7 +2,8 @@
 # Точка входа образа Control Plane: одна кодовая база, роль процесса задаёт APP_ROLE
 # (docs/architectures/system-architecture.md §3.2, C-01…C-03). Аргументы командной строки,
 # если заданы, выполняются вместо роли — для `docker compose run api python -m app.cli …`.
-# Задача 001.03 добавляет перед стартом роли api шаг `python -m app.cli migrate` (§10.2).
+# Роль api перед стартом применяет миграции (`python -m app.cli migrate`, §10.2): под ролью
+# app_migrate с блокировкой yoyo, поэтому несколько экземпляров api не мешают друг другу.
 set -eu
 
 # Секреты Compose — файлы хоста с правами хоста (обычно 600 владельца-оператора), а роль
@@ -28,6 +29,7 @@ fi
 
 case "${APP_ROLE:-}" in
     api)
+        python -m app.cli migrate
         # Переменные названы APP_*: имена UVICORN_* uvicorn читает сам (auto_envvar_prefix)
         # и они перебивали бы явные флаги ниже.
         case "${APP_RELOAD:-}" in

@@ -11,14 +11,19 @@
 | `pg_password` | `postgres` (пароль суперпользователя `postgres` при инициализации); задача 001.03 — создание ролей | одна строка без перевода строки | `openssl rand -base64 24 \| tr -d '\n' > pg_password` |
 | `pg_app_rw_password` | все роли приложения (`PG_DSN` под `app_rw`, data-model §4.6) | одна строка | `openssl rand -base64 24 \| tr -d '\n' > pg_app_rw_password` |
 | `pg_app_migrate_password` | `api` — миграции при старте под `app_migrate` (001.03) | одна строка | `openssl rand -base64 24 \| tr -d '\n' > pg_app_migrate_password` |
+| `pg_app_backup_password` | резервное копирование под `app_backup` (только чтение, 001.67) | одна строка | `openssl rand -base64 24 \| tr -d '\n' > pg_app_backup_password` |
 | `app_encryption_key` | все роли приложения | ключ AES-256-GCM (§7.2), 32 байта в base64 | `openssl rand -base64 32 \| tr -d '\n' > app_encryption_key` |
 | `ca_key` | `api` (выпуск сертификатов нод при enrollment, §7.1) | приватный ключ внутреннего CA, PEM | `openssl ecparam -genkey -name prime256v1 -noout -out ca_key` |
 | `smtp_password` | `worker-background` | пароль SMTP-реле; пустой файл — почта отключена | `printf '%s' "$SMTP_PASSWORD" > smtp_password` |
 | `pgbackrest_key` | резервное копирование (задача 001.67) | ключ шифрования репозитория pgbackrest (Н-12) | `openssl rand -hex 32 \| tr -d '\n' > pgbackrest_key` |
 
 `pgbackrest_key` в `docker-compose.yml` пока не объявлен: его подключает задача 001.67.
-Роли `app_owner`, `app_rw`, `app_migrate`, `app_backup` создаёт миграция 001.03 под суперпользователем
-`postgres` с паролями из `pg_app_*_password`; приложение суперпользователя не использует.
+Роли `app_owner`, `app_rw`, `app_migrate`, `app_backup` создаёт `deploy/compose/postgres/initdb.d/10-roles.sh`
+при инициализации кластера (SQL — `control-plane/migrations/bootstrap/roles.sql`) с паролями из
+`pg_app_*_password` (обёртка `entrypoint.sh` при каждом старте копирует их в `/run/pg-secrets`
+пользователю `postgres`, скрипт initdb.d читает их только при инициализации). Приложение
+суперпользователя не использует. На уже инициализированном томе скрипт не выполняется: роли
+создаются вручную тем же SQL (`docker exec -i … psql -U postgres -d control_plane -v rw=… -v mig=… -v bk=… -v db=control_plane -f - < control-plane/migrations/bootstrap/roles.sql`).
 
 ## Сертификаты nginx (`tls/`, монтируется в `/etc/nginx/certs`)
 

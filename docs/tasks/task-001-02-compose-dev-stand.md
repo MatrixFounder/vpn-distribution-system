@@ -24,7 +24,7 @@
 - `deploy/compose/docker-compose.yml` — базовые службы: `postgres` (18, WAL-архивация включена), `redis` (8, `appendonly yes`), `nginx` (1.30 — по `docs/architectures/stack.md`; запись плана «1.26» устарела), `api`, `worker-critical`, `worker-background`, `scheduler`
 - `deploy/compose/docker-compose.dev.yml` — переопределения для разработки: порты наружу, монтирование исходников
 - `deploy/compose/.env.example` — переменные без секретов: домены, режимы, адреса служб
-- `deploy/compose/secrets/README.md` — перечень файлов Docker secrets: `pg_password`, `app_encryption_key`, `ca_key`, `smtp_password`, `pgbackrest_key`; добавлены при реализации по ролям data-model §4.6: `pg_app_rw_password` (приложение под `app_rw`), `pg_app_migrate_password` (миграции под `app_migrate`)
+- `deploy/compose/secrets/README.md` — перечень файлов Docker secrets: `pg_password`, `app_encryption_key`, `ca_key`, `smtp_password`, `pgbackrest_key`; добавлены при реализации по ролям data-model §4.6: `pg_app_rw_password` (приложение под `app_rw`), `pg_app_migrate_password` (миграции под `app_migrate`), `pg_app_backup_password` (копии под `app_backup`, добавлен в 001.03)
 - `deploy/scripts/dev-secrets.sh` — генерация секретов и dev CA/сертификатов для разработки (добавлено при реализации: без него стенд не поднимается одной командой, AC-19)
 - `deploy/scripts/vm-sync.sh`, `skills/vm-deploy/SKILL.md` — стенд живёт на VM Ubuntu, Docker на рабочей машине не ставится (решение пользователя при реализации)
 - `deploy/nginx/nginx.conf` — три `server`: публичный (кабинет, панель, домены подписки), агентский с `ssl_verify_client on`, enrollment без клиентского сертификата; `map` для исключения `/s/` из журнала

@@ -17,6 +17,7 @@ services:
   api:
     volumes:
       - ../../control-plane/app:/app/app:ro
+      - ../../control-plane/migrations:/app/migrations:ro
     environment:
       APP_RELOAD: "1"
 

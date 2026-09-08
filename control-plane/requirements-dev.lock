@@ -25,6 +25,8 @@ mypy_extensions==1.1.0
 packaging==26.3
 pathspec==1.1.1
 pluggy==1.6.0
+psycopg==3.3.5
+psycopg-binary==3.3.5
 pycparser==3.0
 pydantic==2.13.5
 pydantic-settings==2.15.0

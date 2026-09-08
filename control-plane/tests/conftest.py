@@ -14,7 +14,7 @@ import pytest
 
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
-    """DSN PostgreSQL стенда разработки; роль `app_rw` создаётся миграцией задачи 001.03."""
+    """DSN PostgreSQL стенда разработки под ролью `app_rw` (роли создаёт bootstrap 001.03)."""
     return os.environ.get("PG_DSN", "postgresql://app_rw:app@127.0.0.1:5432/control_plane")
 
 

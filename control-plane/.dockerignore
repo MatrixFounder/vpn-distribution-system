@@ -1,6 +1,9 @@
-# Контекст сборки control-plane/Dockerfile: только app/, requirements.lock, docker-entrypoint.sh.
+# Контекст сборки control-plane/Dockerfile: app/, migrations/, yoyo.ini, requirements.lock,
+# docker-entrypoint.sh — всё остальное в образ не попадает.
 *
 !app/
+!migrations/
+!yoyo.ini
 !requirements.lock
 !docker-entrypoint.sh
 **/__pycache__/
