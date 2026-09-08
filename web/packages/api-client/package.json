@@ -1,0 +1,9 @@
+{
+  "name": "@vpn/api-client",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Клиент API, генерируется из OpenAPI (R-50)",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

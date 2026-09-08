@@ -1,0 +1,32 @@
+{
+  "name": "vpn-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Кабинет пользователя, административная панель, клиент API и локализация (C-04)",
+  "type": "module",
+  "workspaces": [
+    "apps/cabinet",
+    "apps/admin",
+    "packages/api-client",
+    "packages/i18n"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc -b",
+    "test": "vitest run --passWithNoTests",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^4.0.0"
+  }
+}

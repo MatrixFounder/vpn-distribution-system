@@ -1,0 +1,9 @@
+{
+  "name": "@vpn/admin",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Административная панель, настольный экран (R-34)",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

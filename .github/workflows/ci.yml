@@ -1,0 +1,80 @@
+# Стадии по docs/architectures/deployment.md §10.2: lint → unit → contract → build.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.14" }
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.27" }
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .nvmrc, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: make setup
+      - run: make tools lint typecheck
+
+  unit:
+    runs-on: ubuntu-24.04
+    needs: lint
+    services:
+      postgres:
+        # Роли app_rw/app_migrate создаёт миграция задачи 001.03; до неё тесты ходят под владельцем.
+        image: postgres:18
+        env: { POSTGRES_USER: app_owner, POSTGRES_PASSWORD: app, POSTGRES_DB: control_plane }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U app_owner" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+    env:
+      PG_DSN: postgresql://app_owner:app@127.0.0.1:5432/control_plane
+      REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.14" }
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.27" }
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .nvmrc, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: make setup
+      - run: make tools test
+
+  contract:
+    # Контрактные тесты /agent/v1 и эталонные ответы подписки — наполняются задачами 001.28, 001.43.
+    runs-on: ubuntu-24.04
+    needs: unit
+    steps:
+      - uses: actions/checkout@v5
+      # Fail-fast: как только каталог контрактов появится (001.28), стадия обязана запускать тесты.
+      - run: |
+          if [ -d contracts/agent_v1 ]; then make test-contract; else echo "каталог contracts/agent_v1 появится в 001.28"; fi
+
+  build:
+    runs-on: ubuntu-24.04
+    needs: unit
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.27" }
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .nvmrc, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: node-agent (статический бинарный файл + контрольная сумма)
+        run: |
+          cd node-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X node-agent/internal/app.Version=${GITHUB_SHA::12}" -o ../dist/node-agent ./cmd/node-agent
+          cd ../dist && sha256sum node-agent > node-agent.sha256
+      - name: web (проверка типов; сборка статических файлов появляется с Vite в 001.62)
+        run: cd web && npm ci --no-audit --no-fund && npm run -s typecheck
+      - name: control-plane (образ Docker появляется в 001.02)
+        run: |
+          if [ -f control-plane/Dockerfile ]; then docker build -t control-plane:ci control-plane; else echo "Dockerfile появится в 001.02"; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: node-agent, path: dist/ }

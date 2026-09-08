@@ -1,0 +1,7 @@
+# golangci-lint v2: базовый набор для Node Agent; расширяется задачами этапа 9.
+version: "2"
+linters:
+  default: standard
+  enable: [errcheck, govet, staticcheck, unused, ineffassign, misspell, gocritic]
+formatters:
+  enable: [gofmt, goimports]

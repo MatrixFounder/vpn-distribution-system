@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/i18n" },
+    { "path": "packages/api-client" },
+    { "path": "apps/cabinet" },
+    { "path": "apps/admin" }
+  ]
+}
