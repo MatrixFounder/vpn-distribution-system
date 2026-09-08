@@ -9,6 +9,10 @@
 --   app_rw      — C-01…C-03, только DML (привилегии на объекты — миграциями)
 --   app_migrate — миграции yoyo; член app_owner
 --   app_backup  — только чтение, для C-11
+--
+-- Все объекты Control Plane живут в схеме control_plane, а не в public: соседство с другими
+-- решениями в одном кластере не должно давать конфликтов имён. Роли приложения получают
+-- search_path = control_plane; служебные таблицы yoyo тоже создаются там.
 
 \set ON_ERROR_STOP on
 
@@ -62,11 +66,18 @@ BEGIN
 END
 $$;
 
--- Владелец базы — app_owner: вместе с базой ему принадлежит схема public (pg_database_owner).
+-- Владелец базы — app_owner.
 ALTER DATABASE :"db" OWNER TO app_owner;
 -- Подключаться могут только роли приложения, не любая роль кластера.
 REVOKE CONNECT ON DATABASE :"db" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"db" TO app_rw, app_migrate, app_backup;
-GRANT USAGE ON SCHEMA public TO app_rw, app_backup;
+
+-- Схема приложения; public остаётся пустым и в search_path ролей не входит.
+CREATE SCHEMA IF NOT EXISTS control_plane AUTHORIZATION app_owner;
+ALTER SCHEMA control_plane OWNER TO app_owner;  -- и для схемы, созданной ранее кем-то другим
+GRANT USAGE ON SCHEMA control_plane TO app_rw, app_backup;
 -- Служебные таблицы yoyo (_yoyo_migration, _yoyo_log, yoyo_lock) создаёт сам app_migrate.
-GRANT USAGE, CREATE ON SCHEMA public TO app_migrate;
+GRANT USAGE, CREATE ON SCHEMA control_plane TO app_migrate;
+ALTER ROLE app_rw      IN DATABASE :"db" SET search_path = control_plane;
+ALTER ROLE app_migrate IN DATABASE :"db" SET search_path = control_plane;
+ALTER ROLE app_backup  IN DATABASE :"db" SET search_path = control_plane;

@@ -5,12 +5,16 @@
 -- транзакции миграции, учёт yoyo ведётся уже от app_migrate).
 
 SET LOCAL ROLE app_owner;
+-- Все объекты — в схеме control_plane (bootstrap создаёт её и задаёт search_path ролям);
+-- SET LOCAL здесь — чтобы миграция была верна и при запуске вручную.
+SET LOCAL search_path TO control_plane;
 
 -- Расширения (§4.6): btree_gist — EXCLUDE по uuid и tstzrange; citext — адреса почты.
 -- Обе отмечены trusted: устанавливаются владельцем базы без суперпользователя. Без IF NOT EXISTS:
--- чужое (не app_owner) расширение — ошибка здесь, а не при откате.
-CREATE EXTENSION btree_gist;
-CREATE EXTENSION citext;
+-- чужое (не app_owner) расширение — ошибка здесь, а не при откате. Объекты расширений — тоже
+-- в control_plane, чтобы citext и опклассы gist резолвились без public в search_path.
+CREATE EXTENSION btree_gist SCHEMA control_plane;
+CREATE EXTENSION citext SCHEMA control_plane;
 
 -- Привилегии по умолчанию на будущие объекты app_owner: app_rw — DML, app_backup — чтение.
 -- Запреты UPDATE/DELETE для audit_log, traffic_lines, balance_entries вводят их миграции (§4.6).
@@ -19,13 +23,13 @@ CREATE EXTENSION citext;
 -- (без IN SCHEMA): схемные умолчания складываются со встроенными и отозвать их не могут.
 ALTER DEFAULT PRIVILEGES FOR ROLE app_owner
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     GRANT USAGE, SELECT ON SEQUENCES TO app_rw;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     GRANT EXECUTE ON FUNCTIONS TO app_rw;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     GRANT SELECT ON TABLES TO app_backup;
 
 -- Перечисления §4.2 (значения только добавляются: ALTER TYPE ... ADD VALUE, §4.6).

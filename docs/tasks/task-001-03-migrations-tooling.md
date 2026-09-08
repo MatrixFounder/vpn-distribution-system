@@ -20,7 +20,7 @@
 
 ### Новые файлы
 
-- `control-plane/migrations/0001_extensions_roles_enums.sql` — `CREATE EXTENSION btree_gist, citext`; привилегии ролей `app_rw`, `app_backup` на объекты `app_owner`; все `enum`-типы §4.2. Сами роли — кластерные объекты, и миграция под `app_migrate` создать их не может (`app_migrate` не существует до них): они создаются `control-plane/migrations/bootstrap/roles.sql` при инициализации кластера (`deploy/compose/postgres/initdb.d/10-roles.sh`) или в CI тем же SQL под суперпользователем; откат миграции роли не удаляет (уточнено при реализации)
+- `control-plane/migrations/0001_extensions_roles_enums.sql` — `CREATE EXTENSION btree_gist, citext`; привилегии ролей `app_rw`, `app_backup` на объекты `app_owner`; все `enum`-типы §4.2. Сами роли — кластерные объекты, и миграция под `app_migrate` создать их не может (`app_migrate` не существует до них): они создаются `control-plane/migrations/bootstrap/roles.sql` при инициализации кластера (`deploy/compose/postgres/initdb.d/10-roles.sh`) или в CI тем же SQL под суперпользователем; откат миграции роли не удаляет (уточнено при реализации). Тот же bootstrap создаёт схему `control_plane` и задаёт её `search_path` ролям приложения: все объекты Control Plane живут в своей схеме, `public` пуст (решение пользователя 2026-09-08, data-model §4.6)
 - `control-plane/migrations/0001_extensions_roles_enums.rollback.sql` — откат первой миграции
 - `control-plane/app/cli.py` — команда `migrate` — запуск yoyo под ролью `app_migrate`; команда `admin create` (заглушка до 001.47)
 - `control-plane/yoyo.ini` — источник миграций и подключение из переменной `MIGRATE_DSN`

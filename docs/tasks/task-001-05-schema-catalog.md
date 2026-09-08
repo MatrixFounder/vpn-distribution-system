@@ -25,7 +25,20 @@
 
 ### Интеграция компонентов
 
-Таблицы создаются ролью `app_migrate`; права `app_rw` выдаются в той же миграции по перечню §4.6.
+Таблицы создаются ролью `app_migrate`; права `app_rw` выдаются в той же миграции по перечню §4.6
+(через умолчания привилегий `app_owner` из миграции 0001, как в 001.04).
+
+Уточнения при реализации: `node_billing_assignments.node_id` без внешнего ключа — таблицы `nodes`
+до 001.06 нет, FK добавляет миграция 060 (и снимает её откат). Сверх §4.2.2: умолчания `status`,
+`description`, `created_at`/`updated_at`; `CHECK (valid_to IS NULL OR valid_to > valid_from)` на двух
+таблицах истории (иначе `tstzrange` отвергал бы строку с ошибкой диапазона, а пустой интервал
+проходил бы `EXCLUDE`); индексы обратного поиска `plan_access_groups (access_group_id)` и
+`node_billing_assignments (billing_group_id)`; `ON DELETE CASCADE` на `plan_protocols.plan_id`,
+`plan_access_groups.plan_id`, `plan_access_groups.access_group_id` (модель каскадов не задаёт:
+удаление тарифа или группы доступа уносит строки состава; история коэффициентов — без каскада,
+§4.5 «бессрочно»). Модуль TC-UNIT-01 — `tests/unit/db/test_schema_catalog.py`
+(команда регрессии `-k 'schema_catalog'`), функция `test_app_rw_privileges`; проверка прав —
+`has_table_privilege` (каталог `information_schema` из сессии `app_rw` чужих прав не видит).
 
 <!-- contract:tests -->
 
@@ -43,8 +56,8 @@
 ### Модульные тесты
 
 1. **TC-UNIT-01:** Проверка прав роли `app_rw`
-   - Проверяемая функция: `tests/unit/db/test_grants.py::test_app_rw_privileges`
-   - Входные данные: каталог `information_schema.role_table_grants`
+   - Проверяемая функция: `tests/unit/db/test_schema_catalog.py::test_app_rw_privileges` (см. уточнения)
+   - Входные данные: `has_table_privilege` для ролей `app_rw`, `app_backup` (каталог `information_schema.role_table_grants` из сессии `app_rw` чужих прав не показывает)
    - Ожидаемый результат: права совпадают с перечнем §4.6
 
 ### Регрессионные тесты

@@ -2,6 +2,7 @@
 -- и созданы bootstrap-скриптом, а не этой миграцией.
 
 SET LOCAL ROLE app_owner;
+SET LOCAL search_path TO control_plane;
 
 DROP TYPE actor_type;
 DROP TYPE job_status;
@@ -26,13 +27,13 @@ DROP TYPE admin_status;
 DROP TYPE admin_role;
 DROP TYPE user_status;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     REVOKE SELECT ON TABLES FROM app_backup;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     REVOKE EXECUTE ON FUNCTIONS FROM app_rw;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     REVOKE USAGE, SELECT ON SEQUENCES FROM app_rw;
-ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA control_plane
     REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM app_rw;
 -- Возврат умолчания PostgreSQL (EXECUTE у PUBLIC): глобальная запись pg_default_acl исчезает.
 ALTER DEFAULT PRIVILEGES FOR ROLE app_owner

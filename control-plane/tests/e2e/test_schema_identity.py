@@ -1,7 +1,8 @@
 """Сквозные проверки задачи 001.04 (миграция 040 «учётные записи и аутентификация»).
 
-TC-E2E-01: миграция применяется и откатывается на один шаг (``python -m app.cli migrate`` /
-``--rollback``), откат удаляет только её объекты. TC-E2E-02: ограничения §4.2.1 отклоняют
+TC-E2E-01: миграция применяется, откатывается (``python -m app.cli migrate --rollback`` ровно
+столько шагов, сколько миграций стоит над ней вместе с ней) и применяется снова; откат удаляет
+только её объекты. TC-E2E-02: ограничения §4.2.1 отклоняют
 нарушающие строки под ролью app_rw. Партиции ``auth_events`` создаёт планировщик 001.08 на семь
 суток вперёд, поэтому пробы кладутся в далёкое прошлое (2000-01-01): такую партицию он не создаст,
 а строка без партиции отклоняется независимо от состояния стенда.
@@ -18,10 +19,9 @@ import pytest
 from app.cli import migrate_dsn
 from psycopg import sql
 
-from ._cli import run_cli
-from ._spec import EXPECTED_ENUMS
-
-IDENTITY_TABLES = {"users", "admin_users", "admin_recovery_codes", "email_tokens", "auth_events"}
+from ._cli import rollback_through, run_cli
+from ._db import existing_tables
+from ._spec import EXPECTED_ENUMS, IDENTITY_TABLES
 
 PROBE_DAY = dt.datetime(2000, 1, 1, tzinfo=dt.UTC)  # партиция-проба вне окна планировщика
 PROBE_TS = PROBE_DAY + dt.timedelta(hours=12)
@@ -32,19 +32,6 @@ USER_ROW = {
     "aup_version": "2026-09",
     "aup_accepted_at": dt.datetime(2026, 9, 8, tzinfo=dt.UTC),
 }
-
-
-async def existing_tables(pg_dsn: str) -> set[str]:
-    """Таблицы схемы public, известные app_rw (включая партиционированные родительские)."""
-    conn = await asyncpg.connect(pg_dsn)
-    try:
-        rows = await conn.fetch(
-            "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
-            "where n.nspname = 'public' and c.relkind in ('r', 'p')"
-        )
-        return {r["relname"] for r in rows}
-    finally:
-        await conn.close()
 
 
 async def insert_user(conn: asyncpg.Connection, **overrides: object) -> uuid.UUID:
@@ -62,10 +49,11 @@ async def insert_user(conn: asyncpg.Connection, **overrides: object) -> uuid.UUI
     return user_id
 
 
-async def test_migration_040_apply_rollback_one_step(
+async def test_migration_040_apply_rollback_reapply(
     pg_dsn: str, migrate_env: dict[str, str]
 ) -> None:
-    """TC-E2E-01: после apply таблицы есть; --rollback снимает только 040 (типы 0001 остаются)."""
+    """TC-E2E-01: после apply таблицы есть; откат ровно до 040 снимает её объекты (типы 0001
+    остаются); повторное применение возвращает таблицы."""
     applied = run_cli(migrate_env, "migrate")
     assert applied.returncode == 0, applied.stderr
     assert IDENTITY_TABLES <= await existing_tables(pg_dsn)
@@ -73,17 +61,19 @@ async def test_migration_040_apply_rollback_one_step(
     conn = await asyncpg.connect(pg_dsn)
     try:
         partition_key = await conn.fetchval(
-            "select pg_get_partkeydef('public.auth_events'::regclass)"
+            "select pg_get_partkeydef('control_plane.auth_events'::regclass)"
         )
         assert partition_key == "RANGE (ts)", "auth_events партиционирована по диапазону ts"
         id_default = await conn.fetchval(
             "select column_default from information_schema.columns "
-            "where table_name = 'auth_events' and column_name = 'id'"
+            "where table_schema = 'control_plane' and table_name = 'auth_events' "
+            "and column_name = 'id'"
         )
         assert id_default == "nextval('auth_events_id_seq'::regclass)"
         email_type = await conn.fetchval(
             "select udt_name from information_schema.columns "
-            "where table_name = 'users' and column_name = 'email'"
+            "where table_schema = 'control_plane' and table_name = 'users' and column_name = "
+            "'email'"
         )
         assert email_type == "citext"
         uuid_version = await conn.fetchval("select uuid_extract_version(uuidv7())")
@@ -91,16 +81,15 @@ async def test_migration_040_apply_rollback_one_step(
     finally:
         await conn.close()
 
-    rolled_back = run_cli(migrate_env, "migrate", "--rollback")
-    assert rolled_back.returncode == 0, rolled_back.stderr
-    assert "откачено миграций — 1" in rolled_back.stdout
+    # Ровно столько шагов, сколько нужно снять 040 вместе с более поздними миграциями.
+    rollback_through(migrate_env, "040_schema_identity")
     tables = await existing_tables(pg_dsn)
     assert not (IDENTITY_TABLES & tables), tables
     conn = await asyncpg.connect(pg_dsn)
     try:
         enums = await conn.fetchval(
             "select count(*) from pg_type t join pg_namespace n on n.oid = t.typnamespace "
-            "where t.typtype = 'e' and n.nspname = 'public'"
+            "where t.typtype = 'e' and n.nspname = 'control_plane'"
         )
         assert enums == len(EXPECTED_ENUMS), "откат 040 не трогает перечисления 0001"
         seq = await conn.fetchval(
@@ -244,6 +233,7 @@ async def test_auth_events_insert_as_app_rw(pg_dsn: str, migrate_env: dict[str, 
     assert run_cli(migrate_env, "migrate").returncode == 0
     with owner_connection(migrate_env) as owner:
         owner.execute("SET ROLE app_owner")
+        owner.execute("SET search_path TO control_plane")
         owner.execute("DROP TABLE IF EXISTS auth_events_probe")
         owner.execute(
             sql.SQL(

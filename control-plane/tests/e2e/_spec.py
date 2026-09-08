@@ -49,3 +49,15 @@ EXPECTED_ENUMS: dict[str, list[str]] = {
     "job_status": ["pending", "running", "done", "failed", "dead"],
     "actor_type": ["admin", "user", "system"],
 }
+
+# Таблицы групп схемы (по номерам миграций плана).
+IDENTITY_TABLES = {"users", "admin_users", "admin_recovery_codes", "email_tokens", "auth_events"}
+CATALOG_TABLES = {
+    "plans",
+    "plan_protocols",
+    "access_groups",
+    "plan_access_groups",
+    "billing_groups",
+    "billing_group_multipliers",
+    "node_billing_assignments",
+}

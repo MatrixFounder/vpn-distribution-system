@@ -3,11 +3,13 @@
 -- (uuidv7() PostgreSQL 18), время — timestamptz в UTC. Права app_rw (DML) и app_backup (SELECT)
 -- приходят из умолчаний привилегий app_owner (0001, §4.6); особых запретов у этой группы нет.
 -- Сверх §4.2.1 (объявлено в задаче): умолчания статусов/языка/времени, индекс по FK
--- email_tokens.user_id, CHECK на auth_events.result. Язык — text без CHECK: третий язык
+-- email_tokens.user_id, CHECK на auth_events.result, ON DELETE CASCADE у admin_recovery_codes и
+-- email_tokens (строки не имеют смысла без учётной записи). Язык — text без CHECK: третий язык
 -- добавляется без изменения схемы (R-51, AC-22), список допустимых локалей — у приложения.
 -- depends: 0001_extensions_roles_enums
 
 SET LOCAL ROLE app_owner;
+SET LOCAL search_path TO control_plane;
 
 -- Пользователи кабинета. Удаление аккаунта (UC-14) стирает PII и ставит deleted_at, строка остаётся.
 CREATE TABLE users (

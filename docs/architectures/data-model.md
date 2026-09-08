@@ -723,6 +723,11 @@ erDiagram
 - Инструмент: `yoyo-migrations`, файлы `.sql` с явным `rollback`.
 - Правило expand/contract (§17.2): добавление колонки и обратно совместимый код в выпуске N;
   удаление старой колонки в выпуске N+1.
+- Схема: все объекты Control Plane — в схеме `control_plane`, не в `public` (решение
+  2026-09-08: в одном кластере могут соседствовать другие решения, общая `public` даёт
+  конфликты имён). Схему создаёт bootstrap ролей, владелец — `app_owner`; роли приложения
+  получают `search_path = control_plane`; расширения устанавливаются в неё же; каждая миграция
+  начинается с `SET LOCAL ROLE app_owner; SET LOCAL search_path TO control_plane`.
 - Роли базы:
   - `app_owner` — владелец всех объектов; приложением не используется;
   - `app_rw` — C-01…C-03, только DML; без `UPDATE`/`DELETE` на `audit_log`, `traffic_lines`,

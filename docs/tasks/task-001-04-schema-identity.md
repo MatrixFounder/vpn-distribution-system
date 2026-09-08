@@ -40,7 +40,9 @@
 
 Отклонения от §4.2.1, принятые при реализации: умолчания `status`/`language`/`timezone`/
 `announce_consent`/`created_at`/`updated_at`/`ts`; индекс по внешнему ключу `email_tokens (user_id)`;
-`CHECK (result IN ('success', 'denied'))` на `auth_events`. `language` — `text` без `CHECK`:
+`CHECK (result IN ('success', 'denied'))` на `auth_events`; `ON DELETE CASCADE` у `admin_recovery_codes.admin_user_id`
+и `email_tokens.user_id` (модель каскадов не задаёт; строки без учётной записи бессмысленны).
+`language` — `text` без `CHECK`:
 третий язык добавляется без изменения схемы (R-51, AC-22), список допустимых локалей — у приложения.
 
 <!-- contract:tests -->

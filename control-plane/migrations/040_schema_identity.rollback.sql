@@ -2,6 +2,7 @@
 -- auth_events_id_seq (OWNED BY) удаляются вместе с таблицами; типы из 0001 остаются.
 
 SET LOCAL ROLE app_owner;
+SET LOCAL search_path TO control_plane;
 
 DROP TABLE auth_events;
 DROP TABLE email_tokens;

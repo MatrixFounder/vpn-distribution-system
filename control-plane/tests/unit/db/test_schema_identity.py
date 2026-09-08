@@ -17,7 +17,12 @@ from __future__ import annotations
 import asyncpg
 import pytest
 
-Column = tuple[str, str, bool, str | None]  # имя, тип (udt_name), допускает NULL, умолчание
+from ._introspect import (
+    EXPECTED_TABLE_GRANTS,
+    Column,
+    assert_table_matches,
+    table_grants,
+)
 
 EXPECTED_COLUMNS: dict[str, list[Column]] = {
     "users": [
@@ -92,39 +97,36 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
 
 EXPECTED_INDEXES: dict[str, set[str]] = {
     "users": {
-        "CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)",
-        "CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email)",
+        "CREATE UNIQUE INDEX users_pkey ON control_plane.users USING btree (id)",
+        "CREATE UNIQUE INDEX users_email_key ON control_plane.users USING btree (email)",
     },
     "admin_users": {
-        "CREATE UNIQUE INDEX admin_users_pkey ON public.admin_users USING btree (id)",
-        "CREATE UNIQUE INDEX admin_users_email_key ON public.admin_users USING btree (email)",
+        "CREATE UNIQUE INDEX admin_users_pkey ON control_plane.admin_users USING btree (id)",
+        "CREATE UNIQUE INDEX admin_users_email_key ON control_plane.admin_users USING btree "
+        "(email)",
     },
     "admin_recovery_codes": {
-        "CREATE UNIQUE INDEX admin_recovery_codes_pkey ON public.admin_recovery_codes "
+        "CREATE UNIQUE INDEX admin_recovery_codes_pkey ON control_plane.admin_recovery_codes "
         "USING btree (id)",
-        "CREATE INDEX admin_recovery_codes_unused_idx ON public.admin_recovery_codes "
+        "CREATE INDEX admin_recovery_codes_unused_idx ON control_plane.admin_recovery_codes "
         "USING btree (admin_user_id) WHERE (used_at IS NULL)",
     },
     "email_tokens": {
-        "CREATE UNIQUE INDEX email_tokens_pkey ON public.email_tokens USING btree (id)",
-        "CREATE UNIQUE INDEX email_tokens_token_hash_key ON public.email_tokens "
+        "CREATE UNIQUE INDEX email_tokens_pkey ON control_plane.email_tokens USING btree (id)",
+        "CREATE UNIQUE INDEX email_tokens_token_hash_key ON control_plane.email_tokens "
         "USING btree (token_hash)",
-        "CREATE INDEX email_tokens_user_id_idx ON public.email_tokens USING btree (user_id)",
+        "CREATE INDEX email_tokens_user_id_idx ON control_plane.email_tokens USING btree (user_id)",
     },
     "auth_events": {
-        "CREATE UNIQUE INDEX auth_events_pkey ON ONLY public.auth_events USING btree (ts, id)",
-        "CREATE INDEX auth_events_user_id_ts_idx ON ONLY public.auth_events "
+        "CREATE UNIQUE INDEX auth_events_pkey ON ONLY control_plane.auth_events USING btree (ts, "
+        "id)",
+        "CREATE INDEX auth_events_user_id_ts_idx ON ONLY control_plane.auth_events "
         "USING btree (user_id, ts DESC)",
     },
 }
 
 SCHEMA_IDENTITY_TABLES = list(EXPECTED_COLUMNS)
-TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
 SEQUENCE_PRIVILEGES = ["USAGE", "SELECT", "UPDATE"]
-EXPECTED_TABLE_GRANTS: dict[str, set[str]] = {
-    "app_rw": {"SELECT", "INSERT", "UPDATE", "DELETE"},
-    "app_backup": {"SELECT"},
-}
 EXPECTED_SEQUENCE_GRANTS: dict[str, set[str]] = {
     "app_rw": {"USAGE", "SELECT"},
     "app_backup": set(),
@@ -136,63 +138,30 @@ async def test_catalog_matches_data_model(pg_dsn: str) -> None:
     conn = await asyncpg.connect(pg_dsn)
     try:
         for table in SCHEMA_IDENTITY_TABLES:
-            columns = await conn.fetch(
-                "select column_name, udt_name, is_nullable, column_default "
-                "from information_schema.columns where table_schema = 'public' "
-                "and table_name = $1 order by ordinal_position",
+            await assert_table_matches(
+                conn,
                 table,
-            )
-            actual: list[Column] = [
-                (r["column_name"], r["udt_name"], r["is_nullable"] == "YES", r["column_default"])
-                for r in columns
-            ]
-            assert actual == EXPECTED_COLUMNS[table], f"{table}: колонки расходятся с §4.2.1"
-
-            constraints = await conn.fetch(
-                "select contype::text as kind, pg_get_constraintdef(oid) as def "
-                "from pg_constraint where conrelid = ('public.' || $1)::regclass "
-                "and contype in ('p', 'u', 'f', 'c', 'x')",
-                table,
-            )
-            assert {(r["kind"], r["def"]) for r in constraints} == EXPECTED_CONSTRAINTS[table], (
-                f"{table}: ограничения расходятся с §4.2.1"
-            )
-
-            indexes = await conn.fetch(
-                "select indexdef from pg_indexes where schemaname = 'public' and tablename = $1",
-                table,
-            )
-            assert {r["indexdef"] for r in indexes} == EXPECTED_INDEXES[table], (
-                f"{table}: индексы расходятся с §4.2.1"
+                EXPECTED_COLUMNS[table],
+                EXPECTED_CONSTRAINTS[table],
+                EXPECTED_INDEXES[table],
             )
 
         partition_key = await conn.fetchval(
-            "select pg_get_partkeydef('public.auth_events'::regclass)"
+            "select pg_get_partkeydef('control_plane.auth_events'::regclass)"
         )
         assert partition_key == "RANGE (ts)", "auth_events партиционирована по суткам ts (§4.5)"
         sequence = await conn.fetchrow(
             "select s.seqtypid::regtype::text as type, d.refobjid::regclass::text as tbl, "
             "a.attname from pg_sequence s join pg_depend d on d.objid = s.seqrelid "
             "and d.deptype = 'a' join pg_attribute a on a.attrelid = d.refobjid "
-            "and a.attnum = d.refobjsubid where s.seqrelid = 'public.auth_events_id_seq'::regclass"
+            "and a.attnum = d.refobjsubid where s.seqrelid = "
+            "'control_plane.auth_events_id_seq'::regclass"
         )
         assert sequence is not None and tuple(sequence) == ("bigint", "auth_events", "id"), (
             "auth_events_id_seq — bigint, OWNED BY auth_events.id"
         )
     finally:
         await conn.close()
-
-
-async def table_grants(conn: asyncpg.Connection, table: str) -> dict[str, set[str]]:
-    """Привилегии ролей app_rw/app_backup на таблицу по has_table_privilege."""
-    return {
-        role: {
-            priv
-            for priv in TABLE_PRIVILEGES
-            if await conn.fetchval("select has_table_privilege($1, $2, $3)", role, table, priv)
-        }
-        for role in EXPECTED_TABLE_GRANTS
-    }
 
 
 @pytest.mark.parametrize("table", SCHEMA_IDENTITY_TABLES)
@@ -215,7 +184,7 @@ async def test_sequence_privileges(pg_dsn: str) -> None:
                 priv
                 for priv in SEQUENCE_PRIVILEGES
                 if await conn.fetchval(
-                    "select has_sequence_privilege($1, 'public.auth_events_id_seq', $2)",
+                    "select has_sequence_privilege($1, 'control_plane.auth_events_id_seq', $2)",
                     role,
                     priv,
                 )

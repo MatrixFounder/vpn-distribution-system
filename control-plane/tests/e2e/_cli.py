@@ -26,3 +26,29 @@ def run_cli(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]
         encoding="utf-8",
         check=False,
     )
+
+
+def migration_ids() -> list[str]:
+    """Идентификаторы миграций источника в порядке применения (линейные зависимости → по имени)."""
+    return sorted(
+        p.stem for p in MIGRATIONS_DIR.glob("*.sql") if not p.name.endswith(".rollback.sql")
+    )
+
+
+def steps_to_remove(migration_id: str) -> int:
+    """Сколько откатов на шаг снимают ``migration_id`` при полностью применённом источнике:
+    сама миграция плюс все более поздние."""
+    ids = migration_ids()
+    assert migration_id in ids, f"{migration_id} нет в {MIGRATIONS_DIR}"
+    return len(ids) - ids.index(migration_id)
+
+
+def rollback_through(env: dict[str, str], migration_id: str) -> int:
+    """Откатить ровно столько шагов, чтобы снять ``migration_id`` (и всё, что новее); вернуть
+    число шагов. Каждый шаг должен завершиться кодом 0 и снять ровно одну миграцию."""
+    steps = steps_to_remove(migration_id)
+    for _ in range(steps):
+        result = run_cli(env, "migrate", "--rollback")
+        assert result.returncode == 0, result.stderr
+        assert "откачено миграций — 1" in result.stdout, result.stdout
+    return steps

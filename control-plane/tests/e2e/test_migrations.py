@@ -17,7 +17,7 @@ from ._spec import EXPECTED_ENUMS
 
 EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
 EXPECTED_ROLES = {"app_owner", "app_rw", "app_migrate", "app_backup"}
-# Служебные таблицы yoyo — единственные объекты, которыми в public владеет app_migrate.
+# Служебные таблицы yoyo — единственные объекты, которыми в control_plane владеет app_migrate.
 YOYO_TABLES = {"_yoyo_migration", "_yoyo_log", "_yoyo_version", "yoyo_lock"}
 
 
@@ -41,26 +41,26 @@ async def db_state(pg_dsn: str) -> dict[str, object]:
             "array(select enumlabel::text from pg_enum e where e.enumtypid = t.oid "
             "order by e.enumsortorder) as labels from pg_type t "
             "join pg_namespace n on n.oid = t.typnamespace "
-            "where t.typtype = 'e' and n.nspname = 'public'"
+            "where t.typtype = 'e' and n.nspname = 'control_plane'"
         )
-        # Владельцы объектов схемы public (таблицы, последовательности, типы, функции), кроме
+        # Владельцы объектов схемы control_plane (таблицы, последовательности, типы, функции), кроме
         # членов расширений: у trusted-расширений они принадлежат bootstrap-суперпользователю.
         owner_rows = await conn.fetch(
             "select c.relname as name, pg_get_userbyid(c.relowner) as owner from pg_class c "
-            "join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' "
+            "join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'control_plane' "
             "and c.relkind in ('r', 'p', 'S', 'v', 'm') and not exists (select 1 from pg_depend d "
             "where d.classid = 'pg_class'::regclass and d.objid = c.oid and d.deptype = 'e') "
             "union all select p.proname, pg_get_userbyid(p.proowner) from pg_proc p "
-            "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' "
+            "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'control_plane' "
             "and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass "
             "and d.objid = p.oid and d.deptype = 'e') "
             "union all select t.typname, pg_get_userbyid(t.typowner) from pg_type t "
-            "join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' "
+            "join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'control_plane' "
             "and t.typtype = 'e' and not exists (select 1 from pg_depend d "
             "where d.classid = 'pg_type'::regclass and d.objid = t.oid and d.deptype = 'e')"
         )
         # Умолчания app_owner: глобальные (namespace 0 — только они могут отозвать встроенное
-        # право PUBLIC) и для схемы public. Встроенные умолчания PostgreSQL здесь не хранятся.
+        # право PUBLIC) и для схемы control_plane. Встроенные умолчания здесь не хранятся.
         default_acl = await conn.fetch(
             "select defaclobjtype::text as kind, defaclacl::text[] as acl, "
             "case when defaclnamespace = 0 then 'global' else defaclnamespace::regnamespace::text "
@@ -150,7 +150,7 @@ def assert_migrated_state(state: dict[str, object], migrate_env: dict[str, str])
     assert state["enum_labels"] == EXPECTED_ENUMS, "значения перечислений — побуквенно по §4.2"
     assert state["enum_owners"] == {"app_owner"}, "владелец типов — app_owner (§4.6)"
     assert state["foreign_owned"] == set(), (
-        "в public всё принадлежит app_owner, кроме служебных таблиц yoyo: "
+        "в control_plane всё принадлежит app_owner, кроме служебных таблиц yoyo: "
         "миграция без SET LOCAL ROLE app_owner"
     )
     assert state["roles"] == EXPECTED_ROLES
@@ -159,11 +159,11 @@ def assert_migrated_state(state: dict[str, object], migrate_env: dict[str, str])
     assert state["owned_by_rw"] == 0, "app_rw не владеет объектами (AC 001.03)"
     acl = state["default_acl"]
     assert isinstance(acl, dict)
-    assert acl.get(("r", "public")) == {"app_rw=arwd/app_owner", "app_backup=r/app_owner"}, (
+    assert acl.get(("r", "control_plane")) == {"app_rw=arwd/app_owner", "app_backup=r/app_owner"}, (
         "будущие таблицы app_owner: app_rw — DML, app_backup — только SELECT"
     )
-    assert acl.get(("S", "public")) == {"app_rw=rU/app_owner"}
-    assert acl.get(("f", "public")) == {"app_rw=X/app_owner"}
+    assert acl.get(("S", "control_plane")) == {"app_rw=rU/app_owner"}
+    assert acl.get(("f", "control_plane")) == {"app_rw=X/app_owner"}
     # Отзыв EXECUTE у PUBLIC виден только как глобальная запись без «=X» и с одним app_owner;
     # без REVOKE записи нет вовсе (встроенное умолчание в pg_default_acl не хранится).
     assert acl.get(("f", "global")) == {"app_owner=X/app_owner"}, (
@@ -184,7 +184,8 @@ def test_migrate_is_idempotent(migrate_env: dict[str, str]) -> None:
 
 def test_every_migration_sets_owner_role() -> None:
     """Статический страж соглашения §4.6: каждая миграция и её откат начинаются с
-    ``SET LOCAL ROLE app_owner`` — иначе объекты достанутся app_migrate, и app_rw их не увидит."""
+    ``SET LOCAL ROLE app_owner`` и ``SET LOCAL search_path TO control_plane`` — иначе объекты
+    достанутся app_migrate или окажутся в public."""
     python_migrations = sorted(MIGRATIONS_DIR.glob("*.py"))
     assert not python_migrations, f"миграции только SQL (страж владения): {python_migrations}"
     files = sorted(p for p in MIGRATIONS_DIR.glob("*.sql") if p.parent == MIGRATIONS_DIR)
@@ -195,9 +196,10 @@ def test_every_migration_sets_owner_role() -> None:
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("--")
         ]
-        assert statements and statements[0] == "SET LOCAL ROLE app_owner;", (
-            f"{path.name}: первый оператор должен быть SET LOCAL ROLE app_owner;"
-        )
+        assert statements[:2] == [
+            "SET LOCAL ROLE app_owner;",
+            "SET LOCAL search_path TO control_plane;",
+        ], f"{path.name}: миграция начинается с SET LOCAL ROLE app_owner; SET LOCAL search_path"
 
 
 def test_admin_create_is_a_stub(migrate_env: dict[str, str]) -> None:

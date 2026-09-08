@@ -28,6 +28,11 @@
 
 ### Интеграция компонентов
 
+Миграция 050 (001.05) создала `node_billing_assignments.node_id` без внешнего ключа: `nodes` тогда не
+существовало. Миграция 060 добавляет `ALTER TABLE node_billing_assignments ADD CONSTRAINT
+node_billing_assignments_node_id_fkey FOREIGN KEY (node_id) REFERENCES nodes (id)`, её откат снимает
+это ограничение до `DROP TABLE nodes`; ожидание в `tests/unit/db/test_schema_catalog.py` дополняется.
+
 Таблицы создаются ролью `app_migrate`; права `app_rw` выдаются в той же миграции по перечню §4.6.
 
 <!-- contract:tests -->
@@ -46,7 +51,7 @@
 ### Модульные тесты
 
 1. **TC-UNIT-01:** Проверка прав роли `app_rw`
-   - Проверяемая функция: `tests/unit/db/test_grants.py::test_app_rw_privileges`
+   - Проверяемая функция: `tests/unit/db/test_schema_nodes.py::test_app_rw_privileges` (соглашение `test_schema_<группа>.py`, как в 001.04/001.05)
    - Входные данные: каталог `information_schema.role_table_grants`
    - Ожидаемый результат: права совпадают с перечнем §4.6
 
