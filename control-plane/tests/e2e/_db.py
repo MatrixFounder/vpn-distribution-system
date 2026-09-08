@@ -39,3 +39,21 @@ async def insert_node(
         billing_group_id,
     )
     return node_id
+
+
+async def insert_user(conn: asyncpg.Connection, email: str) -> uuid.UUID:
+    """Вставить пользователя с обязательными полями §4.2.1; вернуть id."""
+    user_id: uuid.UUID = await conn.fetchval(
+        "insert into users (email, password_hash, aup_version, aup_accepted_at) "
+        "values ($1, 'x', '2026-09', now()) returning id",
+        email,
+    )
+    return user_id
+
+
+async def insert_plan(conn: asyncpg.Connection, name: str) -> uuid.UUID:
+    """Вставить тариф на 30 дней; вернуть id."""
+    plan_id: uuid.UUID = await conn.fetchval(
+        "insert into plans (name, duration_days) values ($1, 30) returning id", name
+    )
+    return plan_id

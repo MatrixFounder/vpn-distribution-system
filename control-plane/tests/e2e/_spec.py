@@ -76,3 +76,14 @@ NODES_TABLES = {
     "node_metrics",
     "node_country_availability",
 }
+SUBSCRIPTIONS_TABLES = {
+    "subscription_periods",
+    "subscriptions",
+    "balance_entries",
+    "subscription_tokens",
+    "subscription_access_log",
+    "codes",
+    "code_redemptions",
+    "orders",
+    "payments",
+}

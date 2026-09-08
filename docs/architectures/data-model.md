@@ -369,7 +369,7 @@ subscription_periods
   source                 period_source            — redeem | admin | order
   source_id              uuid NULL
   created_at             timestamptz
-  INDEX (user_id, period_end DESC), INDEX (period_end) WHERE period_end > now()
+  INDEX (user_id, period_end DESC), INDEX (period_end)   — предикат с now() недопустим (не IMMUTABLE)
 
 balance_entries                                    — журнал изменений баланса периода (R-21, R-38)
   id                     bigint identity PK
@@ -687,7 +687,7 @@ erDiagram
 | Выдача подписки: ноды по группам доступа | `node_access_groups (access_group_id)`, `nodes (status)` |
 | Статистика пользователя за период | `traffic_lines (user_id, period_start)` |
 | Сверка по ноде за сутки | `traffic_lines (node_id, period_start)`, `node_interface_hourly` PK |
-| Истечение подписок | `subscription_periods (period_end) WHERE period_end > now()` |
+| Истечение подписок | `subscription_periods (period_end)` — без предиката: `now()` в предикате индекса PostgreSQL не допускает |
 | Выборка задач | `jobs (queue, status, run_at) WHERE status = 'pending'` |
 | Обращения к подписке в карточке | `subscription_access_log (user_id, ts DESC)` |
 | Аутентификация ноды по отпечатку | `node_identities (cert_fingerprint)` |
