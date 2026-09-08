@@ -62,7 +62,7 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
     ],
     "node_billing_assignments": [
         ("id", "uuid", False, "uuidv7()"),
-        ("node_id", "uuid", False, None),  # FK → nodes добавляет миграция 060
+        ("node_id", "uuid", False, None),  # FK → nodes добавлен миграцией 060
         ("billing_group_id", "uuid", False, None),
         ("multiplier_override_milli", "int4", True, None),
         ("valid_from", "timestamptz", False, None),
@@ -100,6 +100,7 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
     "node_billing_assignments": {
         ("p", "PRIMARY KEY (id)"),
         ("f", "FOREIGN KEY (billing_group_id) REFERENCES billing_groups(id)"),
+        ("f", "FOREIGN KEY (node_id) REFERENCES nodes(id)"),  # добавлен миграцией 060
         ("c", OVERRIDE_CHECK),
         ("c", VALID_RANGE_CHECK),
         ("x", "EXCLUDE USING gist (node_id WITH =, tstzrange(valid_from, valid_to) WITH &&)"),

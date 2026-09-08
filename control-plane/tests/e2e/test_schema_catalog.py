@@ -17,7 +17,7 @@ import asyncpg
 import pytest
 
 from ._cli import rollback_through, run_cli
-from ._db import existing_tables
+from ._db import existing_tables, insert_node
 from ._spec import CATALOG_TABLES, IDENTITY_TABLES
 
 T0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
@@ -192,8 +192,9 @@ async def check_multiplier_history(
 async def check_assignment_history(
     conn: asyncpg.Connection, rejected: Rejected, billing_id: uuid.UUID
 ) -> None:
-    """node_billing_assignments: EXCLUDE по ноде, CHECK переопределения, FK группы."""
-    node_id = uuid.uuid4()  # до 060 FK на nodes нет — любой uuid
+    """node_billing_assignments: EXCLUDE по ноде, CHECK переопределения, FK группы и ноды (060)."""
+    node_id = await insert_node(conn, "JP-Tokyo-01", billing_id)
+    other_node = await insert_node(conn, "JP-Tokyo-02", billing_id)
     insert = (
         "insert into node_billing_assignments "
         "(node_id, billing_group_id, multiplier_override_milli, valid_from, valid_to) "
@@ -207,11 +208,12 @@ async def check_assignment_history(
     await rejected(
         asyncpg.ExclusionViolationError, insert, node_id, billing_id, None, day(30), None
     )
-    await rejected(asyncpg.CheckViolationError, insert, uuid.uuid4(), billing_id, 250, day(0), None)
+    await rejected(asyncpg.CheckViolationError, insert, other_node, billing_id, 250, day(0), None)
+    await rejected(asyncpg.CheckViolationError, insert, other_node, billing_id, 10100, day(0), None)
     await rejected(
-        asyncpg.CheckViolationError, insert, uuid.uuid4(), billing_id, 10100, day(0), None
+        asyncpg.ForeignKeyViolationError, insert, other_node, uuid.uuid4(), None, day(0), None
     )
-    await rejected(
-        asyncpg.ForeignKeyViolationError, insert, uuid.uuid4(), uuid.uuid4(), None, day(0), None
+    await rejected(  # FK на nodes добавлен миграцией 060
+        asyncpg.ForeignKeyViolationError, insert, uuid.uuid4(), billing_id, None, day(0), None
     )
-    await conn.execute(insert, uuid.uuid4(), billing_id, 10000, day(0), None)  # другая нода
+    await conn.execute(insert, other_node, billing_id, 10000, day(0), None)  # другая нода

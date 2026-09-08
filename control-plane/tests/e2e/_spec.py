@@ -61,3 +61,18 @@ CATALOG_TABLES = {
     "billing_group_multipliers",
     "node_billing_assignments",
 }
+NODES_TABLES = {
+    "nodes",
+    "node_ip_history",
+    "node_access_groups",
+    "bootstrap_tokens",
+    "node_identities",
+    "inbounds",
+    "inbound_secrets",
+    "node_config_versions",
+    "node_user_credentials",
+    "node_user_state",
+    "commands",
+    "node_metrics",
+    "node_country_availability",
+}
