@@ -1,0 +1,70 @@
+[info] docs/TASK.md:223 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/TASK.md:385 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+
+0 warn / 2 info — advisory, exit 0
+
+DETECTORS (probe-tested this run)
+  live  ru  sentence_length      synthesised fixture, 3 line form(s)
+  live  ru  sentence_near_limit  synthesised fixture, 3 line form(s)
+  live  ru  cell_width           synthesised fixture, 1 line form(s)
+  live  ru  cell_sentences       synthesised fixture, 1 line form(s)
+  live  ru  emoji_severity       synthesised fixture, 1 line form(s)
+  live  ru  marker               22/22 entries verified
+  live  ru  maxim                10/10 entries verified
+  live  ru  metaphor             6/6 entries verified
+  live  ru  reasoning            13 exercised of 13 patterns, 3 line form(s) each
+
+DIAGNOSTICS docs/TASK.md  (language: ru — 37619 Cyrillic / 4601 Latin letters after masking)
+  lines                 : 1293 total, 956 non-blank, 6 masked away, 215 table
+  letters masked away   : 5% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 694 of 956 non-blank (73%)
+  sentences             : 688, mean 7.9, max 22 (limit 35)
+  table cells           : 678, widest 110 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+READING-PASS WORKLIST (rules 3, 4 and 6 are not fully reachable by any detector)
+  docs/TASK.md
+    [ ]        1-2  (preamble)                                                   warn 0   info 0
+    [ ]        3-4    TASK 001 — Control Plane для распределённой VPN-инфраструк   warn 0   info 0
+    [ ]       5-32      0. Метаданные                                                warn 0   info 0
+    [ ]      33-34      1. Описание задачи                                           warn 0   info 0
+    [ ]      35-41        1.1 Цель                                                     warn 0   info 0
+    [ ]      42-60        1.2 Границы                                                  warn 0   info 0
+    [ ]      61-77        1.3 Ограничения и допущения                                  warn 0   info 0
+    [ ]      78-88        1.4 Решение build / adopt / fork                             warn 0   info 0
+    [ ]      89-93        1.5 Порядок реализации                                       warn 0   info 0
+    [ ]      94-98      2. Эпики и issues                                            warn 0   info 0
+    [ ]     99-110        E-01 Инфраструктура: Control Plane и Node Agent              warn 0   info 0
+    [ ]    111-121        E-02 Пользователи и личный кабинет                           warn 0   info 0
+    [ ]    122-131        E-03 Подписка и выдача конфигураций                          warn 0   info 0
+    [ ]    132-147        E-04 Учёт трафика и лимиты                                   warn 0   info 0
+    [ ]    148-156        E-05 Бизнес: тарифы, подписки, коды                          warn 0   info 0
+    [ ]    157-166        E-06 Администрирование и безопасность доступа                warn 0   info 0
+    [ ]    167-174        E-07 Уведомления и почта                                     warn 0   info 0
+    [ ]    175-188        E-08 Эксплуатация                                            warn 0   info 0
+    [ ]    189-198        E-09 Интерфейс и локализация                                 warn 0   info 0
+    [ ]    199-259      3. Матрица трассируемости требований (RTM)                   warn 0   info 1
+    [ ]    260-601        3.1 Детали по идентификатору                                 warn 0   info 1
+    [ ]    602-611      4. Сценарии использования                                    warn 0   info 0
+    [ ]    612-656        UC-01 Ввод ноды в эксплуатацию                               warn 0   info 0
+    [ ]    657-700        UC-02 Регистрация и активация подписки Redeem-кодом          warn 0   info 0
+    [ ]    701-742        UC-03 Получение подписки клиентом                            warn 0   info 0
+    [ ]    743-789        UC-04 Учёт трафика и списание с коэффициентом                warn 0   info 0
+    [ ]    790-828        UC-05 Исчерпание лимита и отзыв доступа                      warn 0   info 0
+    [ ]    829-866        UC-06 Продление и смена тарифа                               warn 0   info 0
+    [ ]    867-904        UC-07 Отказ и возврат ноды                                   warn 0   info 0
+    [ ]    905-938        UC-08 Ограничение числа адресов и перепродажа доступа        warn 0   info 0
+    [ ]    939-974        UC-09 Управление тарифами, группами и кодами                 warn 0   info 0
+    [ ]   975-1007        UC-10 Восстановление Control Plane из резервной копии        warn 0   info 0
+    [ ]  1008-1036        UC-11 Обновление парка нод                                   warn 0   info 0
+    [ ]  1037-1067        UC-12 Компрометация ноды                                     warn 0   info 0
+    [ ]  1068-1096        UC-13 Поддержка пользователя                                 warn 0   info 0
+    [ ]  1097-1122        UC-14 Удаление аккаунта                                      warn 0   info 0
+    [ ]  1123-1155        UC-15 Восстановление пароля                                  warn 0   info 0
+    [ ]  1156-1193        UC-16 Работа в личном кабинете                               warn 0   info 0
+    [ ]  1194-1241      5. Критерии приёмки                                          warn 0   info 0
+    [ ]  1242-1258      6. Нефункциональные требования                               warn 0   info 0
+    [ ]  1259-1265      7. Модель угроз и границы доверия                            warn 0   info 0
+    [ ]  1266-1293      8. Открытые вопросы                                          warn 0   info 0

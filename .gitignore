@@ -1,0 +1,99 @@
+# >>> agentic-development framework >>>
+# Managed by the agentic-development installer. Do not edit between the markers.
+
+# Framework content (symlink or local copy) and installer state.
+/.agentic-development
+/.agentic-installer-state.json
+
+# Framework components.
+/.agent/skills/*
+/.agent/workflows/*
+/.agent/tools
+/.agent/rules
+/.agent/sessions
+/.agent/feedback
+/System
+/.claude/skills/*
+/.claude/commands/*
+/.claude/agents/*
+/.claude/hooks
+/.claude/settings.json
+
+# Claude bridge files (gitignored — they import the framework).
+/CLAUDE.agentic.md
+/CLAUDE.local.md
+
+# .claude runtime locks.
+/.claude/*.lock
+# <<< end agentic-development framework <<<
+
+# >>> project >>>
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets and local configuration (deploy/ хранит только примеры *.example)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+!**/testdata/*.pem
+!**/testdata/*.key
+!contracts/**/*.pem
+!contracts/**/*.key
+secrets/
+deploy/secrets/
+deploy/**/*.local.yml
+
+# Python — control-plane/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / TypeScript — web/
+node_modules/
+web/**/dist/
+# проектные инструменты (golangci-lint и т.п.), ставятся make setup
+/.bin/
+web/**/.vite/
+web/**/coverage/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# Go — node-agent/
+node-agent/bin/
+node-agent/dist/
+*.test
+*.out
+vendor/
+
+# Docker / runtime data
+deploy/**/data/
+deploy/**/*.log
+*.log
+
+# Сборочные артефакты CI
+/dist/
+
+# Temporary and scratch
+tmp/
+*.tmp
+*.bak
+*.orig
+# <<< end project <<<

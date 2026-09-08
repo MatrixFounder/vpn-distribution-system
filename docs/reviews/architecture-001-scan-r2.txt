@@ -1,0 +1,156 @@
+[info] docs/architectures/data-model.md:147 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/architectures/data-model.md:661 (§5.5 r2, marker): Ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/architectures/functional-architecture.md:29 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+
+0 warn / 3 info — advisory, exit 0
+
+DETECTORS (probe-tested this run)
+  live  ru  sentence_length      synthesised fixture, 3 line form(s)
+  live  ru  sentence_near_limit  synthesised fixture, 3 line form(s)
+  live  ru  cell_width           synthesised fixture, 1 line form(s)
+  live  ru  cell_sentences       synthesised fixture, 1 line form(s)
+  live  ru  emoji_severity       synthesised fixture, 1 line form(s)
+  live  ru  marker               22/22 entries verified
+  live  ru  maxim                10/10 entries verified
+  live  ru  metaphor             6/6 entries verified
+  live  ru  reasoning            13 exercised of 13 patterns, 3 line form(s) each
+
+DIAGNOSTICS docs/ARCHITECTURE.md  (language: ru — 3922 Cyrillic / 964 Latin letters after masking)
+  lines                 : 227 total, 172 non-blank, 35 masked away, 54 table
+  letters masked away   : 26% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 62 of 172 non-blank (36%)
+  sentences             : 65, mean 7.1, max 27 (limit 35)
+  table cells           : 149, widest 95 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/data-model.md  (language: ru — 4996 Cyrillic / 734 Latin letters after masking)
+  lines                 : 733 total, 646 non-blank, 499 masked away, 68 table
+  letters masked away   : 69% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 66 of 646 non-blank (10%)
+  sentences             : 52, mean 11.5, max 29 (limit 35)
+  table cells           : 162, widest 94 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/deployment.md  (language: ru — 1357 Cyrillic / 384 Latin letters after masking)
+  lines                 : 53 total, 39 non-blank, 0 masked away, 17 table
+  letters masked away   : 9% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 17 of 39 non-blank (44%)
+  sentences             : 15, mean 9.3, max 27 (limit 35)
+  table cells           : 42, widest 93 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/functional-architecture.md  (language: ru — 2940 Cyrillic / 495 Latin letters after masking)
+  lines                 : 186 total, 129 non-blank, 23 masked away, 18 table
+  letters masked away   : 8% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 84 of 129 non-blank (65%)
+  sentences             : 89, mean 6.3, max 19 (limit 35)
+  table cells           : 51, widest 25 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/interfaces.md  (language: ru — 3760 Cyrillic / 581 Latin letters after masking)
+  lines                 : 151 total, 118 non-blank, 0 masked away, 71 table
+  letters masked away   : 24% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 40 of 118 non-blank (34%)
+  sentences             : 34, mean 10.5, max 26 (limit 35)
+  table cells           : 186, widest 98 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/reliability.md  (language: ru — 1909 Cyrillic / 215 Latin letters after masking)
+  lines                 : 63 total, 49 non-blank, 0 masked away, 20 table
+  letters masked away   : 10% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 49 non-blank (51%)
+  sentences             : 21, mean 9.2, max 28 (limit 35)
+  table cells           : 36, widest 108 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/security.md  (language: ru — 2833 Cyrillic / 442 Latin letters after masking)
+  lines                 : 85 total, 67 non-blank, 0 masked away, 31 table
+  letters masked away   : 13% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 32 of 67 non-blank (48%)
+  sentences             : 18, mean 16.1, max 26 (limit 35)
+  table cells           : 60, widest 103 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/architectures/system-architecture.md  (language: ru — 3591 Cyrillic / 651 Latin letters after masking)
+  lines                 : 185 total, 149 non-blank, 41 masked away, 9 table
+  letters masked away   : 20% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 94 of 149 non-blank (63%)
+  sentences             : 78, mean 8.8, max 26 (limit 35)
+  table cells           : 24, widest 62 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+READING-PASS WORKLIST (rules 3, 4 and 6 are not fully reachable by any detector)
+  docs/ARCHITECTURE.md
+    [ ]       1-12    Архитектура: Control Plane для распределённой VPN-инфрастр   warn 0   info 0
+    [ ]      13-26      Содержание                                                   warn 0   info 0
+    [ ]      27-43      1. Описание задачи                                           warn 0   info 0
+    [ ]      44-81        1.1 Структура репозитория                                    warn 0   info 0
+    [ ]      82-87      2. Функциональная архитектура                                warn 0   info 0
+    [ ]      88-93      3. Системная архитектура                                     warn 0   info 0
+    [ ]     94-100      4. Модель данных                                             warn 0   info 0
+    [ ]    101-107      5. Интерфейсы                                                warn 0   info 0
+    [ ]    108-109      6. Технологический стек                                      warn 0   info 0
+    [ ]    110-123        6.1 Control Plane                                            warn 0   info 0
+    [ ]    124-133        6.2 Node Agent                                               warn 0   info 0
+    [ ]    134-142        6.3 Интерфейсы                                               warn 0   info 0
+    [ ]    143-155        6.4 Данные и инфраструктура                                  warn 0   info 0
+    [ ]    156-162      7. Безопасность                                              warn 0   info 0
+    [ ]    163-164      8. Масштабируемость и производительность                     warn 0   info 0
+    [ ]    165-179        8.1 Стратегия                                                warn 0   info 0
+    [ ]    180-188        8.2 Кеширование                                              warn 0   info 0
+    [ ]    189-198        8.3 Оптимизация базы                                         warn 0   info 0
+    [ ]    199-205      9. Надёжность и отказоустойчивость                           warn 0   info 0
+    [ ]    206-211      10. Развёртывание                                            warn 0   info 0
+    [ ]    212-227      11. Открытые вопросы                                         warn 0   info 0
+  docs/architectures/data-model.md
+    [ ]        1-5    4. Модель данных                                             warn 0   info 0
+    [ ]       6-30        4.1 Концептуальная модель                                    warn 0   info 0
+    [ ]      31-39        4.2 Логическая модель                                        warn 0   info 0
+    [ ]      40-95          4.2.1 Учётные записи                                         warn 0   info 0
+    [ ]     96-158          4.2.2 Каталог                                                warn 0   info 1
+    [ ]    159-345          4.2.3 Парк нод                                               warn 0   info 0
+    [ ]    346-437          4.2.4 Подписки и коды                                        warn 0   info 0
+    [ ]    438-540          4.2.5 Учёт трафика                                           warn 0   info 0
+    [ ]    541-613          4.2.6 Уведомления, задачи, аудит, настройки                  warn 0   info 0
+    [ ]    614-656        4.3 Диаграмма сущностей                                      warn 0   info 0
+    [ ]    657-691        4.4 Правила целостности и индексы                            warn 0   info 1
+    [ ]    692-715        4.5 Партиционирование и сроки хранения                       warn 0   info 0
+    [ ]    716-733        4.6 Миграции                                                 warn 0   info 0
+  docs/architectures/deployment.md
+    [ ]        1-5    10. Развёртывание                                            warn 0   info 0
+    [ ]       6-13        10.1 Окружения                                               warn 0   info 0
+    [ ]      14-25        10.2 CI/CD                                                   warn 0   info 0
+    [ ]      26-34        10.3 Конфигурация                                            warn 0   info 0
+    [ ]      35-53        10.4 Инструкция развёртывания                                warn 0   info 0
+  docs/architectures/functional-architecture.md
+    [ ]        1-5    2. Функциональная архитектура                                warn 0   info 0
+    [ ]      6-140        2.1 Функциональные компоненты                                warn 0   info 1
+    [ ]    141-161        2.1а Покрытие сценариев                                      warn 0   info 0
+    [ ]    162-186        2.2 Диаграмма функциональных компонентов                     warn 0   info 0
+  docs/architectures/interfaces.md
+    [ ]        1-5    5. Интерфейсы                                                warn 0   info 0
+    [ ]       6-34        5.1 Внешний API `/api/v1`                                    warn 0   info 0
+    [ ]      35-83        5.2 Node API `/agent/v1`                                     warn 0   info 0
+    [ ]      84-96        5.3 Subscription-эндпоинт                                    warn 0   info 0
+    [ ]     97-126        5.4 Внутренние интерфейсы                                    warn 0   info 0
+    [ ]    127-141        5.5 Агент ↔ Xray                                             warn 0   info 0
+    [ ]    142-151        5.6 Внешние интеграции                                       warn 0   info 0
+  docs/architectures/reliability.md
+    [ ]        1-5    9. Надёжность и отказоустойчивость                           warn 0   info 0
+    [ ]       6-22        9.1 Обработка ошибок                                         warn 0   info 0
+    [ ]      23-45        9.2 Резервное копирование                                    warn 0   info 0
+    [ ]      46-63        9.3 Мониторинг и алерты                                      warn 0   info 0
+  docs/architectures/security.md
+    [ ]        1-5    7. Безопасность                                              warn 0   info 0
+    [ ]       6-33        7.1 Аутентификация и авторизация                             warn 0   info 0
+    [ ]      34-65        7.2 Защита данных                                            warn 0   info 0
+    [ ]      66-85        7.3 Защита от атак                                           warn 0   info 0
+  docs/architectures/system-architecture.md
+    [ ]        1-5    3. Системная архитектура                                     warn 0   info 0
+    [ ]       6-29        3.1 Архитектурный стиль                                      warn 0   info 0
+    [ ]     30-130        3.2 Системные компоненты                                     warn 0   info 0
+    [ ]    131-174        3.3 Диаграмма компонентов                                    warn 0   info 0
+    [ ]    175-185        3.4 Потоки данных                                            warn 0   info 0

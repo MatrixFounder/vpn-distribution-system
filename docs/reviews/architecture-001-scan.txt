@@ -1,0 +1,84 @@
+[info] docs/ARCHITECTURE.md:89 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/ARCHITECTURE.md:509 (§5.5 r2, marker): ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/ARCHITECTURE.md:948 (§5.5 r2, marker): Ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+
+0 warn / 3 info — advisory, exit 0
+
+DETECTORS (probe-tested this run)
+  live  ru  sentence_length      synthesised fixture, 3 line form(s)
+  live  ru  sentence_near_limit  synthesised fixture, 3 line form(s)
+  live  ru  cell_width           synthesised fixture, 1 line form(s)
+  live  ru  cell_sentences       synthesised fixture, 1 line form(s)
+  live  ru  emoji_severity       synthesised fixture, 1 line form(s)
+  live  ru  marker               22/22 entries verified
+  live  ru  maxim                10/10 entries verified
+  live  ru  metaphor             6/6 entries verified
+  live  ru  reasoning            13 exercised of 13 patterns, 3 line form(s) each
+
+DIAGNOSTICS docs/ARCHITECTURE.md  (language: ru — 19035 Cyrillic / 3633 Latin letters after masking)
+  lines                 : 1380 total, 1125 non-blank, 541 masked away, 237 table
+  letters masked away   : 39% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 293 of 1125 non-blank (26%)
+  sentences             : 264, mean 8.6, max 29 (limit 35)
+  table cells           : 573, widest 103 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+READING-PASS WORKLIST (rules 3, 4 and 6 are not fully reachable by any detector)
+  docs/ARCHITECTURE.md
+    [ ]        1-8    Архитектура: Control Plane для распределённой VPN-инфрастр   warn 0   info 0
+    [ ]       9-25      1. Описание задачи                                           warn 0   info 0
+    [ ]      26-63        1.1 Структура репозитория                                    warn 0   info 0
+    [ ]      64-65      2. Функциональная архитектура                                warn 0   info 0
+    [ ]     66-196        2.1 Функциональные компоненты                                warn 0   info 1
+    [ ]    197-222        2.2 Диаграмма функциональных компонентов                     warn 0   info 0
+    [ ]    223-224      3. Системная архитектура                                     warn 0   info 0
+    [ ]    225-243        3.1 Архитектурный стиль                                      warn 0   info 0
+    [ ]    244-335        3.2 Системные компоненты                                     warn 0   info 0
+    [ ]    336-379        3.3 Диаграмма компонентов                                    warn 0   info 0
+    [ ]    380-391        3.4 Потоки данных                                            warn 0   info 0
+    [ ]    392-393      4. Модель данных                                             warn 0   info 0
+    [ ]    394-418        4.1 Концептуальная модель                                    warn 0   info 0
+    [ ]    419-427        4.2 Логическая модель                                        warn 0   info 0
+    [ ]    428-473          4.2.1 Учётные записи                                         warn 0   info 0
+    [ ]    474-510          4.2.2 Каталог                                                warn 0   info 1
+    [ ]    511-673          4.2.3 Парк нод                                               warn 0   info 0
+    [ ]    674-754          4.2.4 Подписки и коды                                        warn 0   info 0
+    [ ]    755-840          4.2.5 Учёт трафика                                           warn 0   info 0
+    [ ]    841-910          4.2.6 Уведомления, задачи, аудит, настройки                  warn 0   info 0
+    [ ]    911-943        4.3 Диаграмма сущностей                                      warn 0   info 0
+    [ ]    944-971        4.4 Правила целостности и индексы                            warn 0   info 1
+    [ ]    972-986        4.5 Партиционирование и сроки хранения                       warn 0   info 0
+    [ ]    987-996        4.6 Миграции                                                 warn 0   info 0
+    [ ]    997-998      5. Интерфейсы                                                warn 0   info 0
+    [ ]   999-1027        5.1 Внешний API `/api/v1`                                    warn 0   info 0
+    [ ]  1028-1054        5.2 Node API `/agent/v1`                                     warn 0   info 0
+    [ ]  1055-1067        5.3 Subscription-эндпоинт                                    warn 0   info 0
+    [ ]  1068-1080        5.4 Внутренние интерфейсы                                    warn 0   info 0
+    [ ]  1081-1094        5.5 Агент ↔ Xray                                             warn 0   info 0
+    [ ]  1095-1105        5.6 Внешние интеграции                                       warn 0   info 0
+    [ ]  1106-1107      6. Технологический стек                                      warn 0   info 0
+    [ ]  1108-1121        6.1 Control Plane                                            warn 0   info 0
+    [ ]  1122-1131        6.2 Node Agent                                               warn 0   info 0
+    [ ]  1132-1140        6.3 Интерфейсы                                               warn 0   info 0
+    [ ]  1141-1153        6.4 Данные и инфраструктура                                  warn 0   info 0
+    [ ]  1154-1155      7. Безопасность                                              warn 0   info 0
+    [ ]  1156-1181        7.1 Аутентификация и авторизация                             warn 0   info 0
+    [ ]  1182-1199        7.2 Защита данных                                            warn 0   info 0
+    [ ]  1200-1218        7.3 Защита от атак                                           warn 0   info 0
+    [ ]  1219-1220      8. Масштабируемость и производительность                     warn 0   info 0
+    [ ]  1221-1235        8.1 Стратегия                                                warn 0   info 0
+    [ ]  1236-1244        8.2 Кеширование                                              warn 0   info 0
+    [ ]  1245-1254        8.3 Оптимизация базы                                         warn 0   info 0
+    [ ]  1255-1256      9. Надёжность и отказоустойчивость                           warn 0   info 0
+    [ ]  1257-1273        9.1 Обработка ошибок                                         warn 0   info 0
+    [ ]  1274-1294        9.2 Резервное копирование                                    warn 0   info 0
+    [ ]  1295-1313        9.3 Мониторинг и алерты                                      warn 0   info 0
+    [ ]  1314-1315      10. Развёртывание                                            warn 0   info 0
+    [ ]  1316-1323        10.1 Окружения                                               warn 0   info 0
+    [ ]  1324-1335        10.2 CI/CD                                                   warn 0   info 0
+    [ ]  1336-1344        10.3 Конфигурация                                            warn 0   info 0
+    [ ]  1345-1364        10.4 Инструкция развёртывания                                warn 0   info 0
+    [ ]  1365-1380      11. Открытые вопросы                                         warn 0   info 0

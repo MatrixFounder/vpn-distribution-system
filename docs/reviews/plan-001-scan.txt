@@ -1,0 +1,1730 @@
+[info] docs/tasks/task-001-19-plans-groups-logic.md:71 (§5.5 r2, marker): Ровно
+       → Оставить при точном количестве («ровно один раз»); удалить в «ровно тот механизм».
+[info] docs/tasks/task-001-48-rbac-audit-logic.md:15 (§5.5 r1, sentence_near_limit): 31 words
+       → 4 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+[info] docs/tasks/task-001-55-agent-sync-apply-logic.md:16 (§5.5 r1, sentence_near_limit): 33 words
+       → 2 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+[info] docs/tasks/task-001-58-agent-guard-logic.md:14 (§5.5 r1, sentence_near_limit): 34 words
+       → 1 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+[info] docs/tasks/task-001-59-agent-metrics-heartbeat-logic.md:14 (§5.5 r1, sentence_near_limit): 30 words
+       → 5 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+[info] docs/tasks/task-001-65-i18n-timezone-logic.md:15 (§5.5 r1, sentence_near_limit): 32 words
+       → 3 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+[info] docs/tasks/task-001-73-stand-acceptance-e2e.md:21 (§5.5 r1, sentence_near_limit): 30 words
+       → 5 word(s) under the 35-word limit. A distribution that stops at the limit is a distribution written for the gate; judge whether this carries one claim.
+
+0 warn / 7 info — advisory, exit 0
+
+DETECTORS (probe-tested this run)
+  live  ru  sentence_length      synthesised fixture, 3 line form(s)
+  live  ru  sentence_near_limit  synthesised fixture, 3 line form(s)
+  live  ru  cell_width           synthesised fixture, 1 line form(s)
+  live  ru  cell_sentences       synthesised fixture, 1 line form(s)
+  live  ru  emoji_severity       synthesised fixture, 1 line form(s)
+  live  ru  marker               22/22 entries verified
+  live  ru  maxim                10/10 entries verified
+  live  ru  metaphor             6/6 entries verified
+  live  ru  reasoning            13 exercised of 13 patterns, 3 line form(s) each
+
+DIAGNOSTICS docs/PLAN.md  (language: ru — 11997 Cyrillic / 3187 Latin letters after masking)
+  lines                 : 663 total, 561 non-blank, 2 masked away, 30 table
+  letters masked away   : 16% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 510 of 561 non-blank (91%)
+  sentences             : 510, mean 5.4, max 22 (limit 35)
+  table cells           : 67, widest 66 (limit 120), most sentences in one cell 1
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-01-repo-skeleton.md  (language: ru — 1023 Cyrillic / 282 Latin letters after masking)
+  lines                 : 74 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 32 of 48 non-blank (67%)
+  sentences             : 34, mean 6.5, max 17 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-02-compose-dev-stand.md  (language: ru — 1107 Cyrillic / 161 Latin letters after masking)
+  lines                 : 71 total, 45 non-blank, 4 masked away, 0 table
+  letters masked away   : 36% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 29 of 45 non-blank (64%)
+  sentences             : 30, mean 6.9, max 19 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-03-migrations-tooling.md  (language: ru — 949 Cyrillic / 69 Latin letters after masking)
+  lines                 : 70 total, 41 non-blank, 4 masked away, 0 table
+  letters masked away   : 35% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 41 non-blank (56%)
+  sentences             : 23, mean 6.5, max 14 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-04-schema-identity.md  (language: ru — 1093 Cyrillic / 62 Latin letters after masking)
+  lines                 : 71 total, 45 non-blank, 4 masked away, 0 table
+  letters masked away   : 29% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 29 of 45 non-blank (64%)
+  sentences             : 30, mean 5.7, max 21 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-05-schema-catalog.md  (language: ru — 1065 Cyrillic / 51 Latin letters after masking)
+  lines                 : 69 total, 43 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 43 non-blank (63%)
+  sentences             : 28, mean 6.1, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-06-schema-nodes.md  (language: ru — 1085 Cyrillic / 74 Latin letters after masking)
+  lines                 : 73 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 35% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 47 non-blank (66%)
+  sentences             : 31, mean 6.1, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-07-schema-subscriptions.md  (language: ru — 1077 Cyrillic / 62 Latin letters after masking)
+  lines                 : 71 total, 45 non-blank, 4 masked away, 0 table
+  letters masked away   : 34% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 29 of 45 non-blank (64%)
+  sentences             : 30, mean 6.0, max 21 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-08-schema-accounting.md  (language: ru — 1188 Cyrillic / 62 Latin letters after masking)
+  lines                 : 74 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 36% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 32 of 48 non-blank (67%)
+  sentences             : 32, mean 6.2, max 24 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-09-schema-ops.md  (language: ru — 1132 Cyrillic / 55 Latin letters after masking)
+  lines                 : 72 total, 46 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 30 of 46 non-blank (65%)
+  sentences             : 30, mean 5.9, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-10-api-skeleton.md  (language: ru — 1094 Cyrillic / 110 Latin letters after masking)
+  lines                 : 78 total, 52 non-blank, 4 masked away, 0 table
+  letters masked away   : 44% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 36 of 52 non-blank (69%)
+  sentences             : 36, mean 5.5, max 18 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-11-jobs-queue-stub.md  (language: ru — 1168 Cyrillic / 58 Latin letters after masking)
+  lines                 : 73 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 40% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 47 non-blank (66%)
+  sentences             : 32, mean 6.0, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-12-security-core-stub.md  (language: ru — 1197 Cyrillic / 121 Latin letters after masking)
+  lines                 : 78 total, 52 non-blank, 4 masked away, 0 table
+  letters masked away   : 42% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 36 of 52 non-blank (69%)
+  sentences             : 37, mean 5.8, max 16 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-13-auth-api-stub.md  (language: ru — 977 Cyrillic / 60 Latin letters after masking)
+  lines                 : 71 total, 44 non-blank, 4 masked away, 0 table
+  letters masked away   : 38% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 28 of 44 non-blank (64%)
+  sentences             : 29, mean 5.4, max 14 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-14-auth-api-logic.md  (language: ru — 1774 Cyrillic / 106 Latin letters after masking)
+  lines                 : 99 total, 64 non-blank, 4 masked away, 0 table
+  letters masked away   : 29% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 43 of 64 non-blank (67%)
+  sentences             : 43, mean 6.9, max 21 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-15-me-api-stub.md  (language: ru — 851 Cyrillic / 36 Latin letters after masking)
+  lines                 : 69 total, 42 non-blank, 4 masked away, 0 table
+  letters masked away   : 40% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 26 of 42 non-blank (62%)
+  sentences             : 26, mean 5.6, max 16 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-16-me-api-logic.md  (language: ru — 1310 Cyrillic / 101 Latin letters after masking)
+  lines                 : 84 total, 51 non-blank, 4 masked away, 0 table
+  letters masked away   : 29% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 51 non-blank (61%)
+  sentences             : 31, mean 7.4, max 17 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-17-account-deletion-logic.md  (language: ru — 832 Cyrillic / 65 Latin letters after masking)
+  lines                 : 70 total, 40 non-blank, 4 masked away, 0 table
+  letters masked away   : 36% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 22 of 40 non-blank (55%)
+  sentences             : 22, mean 5.9, max 19 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-18-catalog-api-stub.md  (language: ru — 929 Cyrillic / 54 Latin letters after masking)
+  lines                 : 75 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 50% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 32 of 48 non-blank (67%)
+  sentences             : 33, mean 4.9, max 14 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-19-plans-groups-logic.md  (language: ru — 1191 Cyrillic / 61 Latin letters after masking)
+  lines                 : 79 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 28 of 47 non-blank (60%)
+  sentences             : 29, mean 6.1, max 16 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-20-codes-logic.md  (language: ru — 1136 Cyrillic / 85 Latin letters after masking)
+  lines                 : 77 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 30 of 48 non-blank (62%)
+  sentences             : 30, mean 6.5, max 15 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-21-subscription-service-stub.md  (language: ru — 842 Cyrillic / 34 Latin letters after masking)
+  lines                 : 66 total, 39 non-blank, 4 masked away, 0 table
+  letters masked away   : 42% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 39 non-blank (59%)
+  sentences             : 23, mean 5.5, max 19 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-22-subscription-service-logic.md  (language: ru — 1477 Cyrillic / 67 Latin letters after masking)
+  lines                 : 85 total, 54 non-blank, 4 masked away, 0 table
+  letters masked away   : 32% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 35 of 54 non-blank (65%)
+  sentences             : 36, mean 7.3, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-23-multiplier-resolution-logic.md  (language: ru — 1028 Cyrillic / 56 Latin letters after masking)
+  lines                 : 73 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 47 non-blank (66%)
+  sentences             : 32, mean 5.2, max 15 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-24-nodes-api-stub.md  (language: ru — 723 Cyrillic / 108 Latin letters after masking)
+  lines                 : 66 total, 39 non-blank, 4 masked away, 0 table
+  letters masked away   : 47% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 39 non-blank (59%)
+  sentences             : 23, mean 5.7, max 14 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-25-enrollment-identity-logic.md  (language: ru — 1371 Cyrillic / 178 Latin letters after masking)
+  lines                 : 89 total, 56 non-blank, 4 masked away, 0 table
+  letters masked away   : 29% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 36 of 56 non-blank (64%)
+  sentences             : 37, mean 6.6, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-26-inbound-xray-config-stub.md  (language: ru — 983 Cyrillic / 117 Latin letters after masking)
+  lines                 : 68 total, 41 non-blank, 4 masked away, 0 table
+  letters masked away   : 39% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 41 non-blank (61%)
+  sentences             : 25, mean 6.7, max 26 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-27-inbound-xray-config-logic.md  (language: ru — 1296 Cyrillic / 140 Latin letters after masking)
+  lines                 : 90 total, 56 non-blank, 4 masked away, 0 table
+  letters masked away   : 34% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 36 of 56 non-blank (64%)
+  sentences             : 35, mean 6.4, max 25 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-28-agent-state-api-stub.md  (language: ru — 840 Cyrillic / 71 Latin letters after masking)
+  lines                 : 71 total, 44 non-blank, 4 masked away, 0 table
+  letters masked away   : 50% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 28 of 44 non-blank (64%)
+  sentences             : 29, mean 5.1, max 15 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-29-composition-stream-logic.md  (language: ru — 1744 Cyrillic / 180 Latin letters after masking)
+  lines                 : 97 total, 64 non-blank, 4 masked away, 0 table
+  letters masked away   : 35% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 44 of 64 non-blank (69%)
+  sentences             : 43, mean 7.6, max 26 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-30-heartbeat-statuses-logic.md  (language: ru — 1174 Cyrillic / 132 Latin letters after masking)
+  lines                 : 89 total, 55 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 35 of 55 non-blank (64%)
+  sentences             : 35, mean 6.3, max 21 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-31-versions-update-command-logic.md  (language: ru — 1182 Cyrillic / 105 Latin letters after masking)
+  lines                 : 81 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 29% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 47 non-blank (57%)
+  sentences             : 27, mean 7.3, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-32-country-probes-logic.md  (language: ru — 887 Cyrillic / 47 Latin letters after masking)
+  lines                 : 66 total, 37 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 19 of 37 non-blank (51%)
+  sentences             : 20, mean 6.9, max 21 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-33-reports-api-stub.md  (language: ru — 625 Cyrillic / 26 Latin letters after masking)
+  lines                 : 62 total, 35 non-blank, 4 masked away, 0 table
+  letters masked away   : 47% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 19 of 35 non-blank (54%)
+  sentences             : 20, mean 4.7, max 10 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-34-report-acceptance-logic.md  (language: ru — 1374 Cyrillic / 96 Latin letters after masking)
+  lines                 : 89 total, 60 non-blank, 4 masked away, 0 table
+  letters masked away   : 34% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 42 of 60 non-blank (70%)
+  sentences             : 42, mean 6.3, max 18 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-35-limits-thresholds-logic.md  (language: ru — 1119 Cyrillic / 73 Latin letters after masking)
+  lines                 : 83 total, 52 non-blank, 4 masked away, 0 table
+  letters masked away   : 33% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 33 of 52 non-blank (63%)
+  sentences             : 33, mean 5.9, max 26 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-36-quota-grants-logic.md  (language: ru — 988 Cyrillic / 30 Latin letters after masking)
+  lines                 : 80 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 35% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 47 non-blank (57%)
+  sentences             : 27, mean 5.7, max 16 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-37-reconciliation-aggregation-retention-logic.md  (language: ru — 1181 Cyrillic / 58 Latin letters after masking)
+  lines                 : 78 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 33% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 30 of 48 non-blank (62%)
+  sentences             : 31, mean 6.3, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-38-device-limit-logic.md  (language: ru — 1104 Cyrillic / 45 Latin letters after masking)
+  lines                 : 76 total, 44 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 44 non-blank (57%)
+  sentences             : 25, mean 6.8, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-39-resale-signals-logic.md  (language: ru — 832 Cyrillic / 42 Latin letters after masking)
+  lines                 : 71 total, 40 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 21 of 40 non-blank (52%)
+  sentences             : 22, mean 5.2, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-40-force-disconnect-strategy-logic.md  (language: ru — 879 Cyrillic / 25 Latin letters after masking)
+  lines                 : 69 total, 38 non-blank, 4 masked away, 0 table
+  letters masked away   : 27% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 19 of 38 non-blank (50%)
+  sentences             : 20, mean 5.8, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-41-subscription-endpoint-stub.md  (language: ru — 1012 Cyrillic / 94 Latin letters after masking)
+  lines                 : 75 total, 48 non-blank, 4 masked away, 0 table
+  letters masked away   : 43% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 32 of 48 non-blank (67%)
+  sentences             : 32, mean 5.3, max 17 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-42-subscription-token-format-logic.md  (language: ru — 1297 Cyrillic / 99 Latin letters after masking)
+  lines                 : 88 total, 57 non-blank, 4 masked away, 0 table
+  letters masked away   : 36% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 38 of 57 non-blank (67%)
+  sentences             : 37, mean 5.8, max 29 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-43-subscription-generators-logic.md  (language: ru — 1035 Cyrillic / 203 Latin letters after masking)
+  lines                 : 82 total, 49 non-blank, 4 masked away, 0 table
+  letters masked away   : 35% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 29 of 49 non-blank (59%)
+  sentences             : 30, mean 6.5, max 25 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-44-subscription-composer-logic.md  (language: ru — 1023 Cyrillic / 59 Latin letters after masking)
+  lines                 : 73 total, 43 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 43 non-blank (58%)
+  sentences             : 26, mean 5.8, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-45-subscription-domains-page-logic.md  (language: ru — 1013 Cyrillic / 68 Latin letters after masking)
+  lines                 : 73 total, 41 non-blank, 4 masked away, 0 table
+  letters masked away   : 20% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 22 of 41 non-blank (54%)
+  sentences             : 23, mean 6.8, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-46-admin-auth-rbac-audit-stub.md  (language: ru — 925 Cyrillic / 34 Latin letters after masking)
+  lines                 : 70 total, 43 non-blank, 4 masked away, 0 table
+  letters masked away   : 41% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 43 non-blank (63%)
+  sentences             : 26, mean 5.6, max 17 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-47-admin-auth-2fa-logic.md  (language: ru — 1215 Cyrillic / 89 Latin letters after masking)
+  lines                 : 84 total, 51 non-blank, 4 masked away, 0 table
+  letters masked away   : 25% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 51 non-blank (61%)
+  sentences             : 30, mean 6.6, max 28 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-48-rbac-audit-logic.md  (language: ru — 1315 Cyrillic / 140 Latin letters after masking)
+  lines                 : 86 total, 53 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 33 of 53 non-blank (62%)
+  sentences             : 32, mean 6.9, max 31 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-49-admin-users-nodes-dashboard-stub.md  (language: ru — 878 Cyrillic / 38 Latin letters after masking)
+  lines                 : 64 total, 37 non-blank, 4 masked away, 0 table
+  letters masked away   : 33% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 21 of 37 non-blank (57%)
+  sentences             : 23, mean 5.5, max 15 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-50-admin-users-nodes-dashboard-logic.md  (language: ru — 1152 Cyrillic / 71 Latin letters after masking)
+  lines                 : 87 total, 51 non-blank, 4 masked away, 0 table
+  letters masked away   : 31% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 30 of 51 non-blank (59%)
+  sentences             : 30, mean 6.3, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-51-notifications-stub.md  (language: ru — 776 Cyrillic / 58 Latin letters after masking)
+  lines                 : 66 total, 39 non-blank, 4 masked away, 0 table
+  letters masked away   : 42% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 39 non-blank (59%)
+  sentences             : 24, mean 5.7, max 14 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-52-notifications-logic.md  (language: ru — 1514 Cyrillic / 161 Latin letters after masking)
+  lines                 : 93 total, 58 non-blank, 4 masked away, 0 table
+  letters masked away   : 23% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 37 of 58 non-blank (64%)
+  sentences             : 40, mean 6.2, max 16 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-53-agent-skeleton-stub.md  (language: ru — 965 Cyrillic / 100 Latin letters after masking)
+  lines                 : 72 total, 45 non-blank, 4 masked away, 0 table
+  letters masked away   : 51% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 29 of 45 non-blank (64%)
+  sentences             : 30, mean 5.1, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-54-agent-enroll-mtls-logic.md  (language: ru — 1085 Cyrillic / 182 Latin letters after masking)
+  lines                 : 77 total, 46 non-blank, 4 masked away, 0 table
+  letters masked away   : 24% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 46 non-blank (59%)
+  sentences             : 27, mean 6.6, max 26 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-55-agent-sync-apply-logic.md  (language: ru — 1430 Cyrillic / 150 Latin letters after masking)
+  lines                 : 91 total, 56 non-blank, 4 masked away, 0 table
+  letters masked away   : 28% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 35 of 56 non-blank (62%)
+  sentences             : 34, mean 6.9, max 33 (limit 35)   <-- PRESSED AGAINST THE LIMIT
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+  NOTE: the longest sentence sits within 2 words of the limit. Read the `sentence_near_limit` findings; a zero here is not evidence of a conforming document.
+
+DIAGNOSTICS docs/tasks/task-001-56-agent-accounting-logic.md  (language: ru — 1298 Cyrillic / 98 Latin letters after masking)
+  lines                 : 84 total, 49 non-blank, 4 masked away, 0 table
+  letters masked away   : 24% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 28 of 49 non-blank (57%)
+  sentences             : 28, mean 7.9, max 28 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-57-agent-quota-logic.md  (language: ru — 842 Cyrillic / 69 Latin letters after masking)
+  lines                 : 69 total, 39 non-blank, 4 masked away, 0 table
+  letters masked away   : 25% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 21 of 39 non-blank (54%)
+  sentences             : 21, mean 6.6, max 24 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-58-agent-guard-logic.md  (language: ru — 1183 Cyrillic / 151 Latin letters after masking)
+  lines                 : 84 total, 51 non-blank, 4 masked away, 0 table
+  letters masked away   : 26% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 31 of 51 non-blank (61%)
+  sentences             : 30, mean 6.4, max 34 (limit 35)   <-- PRESSED AGAINST THE LIMIT
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+  NOTE: the longest sentence sits within 2 words of the limit. Read the `sentence_near_limit` findings; a zero here is not evidence of a conforming document.
+
+DIAGNOSTICS docs/tasks/task-001-59-agent-metrics-heartbeat-logic.md  (language: ru — 724 Cyrillic / 138 Latin letters after masking)
+  lines                 : 68 total, 38 non-blank, 4 masked away, 0 table
+  letters masked away   : 23% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 20 of 38 non-blank (53%)
+  sentences             : 21, mean 5.9, max 30 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-60-agent-disconnect-logic.md  (language: ru — 897 Cyrillic / 61 Latin letters after masking)
+  lines                 : 70 total, 41 non-blank, 4 masked away, 0 table
+  letters masked away   : 27% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 41 non-blank (56%)
+  sentences             : 22, mean 5.8, max 26 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-61-node-bootstrap-systemd-nftables.md  (language: ru — 896 Cyrillic / 113 Latin letters after masking)
+  lines                 : 66 total, 40 non-blank, 4 masked away, 0 table
+  letters masked away   : 27% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 24 of 40 non-blank (60%)
+  sentences             : 23, mean 6.5, max 24 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-62-web-skeleton-stub.md  (language: ru — 792 Cyrillic / 82 Latin letters after masking)
+  lines                 : 67 total, 40 non-blank, 4 masked away, 0 table
+  letters masked away   : 34% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 24 of 40 non-blank (60%)
+  sentences             : 25, mean 6.0, max 27 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-63-web-cabinet-logic.md  (language: ru — 1008 Cyrillic / 112 Latin letters after masking)
+  lines                 : 74 total, 44 non-blank, 4 masked away, 0 table
+  letters masked away   : 16% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 26 of 44 non-blank (59%)
+  sentences             : 26, mean 5.8, max 29 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-64-web-admin-logic.md  (language: ru — 928 Cyrillic / 56 Latin letters after masking)
+  lines                 : 73 total, 43 non-blank, 4 masked away, 0 table
+  letters masked away   : 18% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 43 non-blank (58%)
+  sentences             : 26, mean 4.8, max 22 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-65-i18n-timezone-logic.md  (language: ru — 1048 Cyrillic / 53 Latin letters after masking)
+  lines                 : 81 total, 47 non-blank, 4 masked away, 0 table
+  letters masked away   : 26% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 27 of 47 non-blank (57%)
+  sentences             : 27, mean 5.9, max 32 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-66-deploy-prod-nginx-secrets.md  (language: ru — 986 Cyrillic / 153 Latin letters after masking)
+  lines                 : 72 total, 43 non-blank, 4 masked away, 0 table
+  letters masked away   : 30% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 25 of 43 non-blank (58%)
+  sentences             : 26, mean 6.1, max 24 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-67-backup-restore-generation.md  (language: ru — 1131 Cyrillic / 80 Latin letters after masking)
+  lines                 : 75 total, 46 non-blank, 4 masked away, 0 table
+  letters masked away   : 26% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 28 of 46 non-blank (61%)
+  sentences             : 28, mean 5.9, max 20 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-68-observability-alerts.md  (language: ru — 1080 Cyrillic / 105 Latin letters after masking)
+  lines                 : 73 total, 44 non-blank, 4 masked away, 0 table
+  letters masked away   : 23% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 26 of 44 non-blank (59%)
+  sentences             : 26, mean 6.5, max 23 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-69-privacy-aup-retention-logic.md  (language: ru — 1073 Cyrillic / 40 Latin letters after masking)
+  lines                 : 74 total, 42 non-blank, 4 masked away, 0 table
+  letters masked away   : 22% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 42 non-blank (55%)
+  sentences             : 23, mean 6.7, max 29 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-70-status-page-announcements.md  (language: ru — 840 Cyrillic / 80 Latin letters after masking)
+  lines                 : 60 total, 34 non-blank, 4 masked away, 0 table
+  letters masked away   : 12% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 18 of 34 non-blank (53%)
+  sentences             : 18, mean 6.1, max 24 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-71-documentation-openapi-runbooks.md  (language: ru — 1044 Cyrillic / 66 Latin letters after masking)
+  lines                 : 71 total, 42 non-blank, 4 masked away, 0 table
+  letters masked away   : 20% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 24 of 42 non-blank (57%)
+  sentences             : 24, mean 6.3, max 29 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-72-rate-limiting-coverage.md  (language: ru — 936 Cyrillic / 112 Latin letters after masking)
+  lines                 : 74 total, 42 non-blank, 4 masked away, 0 table
+  letters masked away   : 21% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 23 of 42 non-blank (55%)
+  sentences             : 23, mean 6.0, max 29 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+DIAGNOSTICS docs/tasks/task-001-73-stand-acceptance-e2e.md  (language: ru — 1513 Cyrillic / 149 Latin letters after masking)
+  lines                 : 82 total, 56 non-blank, 4 masked away, 0 table
+  letters masked away   : 11% (non-prose constructs; a high share with no fenced block is the signal to read next)
+  prose reaching rule 1 : 40 of 56 non-blank (71%)
+  sentences             : 38, mean 7.0, max 30 (limit 35)
+  table cells           : 0, widest 0 (limit 120), most sentences in one cell 0
+  lexicon entries active: 38   rule-3 vocabulary: yes   rule-6 downgrades by --terms: 0
+
+READING-PASS WORKLIST (rules 3, 4 and 6 are not fully reachable by any detector)
+  docs/PLAN.md
+    [ ]       1-18    План разработки: Control Plane для распределённой VPN-инфр   warn 0   info 0
+    [ ]      19-20      Последовательность выполнения задач                          warn 0   info 0
+    [ ]      21-43        Этап 0 — репозиторий и стенд                                 warn 0   info 0
+    [ ]     44-108        Этап 1 — схема данных и каркас Control Plane                 warn 0   info 0
+    [ ]    109-145        Этап 2 — пользователи и кабинет                              warn 0   info 0
+    [ ]    146-182        Этап 3 — тарифы, подписки, коды                              warn 0   info 0
+    [ ]    183-247        Этап 5 — учёт трафика и лимиты                               warn 0   info 0
+    [ ]    248-312        Этап 4 — парк нод и Node API                                 warn 0   info 0
+    [ ]    313-349        Этап 6 — subscription-эндпоинт                               warn 0   info 0
+    [ ]    350-386        Этап 7 — администрирование, RBAC, аудит, поддержка           warn 0   info 0
+    [ ]    387-402        Этап 8 — уведомления и почта                                 warn 0   info 0
+    [ ]    403-467        Этап 9 — Node Agent (Go)                                     warn 0   info 0
+    [ ]    468-497        Этап 10 — интерфейсы web                                     warn 0   info 0
+    [ ]    498-541        Этап 11 — эксплуатация                                       warn 0   info 0
+    [ ]    542-557        Этап 12 — интеграция и приёмка                               warn 0   info 0
+    [ ]    558-618      Чек-лист требований RTM                                      warn 0   info 0
+    [ ]    619-639      Покрытие сценариев использования                             warn 0   info 0
+    [ ]    640-649      Стратегия тестирования                                       warn 0   info 0
+    [ ]    650-663      Открытые вопросы, влияющие на план                           warn 0   info 0
+  docs/tasks/task-001-01-repo-skeleton.md
+    [ ]        1-4    Задача 001.01: Каркас монорепозитория и инструменты провер   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-34        Новые файлы                                                  warn 0   info 0
+    [ ]      35-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-54        Модульные тесты                                              warn 0   info 0
+    [ ]      55-61        Регрессионные тесты                                          warn 0   info 0
+    [ ]      62-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-74      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-02-compose-dev-stand.md
+    [ ]        1-4    Задача 001.02: Docker Compose для разработки и стенда        warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-30        Новые файлы                                                  warn 0   info 0
+    [ ]      31-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-03-migrations-tooling.md
+    [ ]        1-4    Задача 001.03: Инструмент миграций, расширения, роли и пер   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-29        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      30-33          Файл: `control-plane/Dockerfile`                             warn 0   info 0
+    [ ]      34-40        Интеграция компонентов                                       warn 0   info 0
+    [ ]      41-42      Тестовые случаи                                              warn 0   info 0
+    [ ]      43-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-65      Критерии приёмки                                             warn 0   info 0
+    [ ]      66-70      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-04-schema-identity.md
+    [ ]        1-4    Задача 001.04: Схема: учётные записи и аутентификация        warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-33        Интеграция компонентов                                       warn 0   info 0
+    [ ]      34-35      Тестовые случаи                                              warn 0   info 0
+    [ ]      36-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-51        Модульные тесты                                              warn 0   info 0
+    [ ]      52-58        Регрессионные тесты                                          warn 0   info 0
+    [ ]      59-65      Критерии приёмки                                             warn 0   info 0
+    [ ]      66-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-05-schema-catalog.md
+    [ ]        1-4    Задача 001.05: Схема: тарифы, группы, коэффициенты           warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-25        Новые файлы                                                  warn 0   info 0
+    [ ]      26-31        Интеграция компонентов                                       warn 0   info 0
+    [ ]      32-33      Тестовые случаи                                              warn 0   info 0
+    [ ]      34-42        Сквозные тесты                                               warn 0   info 0
+    [ ]      43-49        Модульные тесты                                              warn 0   info 0
+    [ ]      50-56        Регрессионные тесты                                          warn 0   info 0
+    [ ]      57-63      Критерии приёмки                                             warn 0   info 0
+    [ ]      64-69      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-06-schema-nodes.md
+    [ ]        1-4    Задача 001.06: Схема: парк нод, inbound, состояние и коман   warn 0   info 0
+    [ ]       5-14      Связь со сценариями                                          warn 0   info 0
+    [ ]      15-21      Цель задачи                                                  warn 0   info 0
+    [ ]      22-23      Описание изменений                                           warn 0   info 0
+    [ ]      24-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-34        Интеграция компонентов                                       warn 0   info 0
+    [ ]      35-36      Тестовые случаи                                              warn 0   info 0
+    [ ]      37-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-67      Критерии приёмки                                             warn 0   info 0
+    [ ]      68-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-07-schema-subscriptions.md
+    [ ]        1-4    Задача 001.07: Схема: подписки, баланс, токены, коды         warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-33        Интеграция компонентов                                       warn 0   info 0
+    [ ]      34-35      Тестовые случаи                                              warn 0   info 0
+    [ ]      36-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-51        Модульные тесты                                              warn 0   info 0
+    [ ]      52-58        Регрессионные тесты                                          warn 0   info 0
+    [ ]      59-65      Критерии приёмки                                             warn 0   info 0
+    [ ]      66-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-08-schema-accounting.md
+    [ ]        1-4    Задача 001.08: Схема: учёт трафика, гранты, адреса, функци   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-21      Цель задачи                                                  warn 0   info 0
+    [ ]      22-23      Описание изменений                                           warn 0   info 0
+    [ ]      24-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-34        Интеграция компонентов                                       warn 0   info 0
+    [ ]      35-36      Тестовые случаи                                              warn 0   info 0
+    [ ]      37-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-74      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-09-schema-ops.md
+    [ ]        1-4    Задача 001.09: Схема: события, доставки, очередь задач, ау   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-33        Интеграция компонентов                                       warn 0   info 0
+    [ ]      34-35      Тестовые случаи                                              warn 0   info 0
+    [ ]      36-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-51        Модульные тесты                                              warn 0   info 0
+    [ ]      52-58        Регрессионные тесты                                          warn 0   info 0
+    [ ]      59-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-72      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-10-api-skeleton.md
+    [ ]        1-4    Задача 001.10: Каркас FastAPI: конфигурация, пул, Redis, ф   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-34        Новые файлы                                                  warn 0   info 0
+    [ ]      35-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-52        Сквозные тесты                                               warn 0   info 0
+    [ ]      53-59        Модульные тесты                                              warn 0   info 0
+    [ ]      60-66        Регрессионные тесты                                          warn 0   info 0
+    [ ]      67-72      Критерии приёмки                                             warn 0   info 0
+    [ ]      73-78      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-11-jobs-queue-stub.md
+    [ ]        1-4    Задача 001.11: Очередь задач в PostgreSQL: интерфейс и кар   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-29        Новые файлы                                                  warn 0   info 0
+    [ ]      30-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-55        Модульные тесты                                              warn 0   info 0
+    [ ]      56-62        Регрессионные тесты                                          warn 0   info 0
+    [ ]      63-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-12-security-core-stub.md
+    [ ]        1-4    Задача 001.12: Ядро безопасности: интерфейсы паролей, сесс   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-33        Новые файлы                                                  warn 0   info 0
+    [ ]      34-40        Интеграция компонентов                                       warn 0   info 0
+    [ ]      41-42      Тестовые случаи                                              warn 0   info 0
+    [ ]      43-49        Сквозные тесты                                               warn 0   info 0
+    [ ]      50-60        Модульные тесты                                              warn 0   info 0
+    [ ]      61-67        Регрессионные тесты                                          warn 0   info 0
+    [ ]      68-73      Критерии приёмки                                             warn 0   info 0
+    [ ]      74-78      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-13-auth-api-stub.md
+    [ ]        1-4    Задача 001.13: API аутентификации пользователей: маршруты    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-33        Интеграция компонентов                                       warn 0   info 0
+    [ ]      34-35      Тестовые случаи                                              warn 0   info 0
+    [ ]      36-49        Сквозные тесты                                               warn 0   info 0
+    [ ]      50-53        Модульные тесты                                              warn 0   info 0
+    [ ]      54-60        Регрессионные тесты                                          warn 0   info 0
+    [ ]      61-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-14-auth-api-logic.md
+    [ ]        1-4    Задача 001.14: API аутентификации: логика входа, сессий, в   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-29          Файл: `control-plane/app/domain/users.py`                    warn 0   info 0
+    [ ]      30-33          Файл: `control-plane/app/security/sessions.py`               warn 0   info 0
+    [ ]      34-37          Файл: `control-plane/app/security/ratelimit.py`              warn 0   info 0
+    [ ]      38-41          Файл: `control-plane/app/security/csrf.py`                   warn 0   info 0
+    [ ]      42-45          Файл: `control-plane/tests/e2e/test_auth.py`                 warn 0   info 0
+    [ ]      46-52        Интеграция компонентов                                       warn 0   info 0
+    [ ]      53-54      Тестовые случаи                                              warn 0   info 0
+    [ ]      55-69        Сквозные тесты                                               warn 0   info 0
+    [ ]      70-80        Модульные тесты                                              warn 0   info 0
+    [ ]      81-87        Регрессионные тесты                                          warn 0   info 0
+    [ ]      88-94      Критерии приёмки                                             warn 0   info 0
+    [ ]      95-99      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-15-me-api-stub.md
+    [ ]        1-4    Задача 001.15: API кабинета `/api/v1/me`: маршруты и сквоз   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-35        Интеграция компонентов                                       warn 0   info 0
+    [ ]      36-37      Тестовые случаи                                              warn 0   info 0
+    [ ]      38-47        Сквозные тесты                                               warn 0   info 0
+    [ ]      48-51        Модульные тесты                                              warn 0   info 0
+    [ ]      52-58        Регрессионные тесты                                          warn 0   info 0
+    [ ]      59-64      Критерии приёмки                                             warn 0   info 0
+    [ ]      65-69      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-16-me-api-logic.md
+    [ ]        1-4    Задача 001.16: API кабинета: логика профиля, статистики, п   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-26          Файл: `control-plane/app/domain/profile.py`                  warn 0   info 0
+    [ ]      27-30          Файл: `control-plane/app/accounting/stats.py`                warn 0   info 0
+    [ ]      31-35          Файл: `control-plane/app/api/me.py`                          warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/tests/e2e/test_me.py`                   warn 0   info 0
+    [ ]      40-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-58        Сквозные тесты                                               warn 0   info 0
+    [ ]      59-65        Модульные тесты                                              warn 0   info 0
+    [ ]      66-72        Регрессионные тесты                                          warn 0   info 0
+    [ ]      73-79      Критерии приёмки                                             warn 0   info 0
+    [ ]      80-84      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-17-account-deletion-logic.md
+    [ ]        1-4    Задача 001.17: Удаление аккаунта: стирание PII, отзыв cred   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-26          Файл: `control-plane/app/domain/profile.py`                  warn 0   info 0
+    [ ]      27-30          Файл: `control-plane/tests/e2e/test_me.py`                   warn 0   info 0
+    [ ]      31-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-65      Критерии приёмки                                             warn 0   info 0
+    [ ]      66-70      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-18-catalog-api-stub.md
+    [ ]        1-4    Задача 001.18: API администратора: тарифы, группы, коды —    warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-30        Новые файлы                                                  warn 0   info 0
+    [ ]      31-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-57        Модульные тесты                                              warn 0   info 0
+    [ ]      58-64        Регрессионные тесты                                          warn 0   info 0
+    [ ]      65-70      Критерии приёмки                                             warn 0   info 0
+    [ ]      71-75      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-19-plans-groups-logic.md
+    [ ]        1-4    Задача 001.19: Тарифы и группы: логика, одна тарифицируема   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-27          Файл: `control-plane/app/domain/plans.py`                    warn 0   info 0
+    [ ]      28-33          Файл: `control-plane/app/domain/groups.py`                   warn 0   info 0
+    [ ]      34-37          Файл: `control-plane/tests/e2e/test_catalog.py`              warn 0   info 0
+    [ ]      38-43        Интеграция компонентов                                       warn 0   info 0
+    [ ]      44-45      Тестовые случаи                                              warn 0   info 0
+    [ ]      46-54        Сквозные тесты                                               warn 0   info 0
+    [ ]      55-61        Модульные тесты                                              warn 0   info 0
+    [ ]      62-68        Регрессионные тесты                                          warn 0   info 0
+    [ ]      69-74      Критерии приёмки                                             warn 0   info 1
+    [ ]      75-79      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-20-codes-logic.md
+    [ ]        1-4    Задача 001.20: Redeem- и Promo-коды: генерация, экспорт, а   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-30          Файл: `control-plane/app/domain/codes.py`                    warn 0   info 0
+    [ ]      31-34          Файл: `control-plane/tests/e2e/test_catalog.py`              warn 0   info 0
+    [ ]      35-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-52        Сквозные тесты                                               warn 0   info 0
+    [ ]      53-59        Модульные тесты                                              warn 0   info 0
+    [ ]      60-66        Регрессионные тесты                                          warn 0   info 0
+    [ ]      67-72      Критерии приёмки                                             warn 0   info 0
+    [ ]      73-77      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-21-subscription-service-stub.md
+    [ ]        1-4    Задача 001.21: Служба подписок: интерфейс состояния, перио   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-35        Интеграция компонентов                                       warn 0   info 0
+    [ ]      36-37      Тестовые случаи                                              warn 0   info 0
+    [ ]      38-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-48        Модульные тесты                                              warn 0   info 0
+    [ ]      49-55        Регрессионные тесты                                          warn 0   info 0
+    [ ]      56-61      Критерии приёмки                                             warn 0   info 0
+    [ ]      62-66      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-22-subscription-service-logic.md
+    [ ]        1-4    Задача 001.22: Служба подписок: активация, продление, смен   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-32          Файл: `control-plane/app/domain/subscriptions.py`            warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/jobs/scheduler.py`                  warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/tests/e2e/test_subscriptions.py`        warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-60        Сквозные тесты                                               warn 0   info 0
+    [ ]      61-67        Модульные тесты                                              warn 0   info 0
+    [ ]      68-74        Регрессионные тесты                                          warn 0   info 0
+    [ ]      75-80      Критерии приёмки                                             warn 0   info 0
+    [ ]      81-85      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-23-multiplier-resolution-logic.md
+    [ ]        1-4    Задача 001.23: Разрешение коэффициента трафика по дате: но   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-26        Новые файлы                                                  warn 0   info 0
+    [ ]      27-32        Интеграция компонентов                                       warn 0   info 0
+    [ ]      33-34      Тестовые случаи                                              warn 0   info 0
+    [ ]      35-40        Сквозные тесты                                               warn 0   info 0
+    [ ]      41-55        Модульные тесты                                              warn 0   info 0
+    [ ]      56-62        Регрессионные тесты                                          warn 0   info 0
+    [ ]      63-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-24-nodes-api-stub.md
+    [ ]        1-4    Задача 001.24: API нод и enrollment: маршруты, bootstrap-т   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-29        Новые файлы                                                  warn 0   info 0
+    [ ]      30-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-49        Модульные тесты                                              warn 0   info 0
+    [ ]      50-56        Регрессионные тесты                                          warn 0   info 0
+    [ ]      57-61      Критерии приёмки                                             warn 0   info 0
+    [ ]      62-66      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-25-enrollment-identity-logic.md
+    [ ]        1-4    Задача 001.25: Enrollment и identity ноды: внутренний CA,    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `control-plane/app/security/ca.py`                     warn 0   info 0
+    [ ]      28-34          Файл: `control-plane/app/domain/nodes.py`                    warn 0   info 0
+    [ ]      35-38          Файл: `control-plane/app/agent_api/deps.py`                  warn 0   info 0
+    [ ]      39-42          Файл: `control-plane/tests/e2e/test_nodes.py`                warn 0   info 0
+    [ ]      43-49        Интеграция компонентов                                       warn 0   info 0
+    [ ]      50-51      Тестовые случаи                                              warn 0   info 0
+    [ ]      52-64        Сквозные тесты                                               warn 0   info 0
+    [ ]      65-71        Модульные тесты                                              warn 0   info 0
+    [ ]      72-78        Регрессионные тесты                                          warn 0   info 0
+    [ ]      79-84      Критерии приёмки                                             warn 0   info 0
+    [ ]      85-89      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-26-inbound-xray-config-stub.md
+    [ ]        1-4    Задача 001.26: Inbound и генератор конфигурации Xray: моде   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-34        Интеграция компонентов                                       warn 0   info 0
+    [ ]      35-36      Тестовые случаи                                              warn 0   info 0
+    [ ]      37-43        Сквозные тесты                                               warn 0   info 0
+    [ ]      44-50        Модульные тесты                                              warn 0   info 0
+    [ ]      51-57        Регрессионные тесты                                          warn 0   info 0
+    [ ]      58-63      Критерии приёмки                                             warn 0   info 0
+    [ ]      64-68      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-27-inbound-xray-config-logic.md
+    [ ]        1-4    Задача 001.27: Inbound: генерация конфигурации Xray, ротац   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-31          Файл: `control-plane/app/domain/inbounds.py`                 warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/app/domain/xray_config.py`              warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/app/jobs/scheduler.py`                  warn 0   info 0
+    [ ]      40-43          Файл: `control-plane/tests/unit/domain/test_xray_config.py   warn 0   info 0
+    [ ]      44-50        Интеграция компонентов                                       warn 0   info 0
+    [ ]      51-52      Тестовые случаи                                              warn 0   info 0
+    [ ]      53-61        Сквозные тесты                                               warn 0   info 0
+    [ ]      62-72        Модульные тесты                                              warn 0   info 0
+    [ ]      73-79        Регрессионные тесты                                          warn 0   info 0
+    [ ]      80-85      Критерии приёмки                                             warn 0   info 0
+    [ ]      86-90      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-28-agent-state-api-stub.md
+    [ ]        1-4    Задача 001.28: Node API: состояние (long-poll), подтвержде   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-31        Новые файлы                                                  warn 0   info 0
+    [ ]      32-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-54        Модульные тесты                                              warn 0   info 0
+    [ ]      55-61        Регрессионные тесты                                          warn 0   info 0
+    [ ]      62-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-29-composition-stream-logic.md
+    [ ]        1-4    Задача 001.29: Поток состава и конфигурации: `updated_seq`   warn 0   info 0
+    [ ]       5-14      Связь со сценариями                                          warn 0   info 0
+    [ ]      15-23      Цель задачи                                                  warn 0   info 0
+    [ ]      24-25      Описание изменений                                           warn 0   info 0
+    [ ]      26-27        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      28-35          Файл: `control-plane/app/domain/composition.py`              warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/app/domain/commands.py`                 warn 0   info 0
+    [ ]      40-43          Файл: `control-plane/app/jobs/handlers/composition.py`       warn 0   info 0
+    [ ]      44-47          Файл: `control-plane/tests/e2e/test_agent_api.py`            warn 0   info 0
+    [ ]      48-54        Интеграция компонентов                                       warn 0   info 0
+    [ ]      55-56      Тестовые случаи                                              warn 0   info 0
+    [ ]      57-72        Сквозные тесты                                               warn 0   info 0
+    [ ]      73-79        Модульные тесты                                              warn 0   info 0
+    [ ]      80-86        Регрессионные тесты                                          warn 0   info 0
+    [ ]      87-92      Критерии приёмки                                             warn 0   info 0
+    [ ]      93-97      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-30-heartbeat-statuses-logic.md
+    [ ]        1-4    Задача 001.30: Heartbeat, статусы ноды, пороги Н-15, матри   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `control-plane/app/agent_api/heartbeat.py`             warn 0   info 0
+    [ ]      28-35          Файл: `control-plane/app/domain/statuses.py`                 warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/app/jobs/scheduler.py`                  warn 0   info 0
+    [ ]      40-43          Файл: `control-plane/tests/e2e/test_nodes.py`                warn 0   info 0
+    [ ]      44-50        Интеграция компонентов                                       warn 0   info 0
+    [ ]      51-52      Тестовые случаи                                              warn 0   info 0
+    [ ]      53-65        Сквозные тесты                                               warn 0   info 0
+    [ ]      66-72        Модульные тесты                                              warn 0   info 0
+    [ ]      73-79        Регрессионные тесты                                          warn 0   info 0
+    [ ]      80-84      Критерии приёмки                                             warn 0   info 0
+    [ ]      85-89      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-31-versions-update-command-logic.md
+    [ ]        1-4    Задача 001.31: Закреплённые версии, команда `update_agent`   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/domain/commands.py`                 warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/domain/nodes.py`                    warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/api/admin/nodes.py`                 warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/tests/e2e/test_nodes.py`                warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-57        Сквозные тесты                                               warn 0   info 0
+    [ ]      58-64        Модульные тесты                                              warn 0   info 0
+    [ ]      65-71        Регрессионные тесты                                          warn 0   info 0
+    [ ]      72-76      Критерии приёмки                                             warn 0   info 0
+    [ ]      77-81      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-32-country-probes-logic.md
+    [ ]        1-4    Задача 001.32: Внешние пробы доступности нод по странам (п   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-25        Новые файлы                                                  warn 0   info 0
+    [ ]      26-27        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      28-31          Файл: `control-plane/app/subscription/composer.py`           warn 0   info 0
+    [ ]      32-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-49        Модульные тесты                                              warn 0   info 0
+    [ ]      50-56        Регрессионные тесты                                          warn 0   info 0
+    [ ]      57-61      Критерии приёмки                                             warn 0   info 0
+    [ ]      62-66      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-33-reports-api-stub.md
+    [ ]        1-4    Задача 001.33: Node API отчётов о трафике и служба учёта —   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-26        Новые файлы                                                  warn 0   info 0
+    [ ]      27-32        Интеграция компонентов                                       warn 0   info 0
+    [ ]      33-34      Тестовые случаи                                              warn 0   info 0
+    [ ]      35-41        Сквозные тесты                                               warn 0   info 0
+    [ ]      42-45        Модульные тесты                                              warn 0   info 0
+    [ ]      46-52        Регрессионные тесты                                          warn 0   info 0
+    [ ]      53-57      Критерии приёмки                                             warn 0   info 0
+    [ ]      58-62      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-34-report-acceptance-logic.md
+    [ ]        1-4    Задача 001.34: Приём отчёта: идемпотентность, время, анома   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-36          Файл: `control-plane/app/accounting/service.py`              warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/tests/e2e/test_reports.py`              warn 0   info 0
+    [ ]      41-47        Интеграция компонентов                                       warn 0   info 0
+    [ ]      48-49      Тестовые случаи                                              warn 0   info 0
+    [ ]      50-64        Сквозные тесты                                               warn 0   info 0
+    [ ]      65-71        Модульные тесты                                              warn 0   info 0
+    [ ]      72-78        Регрессионные тесты                                          warn 0   info 0
+    [ ]      79-84      Критерии приёмки                                             warn 0   info 0
+    [ ]      85-89      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-35-limits-thresholds-logic.md
+    [ ]        1-4    Задача 001.35: Лимиты и пороги 80/95/100 %: `suspended_quo   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-26        Новые файлы                                                  warn 0   info 0
+    [ ]      27-28        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/domain/subscriptions.py`            warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/tests/e2e/test_limits.py`               warn 0   info 0
+    [ ]      37-43        Интеграция компонентов                                       warn 0   info 0
+    [ ]      44-45      Тестовые случаи                                              warn 0   info 0
+    [ ]      46-58        Сквозные тесты                                               warn 0   info 0
+    [ ]      59-65        Модульные тесты                                              warn 0   info 0
+    [ ]      66-72        Регрессионные тесты                                          warn 0   info 0
+    [ ]      73-78      Критерии приёмки                                             warn 0   info 0
+    [ ]      79-83      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-36-quota-grants-logic.md
+    [ ]        1-4    Задача 001.36: Гранты квоты: выдача, замена, учёт расхода,   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-25        Новые файлы                                                  warn 0   info 0
+    [ ]      26-27        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      28-31          Файл: `control-plane/app/agent_api/reports.py`               warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/app/domain/composition.py`              warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/tests/e2e/test_limits.py`               warn 0   info 0
+    [ ]      40-45        Интеграция компонентов                                       warn 0   info 0
+    [ ]      46-47      Тестовые случаи                                              warn 0   info 0
+    [ ]      48-56        Сквозные тесты                                               warn 0   info 0
+    [ ]      57-63        Модульные тесты                                              warn 0   info 0
+    [ ]      64-70        Регрессионные тесты                                          warn 0   info 0
+    [ ]      71-75      Критерии приёмки                                             warn 0   info 0
+    [ ]      76-80      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-37-reconciliation-aggregation-retention-logic.md
+    [ ]        1-4    Задача 001.37: Сверки, суточная агрегация, партиции и срок   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-29        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      30-33          Файл: `control-plane/app/jobs/scheduler.py`                  warn 0   info 0
+    [ ]      34-39        Интеграция компонентов                                       warn 0   info 0
+    [ ]      40-41      Тестовые случаи                                              warn 0   info 0
+    [ ]      42-53        Сквозные тесты                                               warn 0   info 0
+    [ ]      54-60        Модульные тесты                                              warn 0   info 0
+    [ ]      61-67        Регрессионные тесты                                          warn 0   info 0
+    [ ]      68-73      Критерии приёмки                                             warn 0   info 0
+    [ ]      74-78      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-38-device-limit-logic.md
+    [ ]        1-4    Задача 001.38: Лимит уникальных адресов: подсчёт, `blocked   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-25        Новые файлы                                                  warn 0   info 0
+    [ ]      26-27        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      28-31          Файл: `control-plane/app/domain/composition.py`              warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/tests/e2e/test_device_limit.py`         warn 0   info 0
+    [ ]      36-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-52        Сквозные тесты                                               warn 0   info 0
+    [ ]      53-59        Модульные тесты                                              warn 0   info 0
+    [ ]      60-66        Регрессионные тесты                                          warn 0   info 0
+    [ ]      67-71      Критерии приёмки                                             warn 0   info 0
+    [ ]      72-76      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-39-resale-signals-logic.md
+    [ ]        1-4    Задача 001.39: Признаки перепродажи доступа в карточке пол   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-24        Новые файлы                                                  warn 0   info 0
+    [ ]      25-26        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      27-30          Файл: `control-plane/app/agent_api/reports.py`               warn 0   info 0
+    [ ]      31-34          Файл: `control-plane/app/api/admin/users.py`                 warn 0   info 0
+    [ ]      35-40        Интеграция компонентов                                       warn 0   info 0
+    [ ]      41-42      Тестовые случаи                                              warn 0   info 0
+    [ ]      43-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-55        Модульные тесты                                              warn 0   info 0
+    [ ]      56-62        Регрессионные тесты                                          warn 0   info 0
+    [ ]      63-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-40-force-disconnect-strategy-logic.md
+    [ ]        1-4    Задача 001.40: Стратегия принудительного разрыва: выбор ка   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-26          Файл: `control-plane/app/domain/composition.py`              warn 0   info 0
+    [ ]      27-30          Файл: `control-plane/app/api/admin/settings.py`              warn 0   info 0
+    [ ]      31-34          Файл: `control-plane/tests/e2e/test_limits.py`               warn 0   info 0
+    [ ]      35-40        Интеграция компонентов                                       warn 0   info 0
+    [ ]      41-42      Тестовые случаи                                              warn 0   info 0
+    [ ]      43-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-64      Критерии приёмки                                             warn 0   info 0
+    [ ]      65-69      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-41-subscription-endpoint-stub.md
+    [ ]        1-4    Задача 001.41: Subscription-эндпоинт `/s/{token}`: маршрут   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-31        Новые файлы                                                  warn 0   info 0
+    [ ]      32-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-53        Сквозные тесты                                               warn 0   info 0
+    [ ]      54-57        Модульные тесты                                              warn 0   info 0
+    [ ]      58-64        Регрессионные тесты                                          warn 0   info 0
+    [ ]      65-70      Критерии приёмки                                             warn 0   info 0
+    [ ]      71-75      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-42-subscription-token-format-logic.md
+    [ ]        1-4    Задача 001.42: Токен подписки, выбор формата, заголовки, с   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-21      Цель задачи                                                  warn 0   info 0
+    [ ]      22-23      Описание изменений                                           warn 0   info 0
+    [ ]      24-25        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      26-29          Файл: `control-plane/app/subscription/tokens.py`             warn 0   info 0
+    [ ]      30-36          Файл: `control-plane/app/subscription/router.py`             warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/tests/e2e/test_subscription.py`         warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-63        Сквозные тесты                                               warn 0   info 0
+    [ ]      64-70        Модульные тесты                                              warn 0   info 0
+    [ ]      71-77        Регрессионные тесты                                          warn 0   info 0
+    [ ]      78-83      Критерии приёмки                                             warn 0   info 0
+    [ ]      84-88      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-43-subscription-generators-logic.md
+    [ ]        1-4    Задача 001.43: Генераторы `base64` и `singbox`: матрица «п   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-26          Файл: `control-plane/app/subscription/generators/base64.py   warn 0   info 0
+    [ ]      27-30          Файл: `control-plane/app/subscription/generators/singbox.p   warn 0   info 0
+    [ ]      31-34          Файл: `control-plane/app/subscription/composer.py`           warn 0   info 0
+    [ ]      35-38          Файл: `control-plane/tests/golden/subscription/`             warn 0   info 0
+    [ ]      39-44        Интеграция компонентов                                       warn 0   info 0
+    [ ]      45-46      Тестовые случаи                                              warn 0   info 0
+    [ ]      47-58        Сквозные тесты                                               warn 0   info 0
+    [ ]      59-65        Модульные тесты                                              warn 0   info 0
+    [ ]      66-72        Регрессионные тесты                                          warn 0   info 0
+    [ ]      73-77      Критерии приёмки                                             warn 0   info 0
+    [ ]      78-82      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-44-subscription-composer-logic.md
+    [ ]        1-4    Задача 001.44: Динамический состав серверов: фильтры, стат   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/subscription/composer.py`           warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/tests/e2e/test_subscription.py`         warn 0   info 0
+    [ ]      33-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-49        Сквозные тесты                                               warn 0   info 0
+    [ ]      50-56        Модульные тесты                                              warn 0   info 0
+    [ ]      57-63        Регрессионные тесты                                          warn 0   info 0
+    [ ]      64-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-45-subscription-domains-page-logic.md
+    [ ]        1-4    Задача 001.45: Два домена подписки и страница подписки       warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `deploy/nginx/nginx.conf`                              warn 0   info 0
+    [ ]      28-31          Файл: `control-plane/app/subscription/page.py`               warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/tests/e2e/test_subscription.py`         warn 0   info 0
+    [ ]      36-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-52        Сквозные тесты                                               warn 0   info 0
+    [ ]      53-56        Модульные тесты                                              warn 0   info 0
+    [ ]      57-63        Регрессионные тесты                                          warn 0   info 0
+    [ ]      64-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-46-admin-auth-rbac-audit-stub.md
+    [ ]        1-4    Задача 001.46: Аутентификация администраторов, RBAC и ауди   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-30        Новые файлы                                                  warn 0   info 0
+    [ ]      31-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-48        Сквозные тесты                                               warn 0   info 0
+    [ ]      49-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-64      Критерии приёмки                                             warn 0   info 0
+    [ ]      65-70      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-47-admin-auth-2fa-logic.md
+    [ ]        1-4    Задача 001.47: Аутентификация администраторов: TOTP, резер   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `control-plane/app/security/totp.py`                   warn 0   info 0
+    [ ]      28-31          Файл: `control-plane/app/api/admin/auth.py`                  warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/app/cli.py`                             warn 0   info 0
+    [ ]      36-39          Файл: `control-plane/tests/e2e/test_admin_auth.py`           warn 0   info 0
+    [ ]      40-45        Интеграция компонентов                                       warn 0   info 0
+    [ ]      46-47      Тестовые случаи                                              warn 0   info 0
+    [ ]      48-59        Сквозные тесты                                               warn 0   info 0
+    [ ]      60-66        Модульные тесты                                              warn 0   info 0
+    [ ]      67-73        Регрессионные тесты                                          warn 0   info 0
+    [ ]      74-78      Критерии приёмки                                             warn 0   info 0
+    [ ]      79-84      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-48-rbac-audit-logic.md
+    [ ]        1-4    Задача 001.48: RBAC: матрица и политики §5.11; Audit Log a   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 1
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/security/rbac.py`                   warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/security/audit.py`                  warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/api/admin/users.py`                 warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/tests/e2e/test_admin_auth.py`           warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-60        Сквозные тесты                                               warn 0   info 0
+    [ ]      61-67        Модульные тесты                                              warn 0   info 0
+    [ ]      68-74        Регрессионные тесты                                          warn 0   info 0
+    [ ]      75-80      Критерии приёмки                                             warn 0   info 0
+    [ ]      81-86      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-49-admin-users-nodes-dashboard-stub.md
+    [ ]        1-4    Задача 001.49: API панели: пользователи, ноды, дашборд, на   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-18      Цель задачи                                                  warn 0   info 0
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-34        Интеграция компонентов                                       warn 0   info 0
+    [ ]      35-36      Тестовые случаи                                              warn 0   info 0
+    [ ]      37-43        Сквозные тесты                                               warn 0   info 0
+    [ ]      44-47        Модульные тесты                                              warn 0   info 0
+    [ ]      48-54        Регрессионные тесты                                          warn 0   info 0
+    [ ]      55-59      Критерии приёмки                                             warn 0   info 0
+    [ ]      60-64      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-50-admin-users-nodes-dashboard-logic.md
+    [ ]        1-4    Задача 001.50: API панели: логика разделов, карточек и нас   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/api/admin/users.py`                 warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/api/admin/nodes.py`                 warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/api/admin/dashboard.py`             warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/app/api/admin/settings.py`              warn 0   info 0
+    [ ]      41-44          Файл: `control-plane/tests/e2e/test_admin.py`                warn 0   info 0
+    [ ]      45-50        Интеграция компонентов                                       warn 0   info 0
+    [ ]      51-52      Тестовые случаи                                              warn 0   info 0
+    [ ]      53-61        Сквозные тесты                                               warn 0   info 0
+    [ ]      62-68        Модульные тесты                                              warn 0   info 0
+    [ ]      69-75        Регрессионные тесты                                          warn 0   info 0
+    [ ]      76-81      Критерии приёмки                                             warn 0   info 0
+    [ ]      82-87      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-51-notifications-stub.md
+    [ ]        1-4    Задача 001.51: События, почта, webhook — интерфейсы и загл   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-30        Новые файлы                                                  warn 0   info 0
+    [ ]      31-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-49        Модульные тесты                                              warn 0   info 0
+    [ ]      50-56        Регрессионные тесты                                          warn 0   info 0
+    [ ]      57-61      Критерии приёмки                                             warn 0   info 0
+    [ ]      62-66      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-52-notifications-logic.md
+    [ ]        1-4    Задача 001.52: Уведомления: подавление, язык, доставка поч   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-24      Цель задачи                                                  warn 0   info 0
+    [ ]      25-26      Описание изменений                                           warn 0   info 0
+    [ ]      27-28        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/notifications/events.py`            warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/notifications/email.py`             warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/app/notifications/webhook.py`           warn 0   info 0
+    [ ]      41-44          Файл: `control-plane/app/jobs/handlers/notifications.py`     warn 0   info 0
+    [ ]      45-48          Файл: `control-plane/tests/e2e/test_notifications.py`        warn 0   info 0
+    [ ]      49-54        Интеграция компонентов                                       warn 0   info 0
+    [ ]      55-56      Тестовые случаи                                              warn 0   info 0
+    [ ]      57-68        Сквозные тесты                                               warn 0   info 0
+    [ ]      69-75        Модульные тесты                                              warn 0   info 0
+    [ ]      76-82        Регрессионные тесты                                          warn 0   info 0
+    [ ]      83-88      Критерии приёмки                                             warn 0   info 0
+    [ ]      89-93      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-53-agent-skeleton-stub.md
+    [ ]        1-4    Задача 001.53: Node Agent: каркас, конфигурация, клиенты,    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-32        Новые файлы                                                  warn 0   info 0
+    [ ]      33-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-47        Сквозные тесты                                               warn 0   info 0
+    [ ]      48-54        Модульные тесты                                              warn 0   info 0
+    [ ]      55-61        Регрессионные тесты                                          warn 0   info 0
+    [ ]      62-67      Критерии приёмки                                             warn 0   info 0
+    [ ]      68-72      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-54-agent-enroll-mtls-logic.md
+    [ ]        1-4    Задача 001.54: Node Agent: enrollment, хранение identity,    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `node-agent/internal/enroll/enroll.go`                 warn 0   info 0
+    [ ]      29-32          Файл: `node-agent/internal/cpclient/client.go`               warn 0   info 0
+    [ ]      33-36          Файл: `node-agent/internal/enroll/enroll_test.go`            warn 0   info 0
+    [ ]      37-42        Интеграция компонентов                                       warn 0   info 0
+    [ ]      43-44      Тестовые случаи                                              warn 0   info 0
+    [ ]      45-53        Сквозные тесты                                               warn 0   info 0
+    [ ]      54-60        Модульные тесты                                              warn 0   info 0
+    [ ]      61-67        Регрессионные тесты                                          warn 0   info 0
+    [ ]      68-72      Критерии приёмки                                             warn 0   info 0
+    [ ]      73-77      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-55-agent-sync-apply-logic.md
+    [ ]        1-4    Задача 001.55: Node Agent: long-poll, применение конфигура   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-22      Цель задачи                                                  warn 0   info 1
+    [ ]      23-24      Описание изменений                                           warn 0   info 0
+    [ ]      25-26        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      27-30          Файл: `node-agent/internal/sync/loop.go`                     warn 0   info 0
+    [ ]      31-34          Файл: `node-agent/internal/sync/apply_config.go`             warn 0   info 0
+    [ ]      35-38          Файл: `node-agent/internal/sync/apply_users.go`              warn 0   info 0
+    [ ]      39-42          Файл: `node-agent/internal/sync/commands.go`                 warn 0   info 0
+    [ ]      43-46          Файл: `node-agent/internal/sync/loop_test.go`                warn 0   info 0
+    [ ]      47-52        Интеграция компонентов                                       warn 0   info 0
+    [ ]      53-54      Тестовые случаи                                              warn 0   info 0
+    [ ]      55-66        Сквозные тесты                                               warn 0   info 0
+    [ ]      67-73        Модульные тесты                                              warn 0   info 0
+    [ ]      74-80        Регрессионные тесты                                          warn 0   info 0
+    [ ]      81-86      Критерии приёмки                                             warn 0   info 0
+    [ ]      87-91      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-56-agent-accounting-logic.md
+    [ ]        1-4    Задача 001.56: Node Agent: счётчики, эпохи, буфер SQLite,    warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `node-agent/internal/accounting/collector.go`          warn 0   info 0
+    [ ]      28-31          Файл: `node-agent/internal/accounting/buffer.go`             warn 0   info 0
+    [ ]      32-35          Файл: `node-agent/internal/accounting/sender.go`             warn 0   info 0
+    [ ]      36-39          Файл: `node-agent/internal/accounting/clock.go`              warn 0   info 0
+    [ ]      40-43          Файл: `node-agent/internal/accounting/collector_test.go`     warn 0   info 0
+    [ ]      44-49        Интеграция компонентов                                       warn 0   info 0
+    [ ]      50-51      Тестовые случаи                                              warn 0   info 0
+    [ ]      52-60        Сквозные тесты                                               warn 0   info 0
+    [ ]      61-67        Модульные тесты                                              warn 0   info 0
+    [ ]      68-74        Регрессионные тесты                                          warn 0   info 0
+    [ ]      75-79      Критерии приёмки                                             warn 0   info 0
+    [ ]      80-84      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-57-agent-quota-logic.md
+    [ ]        1-4    Задача 001.57: Node Agent: локальный грант квоты и автоном   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `node-agent/internal/quota/quota.go`                   warn 0   info 0
+    [ ]      28-31          Файл: `node-agent/internal/quota/quota_test.go`              warn 0   info 0
+    [ ]      32-37        Интеграция компонентов                                       warn 0   info 0
+    [ ]      38-39      Тестовые случаи                                              warn 0   info 0
+    [ ]      40-45        Сквозные тесты                                               warn 0   info 0
+    [ ]      46-52        Модульные тесты                                              warn 0   info 0
+    [ ]      53-59        Регрессионные тесты                                          warn 0   info 0
+    [ ]      60-64      Критерии приёмки                                             warn 0   info 0
+    [ ]      65-69      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-58-agent-guard-logic.md
+    [ ]        1-4    Задача 001.58: Node Agent: блокировка адресов, nftables-ли   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-20      Цель задачи                                                  warn 0   info 1
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `node-agent/internal/guard/routing.go`                 warn 0   info 0
+    [ ]      29-32          Файл: `node-agent/internal/guard/nftables.go`                warn 0   info 0
+    [ ]      33-36          Файл: `node-agent/internal/guard/conntrack.go`               warn 0   info 0
+    [ ]      37-40          Файл: `node-agent/internal/guard/guard_test.go`              warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-60        Сквозные тесты                                               warn 0   info 0
+    [ ]      61-67        Модульные тесты                                              warn 0   info 0
+    [ ]      68-74        Регрессионные тесты                                          warn 0   info 0
+    [ ]      75-79      Критерии приёмки                                             warn 0   info 0
+    [ ]      80-84      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-59-agent-metrics-heartbeat-logic.md
+    [ ]        1-4    Задача 001.59: Node Agent: heartbeat, метрики ОС и Xray, э   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-18      Цель задачи                                                  warn 0   info 1
+    [ ]      19-20      Описание изменений                                           warn 0   info 0
+    [ ]      21-22        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      23-26          Файл: `node-agent/internal/metrics/collect.go`               warn 0   info 0
+    [ ]      27-30          Файл: `node-agent/internal/metrics/metrics_test.go`          warn 0   info 0
+    [ ]      31-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-51        Модульные тесты                                              warn 0   info 0
+    [ ]      52-58        Регрессионные тесты                                          warn 0   info 0
+    [ ]      59-63      Критерии приёмки                                             warn 0   info 0
+    [ ]      64-68      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-60-agent-disconnect-logic.md
+    [ ]        1-4    Задача 001.60: Node Agent: три стратегии принудительного р   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-23        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      24-27          Файл: `node-agent/internal/disconnect/strategies.go`         warn 0   info 0
+    [ ]      28-31          Файл: `node-agent/internal/disconnect/strategies_test.go`    warn 0   info 0
+    [ ]      32-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-46        Сквозные тесты                                               warn 0   info 0
+    [ ]      47-53        Модульные тесты                                              warn 0   info 0
+    [ ]      54-60        Регрессионные тесты                                          warn 0   info 0
+    [ ]      61-65      Критерии приёмки                                             warn 0   info 0
+    [ ]      66-70      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-61-node-bootstrap-systemd-nftables.md
+    [ ]        1-4    Задача 001.61: Bootstrap ноды, systemd-юниты, nftables, за   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-29        Новые файлы                                                  warn 0   info 0
+    [ ]      30-36        Интеграция компонентов                                       warn 0   info 0
+    [ ]      37-38      Тестовые случаи                                              warn 0   info 0
+    [ ]      39-44        Сквозные тесты                                               warn 0   info 0
+    [ ]      45-48        Модульные тесты                                              warn 0   info 0
+    [ ]      49-55        Регрессионные тесты                                          warn 0   info 0
+    [ ]      56-61      Критерии приёмки                                             warn 0   info 0
+    [ ]      62-66      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-62-web-skeleton-stub.md
+    [ ]        1-4    Задача 001.62: Web: клиент API из OpenAPI, пакет локализац   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-29        Новые файлы                                                  warn 0   info 0
+    [ ]      30-35        Интеграция компонентов                                       warn 0   info 0
+    [ ]      36-37      Тестовые случаи                                              warn 0   info 0
+    [ ]      38-43        Сквозные тесты                                               warn 0   info 0
+    [ ]      44-50        Модульные тесты                                              warn 0   info 0
+    [ ]      51-57        Регрессионные тесты                                          warn 0   info 0
+    [ ]      58-62      Критерии приёмки                                             warn 0   info 0
+    [ ]      63-67      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-63-web-cabinet-logic.md
+    [ ]        1-4    Задача 001.63: Web: экраны кабинета — подписка, QR, статис   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `web/apps/cabinet/src/pages/*`                         warn 0   info 0
+    [ ]      29-32          Файл: `web/apps/cabinet/src/pages/*.test.tsx`                warn 0   info 0
+    [ ]      33-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-49        Сквозные тесты                                               warn 0   info 0
+    [ ]      50-56        Модульные тесты                                              warn 0   info 0
+    [ ]      57-63        Регрессионные тесты                                          warn 0   info 0
+    [ ]      64-69      Критерии приёмки                                             warn 0   info 0
+    [ ]      70-74      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-64-web-admin-logic.md
+    [ ]        1-4    Задача 001.64: Web: экраны панели — дашборд, пользователи,   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `web/apps/admin/src/pages/*`                           warn 0   info 0
+    [ ]      29-32          Файл: `web/apps/admin/src/pages/*.test.tsx`                  warn 0   info 0
+    [ ]      33-38        Интеграция компонентов                                       warn 0   info 0
+    [ ]      39-40      Тестовые случаи                                              warn 0   info 0
+    [ ]      41-49        Сквозные тесты                                               warn 0   info 0
+    [ ]      50-56        Модульные тесты                                              warn 0   info 0
+    [ ]      57-63        Регрессионные тесты                                          warn 0   info 0
+    [ ]      64-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-65-i18n-timezone-logic.md
+    [ ]        1-4    Задача 001.65: Локализация RU/EN и часовой пояс: сервер, п   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 1
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-26        Новые файлы                                                  warn 0   info 0
+    [ ]      27-28        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/notifications/templates/`           warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/app/subscription/page.py`               warn 0   info 0
+    [ ]      37-40          Файл: `control-plane/app/api/me.py`                          warn 0   info 0
+    [ ]      41-46        Интеграция компонентов                                       warn 0   info 0
+    [ ]      47-48      Тестовые случаи                                              warn 0   info 0
+    [ ]      49-57        Сквозные тесты                                               warn 0   info 0
+    [ ]      58-64        Модульные тесты                                              warn 0   info 0
+    [ ]      65-71        Регрессионные тесты                                          warn 0   info 0
+    [ ]      72-76      Критерии приёмки                                             warn 0   info 0
+    [ ]      77-81      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-66-deploy-prod-nginx-secrets.md
+    [ ]        1-4    Задача 001.66: Промышленный профиль Compose, nginx mTLS и    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-27        Новые файлы                                                  warn 0   info 0
+    [ ]      28-29        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      30-33          Файл: `deploy/nginx/nginx.conf`                              warn 0   info 0
+    [ ]      34-39        Интеграция компонентов                                       warn 0   info 0
+    [ ]      40-41      Тестовые случаи                                              warn 0   info 0
+    [ ]      42-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-54        Модульные тесты                                              warn 0   info 0
+    [ ]      55-61        Регрессионные тесты                                          warn 0   info 0
+    [ ]      62-67      Критерии приёмки                                             warn 0   info 0
+    [ ]      68-72      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-67-backup-restore-generation.md
+    [ ]        1-4    Задача 001.67: Резервное копирование pgbackrest, метка пок   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-28        Новые файлы                                                  warn 0   info 0
+    [ ]      29-30        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      31-34          Файл: `control-plane/app/main.py`                            warn 0   info 0
+    [ ]      35-40        Интеграция компонентов                                       warn 0   info 0
+    [ ]      41-42      Тестовые случаи                                              warn 0   info 0
+    [ ]      43-51        Сквозные тесты                                               warn 0   info 0
+    [ ]      52-58        Модульные тесты                                              warn 0   info 0
+    [ ]      59-65        Регрессионные тесты                                          warn 0   info 0
+    [ ]      66-70      Критерии приёмки                                             warn 0   info 0
+    [ ]      71-75      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-68-observability-alerts.md
+    [ ]        1-4    Задача 001.68: Метрики, Prometheus, Alertmanager, правила    warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-29        Новые файлы                                                  warn 0   info 0
+    [ ]      30-31        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      32-35          Файл: `control-plane/app/main.py`                            warn 0   info 0
+    [ ]      36-41        Интеграция компонентов                                       warn 0   info 0
+    [ ]      42-43      Тестовые случаи                                              warn 0   info 0
+    [ ]      44-52        Сквозные тесты                                               warn 0   info 0
+    [ ]      53-56        Модульные тесты                                              warn 0   info 0
+    [ ]      57-63        Регрессионные тесты                                          warn 0   info 0
+    [ ]      64-68      Критерии приёмки                                             warn 0   info 0
+    [ ]      69-73      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-69-privacy-aup-retention-logic.md
+    [ ]        1-4    Задача 001.69: Правила использования при регистрации, обра   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/api/admin/nodes.py`                 warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/domain/users.py`                    warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/tests/e2e/test_privacy.py`              warn 0   info 0
+    [ ]      37-42        Интеграция компонентов                                       warn 0   info 0
+    [ ]      43-44      Тестовые случаи                                              warn 0   info 0
+    [ ]      45-53        Сквозные тесты                                               warn 0   info 0
+    [ ]      54-57        Модульные тесты                                              warn 0   info 0
+    [ ]      58-64        Регрессионные тесты                                          warn 0   info 0
+    [ ]      65-69      Критерии приёмки                                             warn 0   info 0
+    [ ]      70-74      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-70-status-page-announcements.md
+    [ ]        1-4    Задача 001.70: Страница состояния вне контура и независимы   warn 0   info 0
+    [ ]       5-11      Связь со сценариями                                          warn 0   info 0
+    [ ]      12-19      Цель задачи                                                  warn 0   info 0
+    [ ]      20-21      Описание изменений                                           warn 0   info 0
+    [ ]      22-25        Новые файлы                                                  warn 0   info 0
+    [ ]      26-31        Интеграция компонентов                                       warn 0   info 0
+    [ ]      32-33      Тестовые случаи                                              warn 0   info 0
+    [ ]      34-39        Сквозные тесты                                               warn 0   info 0
+    [ ]      40-43        Модульные тесты                                              warn 0   info 0
+    [ ]      44-50        Регрессионные тесты                                          warn 0   info 0
+    [ ]      51-55      Критерии приёмки                                             warn 0   info 0
+    [ ]      56-60      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-71-documentation-openapi-runbooks.md
+    [ ]        1-4    Задача 001.71: Документация: OpenAPI, руководство оператор   warn 0   info 0
+    [ ]       5-13      Связь со сценариями                                          warn 0   info 0
+    [ ]      14-21      Цель задачи                                                  warn 0   info 0
+    [ ]      22-23      Описание изменений                                           warn 0   info 0
+    [ ]      24-30        Новые файлы                                                  warn 0   info 0
+    [ ]      31-32        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      33-36          Файл: `.github/workflows/ci.yml`                             warn 0   info 0
+    [ ]      37-42        Интеграция компонентов                                       warn 0   info 0
+    [ ]      43-44      Тестовые случаи                                              warn 0   info 0
+    [ ]      45-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-54        Модульные тесты                                              warn 0   info 0
+    [ ]      55-61        Регрессионные тесты                                          warn 0   info 0
+    [ ]      62-66      Критерии приёмки                                             warn 0   info 0
+    [ ]      67-71      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-72-rate-limiting-coverage.md
+    [ ]        1-4    Задача 001.72: Ограничение частоты: полный перечень эндпои   warn 0   info 0
+    [ ]       5-12      Связь со сценариями                                          warn 0   info 0
+    [ ]      13-20      Цель задачи                                                  warn 0   info 0
+    [ ]      21-22      Описание изменений                                           warn 0   info 0
+    [ ]      23-24        Изменения в существующих файлах                              warn 0   info 0
+    [ ]      25-28          Файл: `control-plane/app/security/ratelimit.py`              warn 0   info 0
+    [ ]      29-32          Файл: `control-plane/app/agent_api/deps.py`                  warn 0   info 0
+    [ ]      33-36          Файл: `control-plane/tests/e2e/test_ratelimit.py`            warn 0   info 0
+    [ ]      37-42        Интеграция компонентов                                       warn 0   info 0
+    [ ]      43-44      Тестовые случаи                                              warn 0   info 0
+    [ ]      45-50        Сквозные тесты                                               warn 0   info 0
+    [ ]      51-57        Модульные тесты                                              warn 0   info 0
+    [ ]      58-64        Регрессионные тесты                                          warn 0   info 0
+    [ ]      65-69      Критерии приёмки                                             warn 0   info 0
+    [ ]      70-74      Примечания                                                   warn 0   info 0
+  docs/tasks/task-001-73-stand-acceptance-e2e.md
+    [ ]        1-4    Задача 001.73: Стенд: сквозной срез, приёмка клиентами, на   warn 0   info 0
+    [ ]       5-18      Связь со сценариями                                          warn 0   info 0
+    [ ]      19-27      Цель задачи                                                  warn 0   info 1
+    [ ]      28-29      Описание изменений                                           warn 0   info 0
+    [ ]      30-35        Новые файлы                                                  warn 0   info 0
+    [ ]      36-42        Интеграция компонентов                                       warn 0   info 0
+    [ ]      43-44      Тестовые случаи                                              warn 0   info 0
+    [ ]      45-59        Сквозные тесты                                               warn 0   info 0
+    [ ]      60-63        Модульные тесты                                              warn 0   info 0
+    [ ]      64-70        Регрессионные тесты                                          warn 0   info 0
+    [ ]      71-76      Критерии приёмки                                             warn 0   info 0
+    [ ]      77-82      Примечания                                                   warn 0   info 0
