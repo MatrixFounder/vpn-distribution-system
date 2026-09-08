@@ -1,0 +1,51 @@
+"""Ожидания по модели данных (docs/architectures/data-model.md), общие для тестов миграций."""
+
+from __future__ import annotations
+
+# Перечисления §4.2 модели данных: имя → значения в порядке объявления.
+EXPECTED_ENUMS: dict[str, list[str]] = {
+    "user_status": ["active", "blocked", "deleted"],
+    "admin_role": ["super_admin", "admin", "operator", "support"],
+    "admin_status": ["active", "blocked"],
+    "email_token_kind": ["verify", "reset"],
+    "auth_event_kind": ["register", "login", "logout", "reset"],
+    "plan_status": ["active", "archived"],
+    "inbound_profile": ["vless_raw_vision", "vless_xhttp", "trojan_reality"],
+    "node_status": [
+        "pending",
+        "provisioning",
+        "active",
+        "degraded",
+        "offline",
+        "maintenance",
+        "disabled",
+        "suspended",
+    ],
+    "user_node_state": ["active", "suspended_quota", "suspended_admin", "expired", "removed"],
+    "command_type": ["restart_xray", "rotate_credentials", "collect_diagnostics", "update_agent"],
+    "command_status": ["issued", "delivered", "applied", "failed", "expired"],
+    "subscription_state": ["none", "active", "suspended_quota", "suspended_admin", "expired"],
+    "period_source": ["redeem", "admin", "order"],
+    "balance_source": ["report", "adjustment", "bonus", "late_report"],
+    "code_kind": ["redeem", "promo"],
+    "report_status": ["accepted", "duplicate", "rejected_time", "held_anomaly"],
+    "reconciliation_kind": ["arithmetic", "cross_source", "continuity"],
+    "event_type": [
+        "subscription_activated",
+        "subscription_expiring",
+        "subscription_expired",
+        "traffic_80",
+        "traffic_95",
+        "traffic_exhausted",
+        "node_address_changed",
+        "node_offline",
+        "node_recovered",
+        "node_suspended_by_provider",
+        "reconciliation_mismatch",
+        "node_report_buffer_full",
+    ],
+    "delivery_status": ["pending", "sent", "bounced", "failed"],
+    "job_queue": ["critical", "background"],
+    "job_status": ["pending", "running", "done", "failed", "dead"],
+    "actor_type": ["admin", "user", "system"],
+}

@@ -1,7 +1,8 @@
 """Команды обслуживания Control Plane (`python -m app.cli …`).
 
 - ``migrate`` — применить миграции yoyo из ``control-plane/migrations`` под ролью ``app_migrate``
-  (docs/architectures/data-model.md §4.6, deployment.md §10.2); ``--rollback-all`` откатывает все.
+  (docs/architectures/data-model.md §4.6, deployment.md §10.2); ``--rollback`` откатывает последнюю
+  применённую, ``--rollback-all`` — все.
   Подключение: ``MIGRATE_DSN`` (``postgresql://app_migrate@host:5432/db`` — пароль из файла
   ``MIGRATE_PASSWORD_FILE``, либо полный URL с паролем). Миграции выполняются с блокировкой yoyo,
   поэтому несколько экземпляров ``api`` при старте не мешают друг другу.
@@ -60,8 +61,9 @@ def migrate_dsn(dsn: str | None = None, password_file: str | None = None) -> str
     return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-def run_migrate(dsn: str, *, rollback_all: bool = False) -> int:
-    """Применить (или откатить все) миграции из ``MIGRATIONS_DIR``; возвращает код завершения."""
+def run_migrate(dsn: str, *, rollback: bool = False, rollback_all: bool = False) -> int:
+    """Применить миграции из ``MIGRATIONS_DIR``, либо откатить последнюю (``rollback``) или все
+    (``rollback_all``); возвращает код завершения."""
     from psycopg import OperationalError
     from yoyo import get_backend, read_migrations
 
@@ -73,8 +75,10 @@ def run_migrate(dsn: str, *, rollback_all: bool = False) -> int:
         return 1
     migrations = read_migrations(str(MIGRATIONS_DIR))
     with backend.lock():
-        if rollback_all:
+        if rollback or rollback_all:
             selected = backend.to_rollback(migrations)
+            if rollback:
+                selected = selected[:1]  # новейшая применённая
             backend.rollback_migrations(selected)
             print(f"migrate: откачено миграций — {len(selected)}")
         else:
@@ -85,11 +89,13 @@ def run_migrate(dsn: str, *, rollback_all: bool = False) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Разбор аргументов: ``migrate [--rollback-all]``, ``admin create``."""
+    """Разбор аргументов: ``migrate [--rollback | --rollback-all]``, ``admin create``."""
     parser = argparse.ArgumentParser(prog="python -m app.cli", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     migrate = sub.add_parser("migrate", help="применить миграции yoyo под ролью app_migrate")
-    migrate.add_argument(
+    direction = migrate.add_mutually_exclusive_group()
+    direction.add_argument("--rollback", action="store_true", help="откатить последнюю миграцию")
+    direction.add_argument(
         "--rollback-all", action="store_true", help="откатить все применённые миграции"
     )
     admin = sub.add_parser("admin", help="управление административными учётными записями")
@@ -105,7 +111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = build_parser().parse_args(argv)
     if args.command == "migrate":
-        return run_migrate(migrate_dsn(), rollback_all=args.rollback_all)
+        return run_migrate(migrate_dsn(), rollback=args.rollback, rollback_all=args.rollback_all)
     if args.command == "admin" and args.admin_command == "create":
         print(
             "admin create: реализуется задачей 001.47 (первый Super Admin, §10.4)", file=sys.stderr

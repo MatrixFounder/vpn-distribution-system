@@ -27,7 +27,21 @@
 
 ### Интеграция компонентов
 
-Таблицы создаются ролью `app_migrate`; права `app_rw` выдаются в той же миграции по перечню §4.6.
+Таблицы создаются ролью `app_migrate`; права `app_rw` выдаются в той же миграции по перечню §4.6
+(уточнено при реализации: через умолчания привилегий `app_owner` из миграции 0001 — объекты
+создаются под `SET LOCAL ROLE app_owner`, `app_rw` получает DML, `app_backup` — SELECT автоматически;
+особых запретов у этой группы нет). Для TC-E2E-01 в `app.cli migrate` добавлен откат на один шаг
+(`--rollback`).
+
+Модуль TC-UNIT-01 назван `test_schema_identity.py`, чтобы регрессионная команда `-k 'schema_identity'`
+его выбирала; рядом `test_sequence_privileges` (права на `auth_events_id_seq`) и
+`test_catalog_matches_data_model` — сверка колонок, ограничений, индексов и ключа партиционирования
+с §4.2.1.
+
+Отклонения от §4.2.1, принятые при реализации: умолчания `status`/`language`/`timezone`/
+`announce_consent`/`created_at`/`updated_at`/`ts`; индекс по внешнему ключу `email_tokens (user_id)`;
+`CHECK (result IN ('success', 'denied'))` на `auth_events`. `language` — `text` без `CHECK`:
+третий язык добавляется без изменения схемы (R-51, AC-22), список допустимых локалей — у приложения.
 
 <!-- contract:tests -->
 
@@ -45,8 +59,9 @@
 ### Модульные тесты
 
 1. **TC-UNIT-01:** Проверка прав роли `app_rw`
-   - Проверяемая функция: `tests/unit/db/test_grants.py::test_app_rw_privileges`
-   - Входные данные: каталог `information_schema.role_table_grants`
+   - Проверяемая функция: `tests/unit/db/test_schema_identity.py::test_app_rw_privileges` (модуль — по группе схемы, см. отклонения)
+   - Входные данные: каталог `information_schema.role_table_grants` (при реализации заменён на
+     `has_table_privilege`: из сессии `app_rw` каталог показывает только собственные права)
    - Ожидаемый результат: права совпадают с перечнем §4.6
 
 ### Регрессионные тесты

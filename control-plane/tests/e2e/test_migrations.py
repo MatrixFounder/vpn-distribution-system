@@ -8,91 +8,17 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 import asyncpg
 import psycopg
-import pytest
 from app.cli import migrate_dsn
 
-CONTROL_PLANE_DIR = Path(__file__).resolve().parents[2]
+from ._cli import MIGRATIONS_DIR, migration_count, run_cli
+from ._spec import EXPECTED_ENUMS
 
-# Перечисления §4.2 модели данных: имя → значения в порядке объявления.
-EXPECTED_ENUMS: dict[str, list[str]] = {
-    "user_status": ["active", "blocked", "deleted"],
-    "admin_role": ["super_admin", "admin", "operator", "support"],
-    "admin_status": ["active", "blocked"],
-    "email_token_kind": ["verify", "reset"],
-    "auth_event_kind": ["register", "login", "logout", "reset"],
-    "plan_status": ["active", "archived"],
-    "inbound_profile": ["vless_raw_vision", "vless_xhttp", "trojan_reality"],
-    "node_status": [
-        "pending",
-        "provisioning",
-        "active",
-        "degraded",
-        "offline",
-        "maintenance",
-        "disabled",
-        "suspended",
-    ],
-    "user_node_state": ["active", "suspended_quota", "suspended_admin", "expired", "removed"],
-    "command_type": ["restart_xray", "rotate_credentials", "collect_diagnostics", "update_agent"],
-    "command_status": ["issued", "delivered", "applied", "failed", "expired"],
-    "subscription_state": ["none", "active", "suspended_quota", "suspended_admin", "expired"],
-    "period_source": ["redeem", "admin", "order"],
-    "balance_source": ["report", "adjustment", "bonus", "late_report"],
-    "code_kind": ["redeem", "promo"],
-    "report_status": ["accepted", "duplicate", "rejected_time", "held_anomaly"],
-    "reconciliation_kind": ["arithmetic", "cross_source", "continuity"],
-    "event_type": [
-        "subscription_activated",
-        "subscription_expiring",
-        "subscription_expired",
-        "traffic_80",
-        "traffic_95",
-        "traffic_exhausted",
-        "node_address_changed",
-        "node_offline",
-        "node_recovered",
-        "node_suspended_by_provider",
-        "reconciliation_mismatch",
-        "node_report_buffer_full",
-    ],
-    "delivery_status": ["pending", "sent", "bounced", "failed"],
-    "job_queue": ["critical", "background"],
-    "job_status": ["pending", "running", "done", "failed", "dead"],
-    "actor_type": ["admin", "user", "system"],
-}
 EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
 EXPECTED_ROLES = {"app_owner", "app_rw", "app_migrate", "app_backup"}
 # Служебные таблицы yoyo — единственные объекты, которыми в public владеет app_migrate.
 YOYO_TABLES = {"_yoyo_migration", "_yoyo_log", "_yoyo_version", "yoyo_lock"}
-MIGRATIONS_DIR = CONTROL_PLANE_DIR / "migrations"
-
-
-@pytest.fixture(scope="session")
-def migrate_env() -> dict[str, str]:
-    """Окружение CLI миграций: ``MIGRATE_DSN`` по умолчанию — стенд разработки под app_migrate."""
-    env = dict(os.environ)
-    env.setdefault("MIGRATE_DSN", "postgresql://app_migrate:app@127.0.0.1:5432/control_plane")
-    return env
-
-
-def run_cli(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
-    """Запустить ``python -m app.cli`` из каталога control-plane и вернуть результат."""
-    return subprocess.run(  # noqa: S603 — аргументы фиксированы тестом
-        [sys.executable, "-m", "app.cli", *args],
-        cwd=CONTROL_PLANE_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
 
 
 def _acl_by_scope(rows: list[asyncpg.Record]) -> dict[tuple[str, str], set[str]]:
@@ -212,7 +138,7 @@ async def test_migration_0001_apply_rollback_apply(
     # ничего не применяет, и только здесь текущие файлы миграций реально выполняются.
     reapplied = run_cli(migrate_env, "migrate")
     assert reapplied.returncode == 0, reapplied.stderr
-    assert "применено — 1" in reapplied.stdout
+    assert f"применено — {migration_count()}" in reapplied.stdout
     assert_migrated_state(await db_state(pg_dsn), migrate_env)
 
 
