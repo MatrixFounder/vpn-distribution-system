@@ -1,0 +1,7 @@
+# Контекст сборки control-plane/Dockerfile: только app/, requirements.lock, docker-entrypoint.sh.
+*
+!app/
+!requirements.lock
+!docker-entrypoint.sh
+**/__pycache__/
+**/.AGENTS.md

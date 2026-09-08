@@ -28,6 +28,10 @@
 # <<< end agentic-development framework <<<
 
 # >>> project >>>
+# Проектный скилл skills/vm-deploy подключён симлинками в каталоги фреймворка (см. блок выше)
+!/.agent/skills/vm-deploy
+!/.claude/skills/vm-deploy
+
 # OS / editors
 .DS_Store
 Thumbs.db
@@ -48,14 +52,17 @@ Thumbs.db
 !**/testdata/*.key
 !contracts/**/*.pem
 !contracts/**/*.key
-secrets/
-deploy/secrets/
+# Docker secrets и сертификаты стенда: в репозитории только README (git не спускается в
+# исключённый каталог, поэтому исключается содержимое, а не сам каталог)
+deploy/compose/secrets/*
+!deploy/compose/secrets/README.md
 deploy/**/*.local.yml
 
 # Python — control-plane/
 __pycache__/
 *.py[cod]
 *.egg-info/
+control-plane/build/
 .venv/
 venv/
 .pytest_cache/

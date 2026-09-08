@@ -1,0 +1,33 @@
+# Переопределения для окружения «Разработка» (§10.1) поверх docker-compose.yml:
+# PostgreSQL и Redis публикуются на хост (по умолчанию только 127.0.0.1 — тесты control-plane
+# ходят по PG_DSN/REDIS_URL из conftest.py), исходники приложения монтируются в контейнеры,
+# api перезапускается при изменении файлов (APP_RELOAD; имена UVICORN_* заняты самим uvicorn).
+#
+# Переменные: DEV_BIND_ADDR, PG_HOST_PORT, REDIS_HOST_PORT — см. .env.example.
+
+services:
+  postgres:
+    ports:
+      - "${DEV_BIND_ADDR:-127.0.0.1}:${PG_HOST_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${DEV_BIND_ADDR:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
+
+  api:
+    volumes:
+      - ../../control-plane/app:/app/app:ro
+    environment:
+      APP_RELOAD: "1"
+
+  worker-critical:
+    volumes:
+      - ../../control-plane/app:/app/app:ro
+
+  worker-background:
+    volumes:
+      - ../../control-plane/app:/app/app:ro
+
+  scheduler:
+    volumes:
+      - ../../control-plane/app:/app/app:ro
