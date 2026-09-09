@@ -20,6 +20,10 @@ if [ "$(id -u)" = "0" ]; then
         done
         chown app:app /run/secrets && chmod 0700 /run/secrets
     fi
+    # setpriv сохраняет окружение root, включая HOME=/root: asyncpg ищет клиентский сертификат
+    # в ~/.postgresql/ и на закрытом /root падает PermissionError (найдено в 001.11 на ролях
+    # worker/scheduler). HOME — домашний каталог app из passwd; USER — для журналов.
+    export HOME=/app USER=app
     exec setpriv --reuid=app --regid=app --init-groups --inh-caps=-all --no-new-privs "$0" "$@"
 fi
 

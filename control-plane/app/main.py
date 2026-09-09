@@ -19,6 +19,7 @@ from app.agent_api.router import router as agent_router
 from app.api.router import router as api_router
 from app.db.pool import close_pool
 from app.errors import install_error_handlers
+from app.metrics import render as render_metrics
 from app.redis import close_redis
 from app.subscription.router import router as subscription_router
 
@@ -61,11 +62,7 @@ def create_app() -> FastAPI:
 
     @app.get("/metrics", include_in_schema=False, response_class=PlainTextResponse)
     async def metrics() -> str:
-        """Экспозиция Prometheus (§5.4); до задачи 001.68 — один показатель живости."""
-        return (
-            "# HELP control_plane_up Процесс Control Plane запущен.\n"
-            "# TYPE control_plane_up gauge\n"
-            "control_plane_up 1\n"
-        )
+        """Экспозиция Prometheus (§5.4): живость, доступность базы, глубина очереди задач."""
+        return await render_metrics()
 
     return app
