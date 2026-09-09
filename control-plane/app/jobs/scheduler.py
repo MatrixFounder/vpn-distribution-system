@@ -90,21 +90,17 @@ async def tick(
         if placed is not None and placed.get(periodic.name) == slot:
             continue
         async with pool.acquire() as conn, conn.transaction():
-            try:
-                await jobs.enqueue(
-                    conn,
-                    periodic.queue,
-                    periodic.type,
-                    periodic.payload,
-                    periodic.idempotency_key(now),
-                )
-            except jobs.DuplicateJobError:
-                if placed is not None:
-                    placed[periodic.name] = slot
-                continue  # слот уже поставлен другим экземпляром
+            result = await jobs.enqueue(
+                conn,
+                periodic.queue,
+                periodic.type,
+                periodic.payload,
+                periodic.idempotency_key(now),
+            )
         if placed is not None:
             placed[periodic.name] = slot
-        enqueued += 1
+        if result.created:  # иначе слот уже поставлен другим экземпляром
+            enqueued += 1
     return enqueued
 
 

@@ -25,6 +25,7 @@ PREFIX = "test-jobs:"  # ключи идемпотентности задач, �
 NOOP = "test-noop"  # тип задачи, известный только процессу тестов
 BOOM = "test-boom"  # тип задачи, обработчик которого падает
 VANISH = "test-vanish"  # тип задачи, обработчик которого удаляет её строку
+FATAL = "test-fatal"  # тип задачи, обработчик которого отказывается без повторов (001.74)
 TEST_LOCK_KEY = 0x7E57_0000_0000_0000 | (os.getpid() & 0xFFFF_FFFF)  # ключ лидерства тестов
 
 
@@ -39,6 +40,11 @@ async def boom(conn: asyncpg.Connection, job: jobs.Job) -> None:
 async def vanish(conn: asyncpg.Connection, job: jobs.Job) -> None:
     """Строка задачи исчезает во время обработки (уборка, оператор): завершать нечего."""
     await conn.execute("delete from jobs where id = $1", job.id)
+
+
+async def fatal(conn: asyncpg.Connection, job: jobs.Job) -> None:
+    """Обработчик знает, что повторять бессмысленно (например, получателя не существует)."""
+    raise jobs.NonRetryableError(f"без повторов {job.payload.get('x')}")
 
 
 @asynccontextmanager
@@ -57,6 +63,7 @@ async def stand_pool(
     monkeypatch.setitem(HANDLERS, NOOP, noop)
     monkeypatch.setitem(HANDLERS, BOOM, boom)
     monkeypatch.setitem(HANDLERS, VANISH, vanish)
+    monkeypatch.setitem(HANDLERS, FATAL, fatal)
     await pool_module.close_pool()
     pool = await pool_module.get_pool()
     await cleanup(pool)
@@ -76,6 +83,18 @@ async def job_row(pool: asyncpg.Pool, job_id: int) -> dict[str, object]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "select status::text, attempts, locked_at, locked_by, last_error from jobs "
+            "where id = $1",
+            job_id,
+        )
+    assert row is not None, job_id
+    return dict(row)
+
+
+async def job_times(pool: asyncpg.Pool, job_id: int) -> dict[str, object]:
+    """Времена задачи: постановка, готовность, последняя выборка и завершение (001.74)."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "select created_at, run_at, claimed_at, finished_at, status::text from jobs "
             "where id = $1",
             job_id,
         )

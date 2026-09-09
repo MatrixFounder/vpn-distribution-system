@@ -69,6 +69,8 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("status", "job_status", False, "'pending'::job_status"),
         ("last_error", "text", True, None),
         ("created_at", "timestamptz", False, "now()"),
+        ("claimed_at", "timestamptz", True, None),  # 110 (001.74)
+        ("finished_at", "timestamptz", True, None),  # 110 (001.74)
     ],
     "audit_log": [
         ("id", "int8", False, None),
@@ -148,6 +150,8 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
         "(idempotency_key) WHERE (status = ANY (ARRAY['pending'::job_status, "
         "'running'::job_status]))",
         "CREATE UNIQUE INDEX jobs_pkey ON control_plane.jobs USING btree (id)",
+        "CREATE INDEX jobs_claimed_at_idx ON control_plane.jobs USING btree (claimed_at) "
+        "WHERE (claimed_at IS NOT NULL)",  # 110 (001.74)
     },
     "audit_log": {
         "CREATE INDEX audit_log_actor_id_ts_idx ON control_plane.audit_log USING btree "

@@ -586,7 +586,10 @@ jobs
   status                 job_status               — pending | running | done | failed | dead
   last_error             text NULL
   created_at             timestamptz
+  claimed_at             timestamptz NULL         — последняя выборка; остаётся после завершения (ожидание выбранной = claimed_at − run_at, готовой невыбранной = now() − run_at)
+  finished_at            timestamptz NULL         — done | failed | dead
   INDEX (queue, status, run_at) WHERE status = 'pending'
+  INDEX (claimed_at) WHERE claimed_at IS NOT NULL — окно метрики ожидания
   UNIQUE (idempotency_key) WHERE status IN ('pending', 'running')
 
 audit_log                                          — append-only (§7.2)

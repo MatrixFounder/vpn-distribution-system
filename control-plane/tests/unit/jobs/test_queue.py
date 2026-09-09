@@ -36,3 +36,14 @@ def test_periodic_slot_and_key() -> None:
     assert periodic.idempotency_key(t0) == periodic.idempotency_key(t0 + dt.timedelta(minutes=59))
     assert periodic.idempotency_key(t0) != periodic.idempotency_key(t0 + dt.timedelta(hours=1))
     assert periodic.idempotency_key(t0).startswith("aggregate:")
+
+
+# EXPECTED_FAIL_REASON: AttributeError: queue.Enqueued — задача 001.74
+def test_enqueue_result_carries_id_and_creation_flag() -> None:
+    """``enqueue`` возвращает существующую активную задачу вместо ошибки (001.74): результат
+    несёт идентификатор и признак «создана сейчас», чтобы планировщик считал только новые."""
+    created = jobs.Enqueued(id=7, created=True)
+    assert (created.id, created.created) == (7, True)
+    assert created == (7, True), "именованный кортеж: копируется и сравнивается как значение"
+    assert not hasattr(jobs, "DuplicateJobError"), "дубль активного ключа — не ошибка"
+    assert "locked_at < now() - $4::interval" in jobs.CLAIM_SQL, "аренда брошенных running"
