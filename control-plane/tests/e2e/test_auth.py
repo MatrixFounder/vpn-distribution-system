@@ -737,11 +737,16 @@ async def test_logout_requires_csrf_and_revokes_sessions(pg_dsn: str, redis_url:
             client.cookies.clear()
 
             client.cookies.set("sid", sid)
-            missing = await client.post("/api/v1/auth/logout")
-            assert missing.status_code == 403 and missing.json()["error"]["code"] == "csrf_failed"
-            forged = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "x" * 43})
-            assert forged.status_code == 403
-            assert await store.get(sid) is not None, "сессия цела после отказов CSRF"
+            # §7.3 на обеих мутациях раздела: без заголовка и с подделанным — 403, сессии целы
+            # (для logout-all это охраняется отдельно: ревью 001.84, B-1).
+            for path in ("/api/v1/auth/logout", "/api/v1/auth/logout-all"):
+                missing = await client.post(path)
+                assert missing.status_code == 403, (path, missing.text)
+                assert missing.json()["error"]["code"] == "csrf_failed"
+                forged = await client.post(path, headers={"X-CSRF-Token": "x" * 43})
+                assert forged.status_code == 403, path
+                assert await store.get(sid) is not None, f"{path}: сессия цела после отказов CSRF"
+                assert await store.get(other_sid) is not None, f"{path}: чужая сессия цела"
 
             logout = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
             assert logout.status_code == 204
