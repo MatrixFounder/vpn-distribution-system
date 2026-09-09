@@ -145,6 +145,23 @@ async def test_migration_0001_apply_rollback_apply(
     assert reapplied.returncode == 0, reapplied.stderr
     assert f"применено — {migration_count()}" in reapplied.stdout
     assert_migrated_state(await db_state(pg_dsn), migrate_env)
+    # Посевы настроек — по состоянию свежепримененной базы, не по тексту файлов (100, 120).
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        seeded = {
+            r["key"]: r["value"]
+            for r in await conn.fetch(
+                "select key, value::text from settings where key in "
+                "('registration_mode', 'captcha', 'email_token_ttl_minutes')"
+            )
+        }
+    finally:
+        await conn.close()
+    assert seeded == {
+        "registration_mode": '"open"',
+        "captcha": '{"enabled": false}',
+        "email_token_ttl_minutes": "15",  # ОВ-25
+    }
 
 
 def assert_migrated_state(state: dict[str, object], migrate_env: dict[str, str]) -> None:

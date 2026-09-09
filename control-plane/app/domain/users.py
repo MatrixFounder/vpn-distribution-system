@@ -6,8 +6,9 @@ security.md §7.1). Задача 001.14: настоящая логика пов�
 ``settings.registration_mode`` (``open`` | ``invite`` | ``closed``); CAPTCHA — ``settings.captcha``
 и внешний ``CaptchaVerifier`` (провайдер — открытый вопрос ОВ-A3: по умолчанию включённая CAPTCHA
 без проверяющего отклоняет запрос, fail-closed). Ссылки подтверждения и восстановления —
-одноразовые токены ``email_tokens`` (хранится только SHA-256, срок ОВ-25: подтверждение 24 ч,
-восстановление 1 ч — умолчания до решения); письмо ставится в очередь ``background`` задачей
+одноразовые токены ``email_tokens`` (хранится только SHA-256; срок — настройка
+``settings.email_token_ttl_minutes``, по умолчанию 15 минут для обоих видов ссылок — решение
+ОВ-25); письмо ставится в очередь ``background`` задачей
 ``send_email`` (обработчик — 001.52), полезная нагрузка содержит токен, который получатель и
 должен получить. Все ошибки — ``ApiError`` единого формата.
 """
@@ -31,8 +32,8 @@ from app.security.passwords import hash_password, verify_password
 UserId = uuid.UUID
 RegistrationMode = Literal["open", "invite", "closed"]
 
-VERIFY_TOKEN_TTL = dt.timedelta(hours=24)  # ОВ-25, умолчание
-RESET_TOKEN_TTL = dt.timedelta(hours=1)  # ОВ-25, умолчание
+DEFAULT_EMAIL_TOKEN_TTL_MINUTES = 15  # ОВ-25: умолчание настройки email_token_ttl_minutes
+MAX_EMAIL_TOKEN_TTL_MINUTES = 24 * 60  # опечатка «секунды вместо минут» не даст ссылку на дни
 EMAIL_QUEUE = "background"
 EMAIL_JOB_TYPE = "send_email"
 
@@ -77,6 +78,23 @@ class CaptchaAnswer:
         return self._verified
 
 
+def email_token_ttl(minutes: object) -> dt.timedelta:
+    """Срок ссылки из значения настройки ``email_token_ttl_minutes`` (ОВ-25): целое число минут
+    от 1 до суток; иное значение — ошибка конфигурации (громкий 500, а не молчаливое умолчание).
+    Срок фиксируется в момент выдачи (``expires_at``): смена настройки на выданные ссылки не
+    действует."""
+    if (
+        isinstance(minutes, bool)
+        or not isinstance(minutes, int)
+        or not 1 <= minutes <= MAX_EMAIL_TOKEN_TTL_MINUTES
+    ):
+        raise ValueError(
+            f"email_token_ttl_minutes: ожидается целое число минут от 1 до "
+            f"{MAX_EMAIL_TOKEN_TTL_MINUTES}, не {minutes!r}"
+        )
+    return dt.timedelta(minutes=minutes)
+
+
 def normalize_email(email: str) -> str:
     """Нормализация §16.8: обрезка пробелов, нижний регистр всего адреса (домен и локальная
     часть — почтовые службы, где регистр локальной части значим, практически отсутствуют)."""
@@ -102,14 +120,17 @@ class UserService:
 
     async def _settings(self, conn: asyncpg.Connection) -> dict[str, Any]:
         rows = await conn.fetch(
-            "select key, value from settings "
-            "where key in ('registration_mode', 'disposable_email_domains', 'captcha')"
+            "select key, value from settings where key in ('registration_mode', "
+            "'disposable_email_domains', 'captcha', 'email_token_ttl_minutes')"
         )
         values = {row["key"]: _json(row["value"]) for row in rows}
         return {
             "registration_mode": values.get("registration_mode", "open"),
             "disposable_email_domains": values.get("disposable_email_domains", []),
             "captcha": values.get("captcha", {"enabled": False}),
+            "email_token_ttl": email_token_ttl(
+                values.get("email_token_ttl_minutes", DEFAULT_EMAIL_TOKEN_TTL_MINUTES)
+            ),
         }
 
     @property
@@ -177,7 +198,9 @@ class UserService:
             )
             if user_id is None:
                 raise ApiError("email_taken", "адрес уже зарегистрирован", status=409)
-            await self._issue_token(conn, user_id, "verify", VERIFY_TOKEN_TTL, address, lang)
+            await self._issue_token(
+                conn, user_id, "verify", settings["email_token_ttl"], address, lang
+            )
             await self._auth_event(conn, user_id, "register", ip, user_agent, "success")
         return user_id
 
@@ -233,6 +256,7 @@ class UserService:
         address = normalize_email(email)
         token = secrets.token_urlsafe(32)
         async with transaction(self._pool) as conn:
+            ttl = (await self._settings(conn))["email_token_ttl"]
             # Один и тот же набор запросов для любого адреса — без ветвления по существованию
             # записи: строка токена появляется лишь у подтверждённой активной записи (INSERT …
             # SELECT), письмо ставится в очередь в обоих случаях; различие во времени — только
@@ -247,7 +271,7 @@ class UserService:
                 "from issued join target on target.id = issued.user_id",
                 address,
                 hash_token(token),
-                RESET_TOKEN_TTL,
+                ttl,
             )
             payload: dict[str, Any] = {"kind": "reset_unknown", "to": address, "lang": lang}
             idempotency_key = f"email:unknown:{uuid.uuid4()}"

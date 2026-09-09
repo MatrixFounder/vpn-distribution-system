@@ -155,6 +155,7 @@ async def auth_stand(
         "registration_mode": "open",
         "disposable_email_domains": [],
         "captcha": {"enabled": False},
+        "email_token_ttl_minutes": 15,  # ОВ-25
     }
     async with pool.acquire() as conn:
         await conn.fetchval("select ensure_partitions(1)")  # auth_events сегодня и завтра

@@ -666,6 +666,87 @@ async def test_authenticate_costs_the_same_for_unknown_address(pg_dsn: str, redi
         )
 
 
+async def token_ttl_seconds(stand: AuthStand, token: str) -> float:
+    """Срок ссылки по часам базы: от сейчас до ``expires_at`` выданного токена."""
+    async with stand.pool.acquire() as conn:
+        seconds = await conn.fetchval(
+            "select extract(epoch from expires_at - now()) from email_tokens where token_hash = $1",
+            hash_token(token),
+        )
+    assert seconds is not None, "токен не найден"
+    return float(seconds)
+
+
+async def test_email_token_ttl_comes_from_settings(pg_dsn: str, redis_url: str) -> None:
+    """ОВ-25 (решение владельца): срок ссылок подтверждения и восстановления — настройка
+    ``email_token_ttl_minutes``, по умолчанию 15 минут; изменение настройки действует на обе
+    ссылки; неверное значение — ошибка конфигурации (500), а не тихое умолчание."""
+    async with auth_stand(pg_dsn, redis_url) as stand:
+        address = stand.email("ttl")
+        async with stand.client() as client:
+            response = await client.post(
+                "/api/v1/auth/register",
+                json={"email": address, "password": PASSWORD, "aup_version": "2026-09"},
+            )
+            assert response.status_code == 201, response.text
+            verify = await stand.mail_token(address, "verify")
+            assert 14 * 60 <= await token_ttl_seconds(stand, verify) <= 15 * 60, "настройка 15 мин"
+            # Умолчание кода — те же 15 минут, когда строки настройки нет; миграция 120 сеет 15.
+            async with stand.pool.acquire() as conn:
+                await conn.execute("delete from settings where key = 'email_token_ttl_minutes'")
+            missing = stand.email("nosetting")
+            created = await client.post(
+                "/api/v1/auth/register",
+                json={"email": missing, "password": PASSWORD, "aup_version": "1"},
+            )
+            assert created.status_code == 201, created.text
+            ttl = await token_ttl_seconds(stand, await stand.mail_token(missing, "verify"))
+            assert 14 * 60 <= ttl <= 15 * 60, f"умолчание кода 15 мин, не {ttl / 60:.0f}"
+            # Посев миграции 120 проверяется по базе в test_migrations (rollback-all → migrate).
+            assert (
+                await client.post("/api/v1/auth/verify", json={"token": verify})
+            ).status_code == 200
+
+            await stand.set_setting("email_token_ttl_minutes", 2)
+            assert (
+                await client.post("/api/v1/auth/reset-request", json={"email": address})
+            ).status_code == 202
+            reset = await stand.mail_token(address, "reset")
+            assert 60 <= await token_ttl_seconds(stand, reset) <= 2 * 60, "настройка: 2 минуты"
+
+            await stand.set_setting("email_token_ttl_minutes", 240)
+            long_lived = stand.email("ttl2")
+            second = await client.post(
+                "/api/v1/auth/register",
+                json={"email": long_lived, "password": PASSWORD, "aup_version": "1"},
+            )
+            assert second.status_code == 201, second.text
+            verify2 = await stand.mail_token(long_lived, "verify")
+            assert 239 * 60 <= await token_ttl_seconds(stand, verify2) <= 240 * 60
+            # Срок фиксируется при выдаче: укороченная настройка выданную ссылку не гасит.
+            await stand.set_setting("email_token_ttl_minutes", 1)
+            assert 238 * 60 <= await token_ttl_seconds(stand, verify2) <= 240 * 60
+            confirmed = await client.post("/api/v1/auth/verify", json={"token": verify2})
+            assert confirmed.status_code == 200, confirmed.text
+
+            for i, bad in enumerate((0, -5, "15", 1.5, True, 24 * 60 + 1)):
+                await stand.set_setting("email_token_ttl_minutes", bad)
+                # Свой адрес на каждую пробу: порог восстановления — 3 в час по адресу; путь для
+                # неизвестного адреса тот же (настройка читается до выборки записи).
+                probe = stand.email(f"bad{i}")
+                broken = await client.post("/api/v1/auth/reset-request", json={"email": probe})
+                assert broken.status_code == 500, (bad, broken.text)
+                assert broken.json()["error"]["code"] == "internal_error"
+                assert await stand.mail_count(probe, "reset_unknown") == 0, "при ошибке писем нет"
+            bad_registration = stand.email("badreg")
+            refused = await client.post(
+                "/api/v1/auth/register",
+                json={"email": bad_registration, "password": PASSWORD, "aup_version": "1"},
+            )
+            assert refused.status_code == 500, "регистрация при негодной настройке — тот же 500"
+            assert await stand.user(bad_registration) is None, "запись не создана (транзакция)"
+
+
 async def test_uc15_a2_expired_and_foreign_links(pg_dsn: str, redis_url: str) -> None:
     """Просроченная ссылка и ссылка неверного вида → 410; чужой (неизвестный) токен → 410."""
     async with auth_stand(pg_dsn, redis_url) as stand:
