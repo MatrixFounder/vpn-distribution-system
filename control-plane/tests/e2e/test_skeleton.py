@@ -87,7 +87,6 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
 @pytest.mark.parametrize(
     ("method", "path", "operation"),
     [
-        ("GET", "/api/v1/admin/dashboard", "admin.dashboard"),
         ("POST", "/agent/v1/enroll", "agent.enroll"),
         ("GET", "/agent/v1/state?config_version=0&users_seq=0&generation=0", "agent.state"),
         ("GET", "/s/sometoken", "subscription.get"),

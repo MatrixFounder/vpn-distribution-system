@@ -109,13 +109,12 @@ async def test_fail_closed_is_bounded_when_redis_accepts_but_never_answers(
         await server.wait_closed()
 
 
-async def test_current_user_active_other_deps_stubbed() -> None:
-    """``current_user`` действует с 001.15: без cookie — 401 до обращения к Redis; администратор
-    и разрешения — заглушки до 001.46/001.47."""
-    with pytest.raises(ApiError) as denied:
-        await deps.current_user(_request("GET"))
-    assert (denied.value.status, denied.value.code) == (401, "unauthenticated")
-    with pytest.raises(NotImplementedError):
-        await deps.current_admin(_request("GET"))
+async def test_current_user_and_admin_active_permission_stubbed() -> None:
+    """``current_user`` действует с 001.15, ``current_admin`` — с 001.18 (минимальный вид: сессия
+    вида ``admin``): без cookie — 401 до обращения к Redis; разрешения — заглушка до 001.46."""
+    for dependency in (deps.current_user, deps.current_admin):
+        with pytest.raises(ApiError) as denied:
+            await dependency(_request("GET"))
+        assert (denied.value.status, denied.value.code) == (401, "unauthenticated")
     with pytest.raises(NotImplementedError, match="users.read"):
         await deps.require_permission("users.read")(_request("GET"))

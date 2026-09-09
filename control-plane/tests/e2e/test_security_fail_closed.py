@@ -10,6 +10,7 @@ import pytest
 from app.main import create_app
 from app.redis import close_redis
 
+from ._admin import ADMIN_OPERATIONS
 from ._me import ME_OPERATIONS, REQUEST_BODY
 
 # Все семь маршрутов /auth с валидными телами: fail-closed должен закрывать каждый (§7.3, §9.1).
@@ -59,7 +60,12 @@ async def test_rate_limited_endpoints_fail_closed_without_redis(
                 assert cabinet.status_code == 503, (method, path, cabinet.text)
                 assert cabinet.headers["retry-after"] == "5", (method, path)
                 assert "set-cookie" not in cabinet.headers, (method, path)
-            assert (await client.get("/api/v1/admin/dashboard")).status_code == 501, (
+            # Панель тоже под сессиями (001.18): без Redis — 503 по всем операциям /admin.
+            for method, path, body in ADMIN_OPERATIONS:
+                panel = await client.request(method, path, json=body)
+                assert panel.status_code == 503, (method, path, panel.text)
+                assert panel.headers["retry-after"] == "5", (method, path)
+            assert (await client.get("/openapi.json")).status_code == 200, (
                 "без лимита и сессии — не зависит"
             )
             assert (await client.get("/healthz")).status_code == 200

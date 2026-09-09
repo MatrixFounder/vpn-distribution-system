@@ -2,14 +2,16 @@
 разрешения (R-35), fail-closed при недоступном Redis (§9.1). Задача 001.12 — интерфейс;
 ``redis_required`` действует с 001.12 (вход, восстановление, активация кодов и подписка отвечают
 503 без Redis); ``current_user`` — с 001.15 (сессия пользователя по cookie ``sid`` §7.1,
-хранилище 001.14); администратор и разрешения — ``NotImplementedError`` до 001.46/001.47."""
+хранилище 001.14); ``current_admin`` — с 001.18 в минимальном виде (сессия вида ``admin`` по
+той же cookie; подтверждённый второй фактор и роль — 001.47); ``require_permission`` —
+``NotImplementedError`` до 001.46, до него операции панели объявляют разрешение в OpenAPI
+(``x-permission``) и защищены только сессией администратора."""
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
 
 from fastapi import Request
 
@@ -56,9 +58,30 @@ async def current_user(request: Request) -> CurrentUser:
     return CurrentUser(id=user_id, session=session)
 
 
-async def current_admin(request: Request) -> Any:
-    """Администратор по сессии с подтверждённым вторым фактором — 001.47."""
-    raise NotImplementedError("current_admin — задача 001.47")
+@dataclass(frozen=True, slots=True)
+class CurrentAdmin:
+    """Аутентифицированный администратор: идентификатор ``admin_users.id`` и его сессия."""
+
+    id: uuid.UUID
+    session: Session
+
+
+async def current_admin(request: Request) -> CurrentAdmin:
+    """Администратор по сессионной cookie ``sid``: сессия вида ``admin`` с UUID-субъектом, иначе
+    401 ``unauthenticated`` (сессия пользователя панель не открывает). Минимальный вид 001.18:
+    сессии администраторов выдаёт 001.47 (пароль + TOTP), там же — проверка подтверждённого
+    второго фактора; роль и матрица разрешений — 001.46."""
+    sid = request.cookies.get(SESSION_COOKIE)
+    if not sid:
+        raise unauthenticated()
+    session = await SessionStore(await get_redis()).get(sid)
+    if session is None or session.kind != "admin":
+        raise unauthenticated()
+    try:
+        admin_id = uuid.UUID(session.subject_id)
+    except ValueError as exc:
+        raise unauthenticated() from exc
+    return CurrentAdmin(id=admin_id, session=session)
 
 
 def require_permission(name: str) -> Callable[[Request], Awaitable[None]]:
