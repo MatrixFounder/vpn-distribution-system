@@ -9,6 +9,10 @@
 --   app_rw      — C-01…C-03, только DML (привилегии на объекты — миграциями)
 --   app_migrate — миграции yoyo; член app_owner
 --   app_backup  — только чтение, для C-11
+--   app_audit_purge — без входа; единственный держатель DELETE на audit_log и владелец функции
+--                 purge_audit_log() (миграция 090, §4.6, §7.2). app_owner — член без наследования
+--                 (INHERIT FALSE, SET TRUE): прав роли не получает, но может SET ROLE — так миграции
+--                 создают и удаляют функцию; явный SET ROLE — единственный путь к DELETE мимо функции.
 --
 -- Все объекты Control Plane живут в схеме control_plane, а не в public: соседство с другими
 -- решениями в одном кластере не должно давать конфликтов имён. Роли приложения получают
@@ -48,6 +52,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_backup') THEN
         CREATE ROLE app_backup NOLOGIN;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_audit_purge') THEN
+        CREATE ROLE app_audit_purge NOLOGIN;
+    END IF;
 END
 $$;
 
@@ -56,12 +63,18 @@ ALTER ROLE app_migrate WITH LOGIN PASSWORD :'mig';
 ALTER ROLE app_backup  WITH LOGIN PASSWORD :'bk';
 
 -- Миграции создают объекты от имени app_owner (SET LOCAL ROLE); app_migrate наследует его права.
+-- app_owner может стать app_audit_purge (SET ROLE), но не наследует её DELETE на audit_log.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
                    JOIN pg_roles g ON g.oid = m.member
                    WHERE r.rolname = 'app_owner' AND g.rolname = 'app_migrate') THEN
         GRANT app_owner TO app_migrate;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid
+                   JOIN pg_roles g ON g.oid = m.member
+                   WHERE r.rolname = 'app_audit_purge' AND g.rolname = 'app_owner') THEN
+        GRANT app_audit_purge TO app_owner WITH INHERIT FALSE, SET TRUE;
     END IF;
 END
 $$;
@@ -75,9 +88,10 @@ GRANT CONNECT ON DATABASE :"db" TO app_rw, app_migrate, app_backup;
 -- Схема приложения; public остаётся пустым и в search_path ролей не входит.
 CREATE SCHEMA IF NOT EXISTS control_plane AUTHORIZATION app_owner;
 ALTER SCHEMA control_plane OWNER TO app_owner;  -- и для схемы, созданной ранее кем-то другим
-GRANT USAGE ON SCHEMA control_plane TO app_rw, app_backup;
+GRANT USAGE ON SCHEMA control_plane TO app_rw, app_backup, app_audit_purge;
 -- Служебные таблицы yoyo (_yoyo_migration, _yoyo_log, yoyo_lock) создаёт сам app_migrate.
 GRANT USAGE, CREATE ON SCHEMA control_plane TO app_migrate;
 ALTER ROLE app_rw      IN DATABASE :"db" SET search_path = control_plane;
 ALTER ROLE app_migrate IN DATABASE :"db" SET search_path = control_plane;
 ALTER ROLE app_backup  IN DATABASE :"db" SET search_path = control_plane;
+ALTER ROLE app_audit_purge IN DATABASE :"db" SET search_path = control_plane;

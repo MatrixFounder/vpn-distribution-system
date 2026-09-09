@@ -26,6 +26,7 @@ EXPECTED_SCHEMA_GRANTS: dict[str, set[str]] = {
     "app_rw": {"USAGE"},
     "app_backup": {"USAGE"},
     "app_migrate": {"USAGE", "CREATE"},
+    "app_audit_purge": {"USAGE"},  # CREATE — только на время создания функции в 090
 }
 
 

@@ -27,4 +27,4 @@ bk="$(secret pg_app_backup_password)"
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
     -v db="$POSTGRES_DB" -v rw="$rw" -v mig="$mig" -v bk="$bk" \
     -f /opt/control-plane/roles.sql
-echo "10-roles.sh: роли app_owner, app_rw, app_migrate, app_backup созданы"
+echo "10-roles.sh: роли app_owner, app_rw, app_migrate, app_backup, app_audit_purge созданы"

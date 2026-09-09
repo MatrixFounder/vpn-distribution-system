@@ -19,11 +19,10 @@ import uuid
 import asyncpg
 import psycopg
 import pytest
-from app.cli import migrate_dsn
 from psycopg import sql
 
 from ._cli import rollback_through, run_cli
-from ._db import existing_tables, insert_node, insert_plan, insert_user
+from ._db import existing_tables, insert_node, insert_plan, insert_user, owner_connection
 from ._spec import ACCOUNTING_TABLES, NODES_TABLES, SUBSCRIPTIONS_TABLES
 
 PROBE_DAY = dt.date(2000, 1, 1)  # вне окна планировщика
@@ -34,17 +33,6 @@ PARTITIONED = [
     "traffic_lines",
     "traffic_hourly",
 ]
-
-
-def owner_connection(migrate_env: dict[str, str]) -> psycopg.Connection:
-    """Подключение app_migrate с SET ROLE app_owner для операций владельца."""
-    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
-    conn = psycopg.connect(
-        dsn.replace("postgresql+psycopg://", "postgresql://", 1), autocommit=True
-    )
-    conn.execute("SET ROLE app_owner")
-    conn.execute("SET search_path TO control_plane")
-    return conn
 
 
 async def partitions(conn: asyncpg.Connection) -> dict[str, str]:

@@ -100,3 +100,11 @@ ACCOUNTING_TABLES = {
     "user_blocked_ips",
     "partition_policies",
 }
+OPS_TABLES = {
+    "events",
+    "email_deliveries",
+    "webhook_deliveries",
+    "jobs",
+    "audit_log",
+    "settings",
+}

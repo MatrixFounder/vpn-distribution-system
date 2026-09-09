@@ -18,7 +18,7 @@
 | `pgbackrest_key` | резервное копирование (задача 001.67) | ключ шифрования репозитория pgbackrest (Н-12) | `openssl rand -hex 32 \| tr -d '\n' > pgbackrest_key` |
 
 `pgbackrest_key` в `docker-compose.yml` пока не объявлен: его подключает задача 001.67.
-Роли `app_owner`, `app_rw`, `app_migrate`, `app_backup` создаёт `deploy/compose/postgres/initdb.d/10-roles.sh`
+Роли `app_owner`, `app_rw`, `app_migrate`, `app_backup`, `app_audit_purge` (без входа) создаёт `deploy/compose/postgres/initdb.d/10-roles.sh`
 при инициализации кластера (SQL — `control-plane/migrations/bootstrap/roles.sql`) с паролями из
 `pg_app_*_password` (обёртка `entrypoint.sh` при каждом старте копирует их в `/run/pg-secrets`
 пользователю `postgres`, скрипт initdb.d читает их только при инициализации). Приложение

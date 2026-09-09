@@ -16,9 +16,13 @@ from ._cli import MIGRATIONS_DIR, migration_count, run_cli
 from ._spec import EXPECTED_ENUMS
 
 EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
-EXPECTED_ROLES = {"app_owner", "app_rw", "app_migrate", "app_backup"}
+EXPECTED_ROLES = {"app_owner", "app_rw", "app_migrate", "app_backup", "app_audit_purge"}
+LOGIN_ROLES = {"app_rw", "app_migrate", "app_backup"}
 # Служебные таблицы yoyo — единственные объекты, которыми в control_plane владеет app_migrate.
 YOYO_TABLES = {"_yoyo_migration", "_yoyo_log", "_yoyo_version", "yoyo_lock"}
+# Единственный объект не app_owner помимо yoyo: функция очистки аудита принадлежит держателю
+# DELETE на audit_log (090, §4.6).
+ALLOWED_FOREIGN_OWNED = {("purge_audit_log", "app_audit_purge")}
 
 
 def _acl_by_scope(rows: list[asyncpg.Record]) -> dict[tuple[str, str], set[str]]:
@@ -85,7 +89,8 @@ async def db_state(pg_dsn: str) -> dict[str, object]:
                 (r["name"], r["owner"])
                 for r in owner_rows
                 if r["owner"] != "app_owner" and r["name"] not in YOYO_TABLES
-            },
+            }
+            - ALLOWED_FOREIGN_OWNED,
             "default_acl": _acl_by_scope(default_acl),
             "roles": {r["rolname"] for r in roles},
             "superusers": {r["rolname"] for r in roles if r["rolsuper"]},
@@ -150,12 +155,12 @@ def assert_migrated_state(state: dict[str, object], migrate_env: dict[str, str])
     assert state["enum_labels"] == EXPECTED_ENUMS, "значения перечислений — побуквенно по §4.2"
     assert state["enum_owners"] == {"app_owner"}, "владелец типов — app_owner (§4.6)"
     assert state["foreign_owned"] == set(), (
-        "в control_plane всё принадлежит app_owner, кроме служебных таблиц yoyo: "
+        "в control_plane всё принадлежит app_owner, кроме служебных таблиц yoyo и purge_audit_log: "
         "миграция без SET LOCAL ROLE app_owner"
     )
     assert state["roles"] == EXPECTED_ROLES
     assert state["superusers"] == set(), "роли приложения не суперпользователи"
-    assert state["login_roles"] == EXPECTED_ROLES - {"app_owner"}
+    assert state["login_roles"] == LOGIN_ROLES, "вход только у app_rw, app_migrate, app_backup"
     assert state["owned_by_rw"] == 0, "app_rw не владеет объектами (AC 001.03)"
     acl = state["default_acl"]
     assert isinstance(acl, dict)

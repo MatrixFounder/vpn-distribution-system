@@ -1,9 +1,10 @@
 """Стражи bootstrap-слоя (``migrations/bootstrap/roles.sql``): схема ``control_plane`` и её права —
 несущий уровень модели прав §4.6 после переезда объектов из ``public``.
 
-Проверяется: владелец схемы ``app_owner``; ``USAGE`` у ``app_rw``/``app_backup``, ``USAGE, CREATE``
-у ``app_migrate`` и ничего сверх; ``search_path = control_plane`` у трёх ролей в базе; ``public``
-без объектов приложения. Без базы тест падает, не пропускается.
+Проверяется: владелец схемы ``app_owner``; ``USAGE`` у ``app_rw``, ``app_backup``,
+``app_audit_purge``, ``USAGE, CREATE`` у ``app_migrate`` и ничего сверх; ``search_path =
+control_plane`` у четырёх ролей в базе; членство ``app_owner`` в ``app_audit_purge`` без
+наследования; ``public`` без объектов приложения. Без базы тест падает, не пропускается.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import asyncpg
 
 from ._introspect import EXPECTED_SCHEMA_GRANTS, SCHEMA, schema_grants
 
-APP_ROLES_WITH_SEARCH_PATH = {"app_rw", "app_migrate", "app_backup"}
+APP_ROLES_WITH_SEARCH_PATH = {"app_rw", "app_migrate", "app_backup", "app_audit_purge"}
 
 
 async def test_schema_owner_and_privileges(pg_dsn: str) -> None:
@@ -26,17 +27,32 @@ async def test_schema_owner_and_privileges(pg_dsn: str) -> None:
         assert await schema_grants(conn) == EXPECTED_SCHEMA_GRANTS
         # app_migrate наследует права владельца базы (владелец public — pg_database_owner);
         # его удерживают search_path и статический страж миграций. Роли DML/чтения — никогда.
-        for role in ("app_rw", "app_backup"):
+        for role in ("app_rw", "app_backup", "app_audit_purge"):
             can_create = await conn.fetchval(
                 "select has_schema_privilege($1, 'public', 'CREATE')", role
             )
             assert can_create is False, f"{role} не создаёт объекты в public"
+        membership = await conn.fetchrow(
+            "select m.inherit_option, m.set_option from pg_auth_members m "
+            "join pg_roles r on r.oid = m.roleid join pg_roles g on g.oid = m.member "
+            "where r.rolname = 'app_audit_purge' and g.rolname = 'app_owner'"
+        )
+        assert membership is not None and tuple(membership) == (False, True), (
+            "app_owner — член app_audit_purge без наследования прав, с правом SET ROLE (§4.6)"
+        )
+        assert (
+            await conn.fetchval(
+                "select count(*) from pg_auth_members m join pg_roles r on r.oid = m.roleid "
+                "where r.rolname = 'app_audit_purge'"
+            )
+            == 1
+        ), "других членов у app_audit_purge нет"
     finally:
         await conn.close()
 
 
 async def test_roles_search_path(pg_dsn: str) -> None:
-    """search_path = control_plane задан трём ролям приложения в базе (pg_db_role_setting)."""
+    """search_path = control_plane задан четырём ролям приложения в базе (pg_db_role_setting)."""
     conn = await asyncpg.connect(pg_dsn)
     try:
         rows = await conn.fetch(

@@ -6,6 +6,20 @@ import itertools
 import uuid
 
 import asyncpg
+import psycopg
+from app.cli import migrate_dsn
+
+
+def owner_connection(migrate_env: dict[str, str]) -> psycopg.Connection:
+    """Подключение app_migrate с SET ROLE app_owner и search_path control_plane — для операций
+    владельца в тестах (создание партиций, проверка триггеров «для всех ролей»); autocommit."""
+    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
+    conn = psycopg.connect(
+        dsn.replace("postgresql+psycopg://", "postgresql://", 1), autocommit=True
+    )
+    conn.execute("SET ROLE app_owner")
+    conn.execute("SET search_path TO control_plane")
+    return conn
 
 
 async def existing_tables(pg_dsn: str) -> set[str]:
