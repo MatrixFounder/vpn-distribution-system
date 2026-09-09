@@ -32,14 +32,22 @@ case "${APP_ROLE:-}" in
         python -m app.cli migrate
         # Переменные названы APP_*: имена UVICORN_* uvicorn читает сам (auto_envvar_prefix)
         # и они перебивали бы явные флаги ниже.
+        # За nginx: схема и адрес клиента — из X-Forwarded-Proto / X-Forwarded-For (§5.1, Н-25,
+        # лимиты частоты). Контракт с deploy/nginx/nginx.conf: nginx ПЕРЕЗАПИСЫВАЕТ оба заголовка
+        # ($remote_addr, $scheme), поэтому в них ровно одно значение и оно не от клиента;
+        # --forwarded-allow-ips '*' лишь принимает заголовки от любого узла сети Compose (порт 8000
+        # не публикуется). При цепочке в X-Forwarded-For uvicorn с '*' взял бы крайний левый,
+        # клиентский элемент — поэтому дополнение ($proxy_add_x_forwarded_for) в nginx запрещено;
+        # страж — tests/unit/test_proxy_contract.py.
         case "${APP_RELOAD:-}" in
             1|true|yes)
                 # Разработка: перезапуск при изменении смонтированных исходников (один процесс).
-                exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload
+                exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 \
+                    --proxy-headers --forwarded-allow-ips '*' --reload
                 ;;
         esac
         exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 \
-            --workers "${APP_WORKERS:-2}"
+            --proxy-headers --forwarded-allow-ips '*' --workers "${APP_WORKERS:-2}"
         ;;
     worker-critical)
         exec python -m app.jobs.worker --queue critical

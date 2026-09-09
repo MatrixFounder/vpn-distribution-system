@@ -21,7 +21,9 @@ import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
+
+from app.config import SecretError, dsn_with_password
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
@@ -29,13 +31,9 @@ EX_USAGE = 64
 EX_NOT_IMPLEMENTED = 69
 
 
-def read_secret(path: str | os.PathLike[str]) -> str:
-    """Прочитать файл секрета (Docker secret): UTF-8, без завершающего перевода строки."""
-    return Path(path).read_text(encoding="utf-8").rstrip("\r\n")
-
-
 def migrate_dsn(dsn: str | None = None, password_file: str | None = None) -> str:
-    """Собрать DSN для yoyo: схема ``postgresql+psycopg``, пароль из файла, если в URL его нет.
+    """Собрать DSN для yoyo: схема ``postgresql+psycopg``, пароль из файла, если в URL его нет
+    (``app.config.dsn_with_password``; пустой или недоступный файл — ошибка).
 
     ``dsn`` и ``password_file`` по умолчанию берутся из ``MIGRATE_DSN`` и ``MIGRATE_PASSWORD_FILE``.
     """
@@ -50,16 +48,14 @@ def migrate_dsn(dsn: str | None = None, password_file: str | None = None) -> str
         scheme = parts.scheme
     else:
         raise SystemExit(f"migrate: неподдерживаемая схема DSN «{parts.scheme}»")
-    netloc = parts.netloc
     if password_file is None:
         password_file = os.environ.get("MIGRATE_PASSWORD_FILE")
-    if parts.password is None and password_file:
-        host = parts.hostname or ""
-        if ":" in host:  # IPv6 — urlsplit снимает скобки, URL требует их вернуть
-            host = f"[{host}]"
-        hostport = f"{host}:{parts.port}" if parts.port else host
-        netloc = f"{parts.username or ''}:{quote(read_secret(password_file), safe='')}@{hostport}"
-    return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
+    try:
+        with_password = dsn_with_password(dsn, password_file)
+    except SecretError as exc:
+        raise SystemExit(f"migrate: {exc}") from exc
+    parts = urlsplit(with_password)
+    return urlunsplit((scheme, parts.netloc, parts.path, parts.query, parts.fragment))
 
 
 def run_migrate(

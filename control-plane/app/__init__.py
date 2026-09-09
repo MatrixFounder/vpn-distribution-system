@@ -1,6 +1,3 @@
-"""Control Plane — приложение FastAPI и фоновые процессы.
+"""Control Plane (C-01…C-03): одна кодовая база, роль процесса задаёт APP_ROLE."""
 
-Структура пакетов описана в `control-plane/app/.AGENTS.md`; архитектура — `docs/ARCHITECTURE.md`.
-"""
-
-__version__ = "0.0.0"
+__version__ = "0.1.0"

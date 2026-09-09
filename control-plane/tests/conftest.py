@@ -2,8 +2,9 @@
 
 `pg_dsn`, `migrate_env` и `redis_url` читаются из окружения стенда разработки
 (`deploy/compose/.env.example`, задача 001.02; `MIGRATE_DSN` — подключение `app_migrate` для
-`app.cli migrate`). `app_client` — HTTP-клиент к приложению в процессе теста; до задачи 001.10,
-где появляется приложение и транспорт ASGI, фикстура пропускает тест, а не обращается в сеть.
+`app.cli migrate`). `app_client` — HTTP-клиент к приложению в процессе теста через транспорт
+ASGI (задача 001.10): без сети и без lifespan, исключения приложения превращаются в ответ 500
+единого формата, а не поднимаются в тест.
 """
 
 import os
@@ -11,6 +12,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+from app.main import create_app
 
 
 @pytest.fixture(scope="session")
@@ -35,6 +37,7 @@ def redis_url() -> str:
 
 @pytest.fixture
 async def app_client() -> AsyncIterator[httpx.AsyncClient]:
-    """HTTP-клиент к приложению через транспорт ASGI (подключается в задаче 001.10)."""
-    pytest.skip("app_client: транспорт ASGI и приложение появляются в задаче 001.10")
-    yield httpx.AsyncClient()  # недостижимо; сохраняет тип генератора для mypy
+    """HTTP-клиент к приложению `create_app()` через транспорт ASGI."""
+    transport = httpx.ASGITransport(app=create_app(), raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
+        yield client
