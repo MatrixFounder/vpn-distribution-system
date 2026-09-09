@@ -77,6 +77,7 @@ resolution.
 
 ## Closed
 
+- **WI-8** [Plan review checks that task scopes are disjoint](backlog/wi-8-plan-review-checks-that-task-scopes-are-disjoint.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-7** [Set properties are asserted over the set, not over examples](backlog/wi-7-set-properties-are-asserted-over-the-set-not-over-examples.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-6** [Depends() reads the callable's signature as HTTP input — wrap factories, assert no requestBody](backlog/wi-6-depends-reads-the-callable-s-signature-as-http-input-wrap-factories-assert-no-requestbody.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-4** [Tolerance guards must be calibrated against measured noise and planted above the bound](backlog/wi-4-tolerance-guards-must-be-calibrated-against-measured-noise-and-planted-above-the-bound.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
