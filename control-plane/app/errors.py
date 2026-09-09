@@ -10,11 +10,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import asyncpg
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.db.pool import DatabaseUnavailable
 from app.security.ratelimit import RETRY_AFTER_SECONDS, RateLimitUnavailable
 
 log = logging.getLogger(__name__)
@@ -44,24 +46,31 @@ class ApiError(Exception):
         *,
         status: int = 400,
         details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
         self.details: dict[str, Any] = details or {}
+        self.headers: dict[str, str] = headers or {}  # например, Retry-After при 429/503
 
     def response(self) -> JSONResponse:
-        return error_response(self.status, self.code, self.message, self.details)
+        return error_response(self.status, self.code, self.message, self.details, self.headers)
 
 
 def error_response(
-    status: int, code: str, message: str, details: dict[str, Any] | None = None
+    status: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     """Тело ошибки в едином формате §5.1."""
     return JSONResponse(
         status_code=status,
         content={"error": {"code": code, "message": message, "details": details or {}}},
+        headers=headers,
     )
 
 
@@ -100,7 +109,8 @@ async def _validation_handler(_: Request, exc: Exception) -> JSONResponse:
 
 
 async def _unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Fail-closed (§9.1): Redis недоступен → 503 с Retry-After, без подробностей клиенту."""
+    """Fail-closed (§9.1): Redis или PostgreSQL недоступны → 503 с Retry-After, без подробностей
+    клиенту."""
     log.error("503 %s %s: %s", request.method, request.url.path, exc)
     response = error_response(503, "service_unavailable", "сервис временно недоступен")
     response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
@@ -118,4 +128,6 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
     app.add_exception_handler(RateLimitUnavailable, _unavailable_handler)
+    app.add_exception_handler(DatabaseUnavailable, _unavailable_handler)
+    app.add_exception_handler(asyncpg.PostgresConnectionError, _unavailable_handler)
     app.add_exception_handler(Exception, _unhandled_handler)

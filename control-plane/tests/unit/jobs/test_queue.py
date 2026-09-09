@@ -20,6 +20,16 @@ def test_channel_names() -> None:
     assert [jobs.channel(q) for q in jobs.QUEUES] == ["jobs_critical", "jobs_background"]
 
 
+def test_schedule_maintains_partitions_hourly() -> None:
+    """001.14: партиции на неделю вперёд обслуживает планировщик раз в час; тип задачи
+    зарегистрирован у исполнителя (иначе задача останется pending)."""
+    from app.jobs.handlers import HANDLERS
+
+    periodic = {p.name: p for p in scheduler.SCHEDULE}["ensure_partitions"]
+    assert periodic.interval == dt.timedelta(hours=1) and periodic.queue == "background"
+    assert periodic.type in HANDLERS
+
+
 def test_periodic_slot_and_key() -> None:
     periodic = scheduler.Periodic("aggregate", dt.timedelta(hours=1), "background", "noop", {})
     t0 = dt.datetime(2026, 9, 9, 10, 0, tzinfo=dt.UTC)

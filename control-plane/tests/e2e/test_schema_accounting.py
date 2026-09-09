@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 
 import asyncpg
 import psycopg
@@ -84,16 +85,21 @@ async def assert_retention_boundary(
     assert await conn.fetchval("select drop_expired_partitions()") == 0
 
 
-async def drop_all_partitions(migrate_env: dict[str, str], pg_dsn: str) -> None:
-    """Убрать все партиции таблиц реестра (владелец), чтобы стенд остался как до теста."""
+async def drop_partitions_except(migrate_env: dict[str, str], pg_dsn: str, keep: set[str]) -> None:
+    """Убрать партиции, которых не было до теста (владелец): стенд живой — планировщик
+    (001.14) держит партиции на неделю вперёд, их тест не трогает."""
     conn = await asyncpg.connect(pg_dsn)
     try:
-        names = list(await partitions(conn))
+        names = [name for name in await partitions(conn) if name not in keep]
     finally:
         await conn.close()
     with owner_connection(migrate_env) as owner:
         for name in names:
             owner.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier("control_plane", name)))
+
+
+def expected_partitions(tables: Sequence[str], days: Sequence[dt.date]) -> set[str]:
+    return {f"{table}_p{day:%Y%m%d}" for table in tables for day in days}
 
 
 async def test_migration_080_apply_rollback_reapply(
@@ -105,29 +111,43 @@ async def test_migration_080_apply_rollback_reapply(
     applied = run_cli(migrate_env, "migrate")
     assert applied.returncode == 0, applied.stderr
     assert ACCOUNTING_TABLES <= await existing_tables(pg_dsn)
+    conn = await asyncpg.connect(pg_dsn)
     try:
-        await check_rollback_keeps_foreign_partitions(pg_dsn, migrate_env)
+        before = set(await partitions(conn))
     finally:
-        # Что бы ни упало посередине: группа снова применена и партиций на стенде нет.
+        await conn.close()
+    probe_user = uuid.uuid4()
+    try:
+        await check_rollback_keeps_foreign_partitions(pg_dsn, migrate_env, before, probe_user)
+    finally:
+        # Что бы ни упало посередине: группа снова применена, следы теста убраны.
         run_cli(migrate_env, "migrate")
-        await drop_all_partitions(migrate_env, pg_dsn)
+        conn = await asyncpg.connect(pg_dsn)
+        try:
+            await conn.execute("delete from auth_events where user_id = $1", probe_user)
+        finally:
+            await conn.close()
+        await drop_partitions_except(migrate_env, pg_dsn, before)
 
 
-async def check_rollback_keeps_foreign_partitions(pg_dsn: str, migrate_env: dict[str, str]) -> None:
+async def check_rollback_keeps_foreign_partitions(
+    pg_dsn: str, migrate_env: dict[str, str], before: set[str], probe_user: uuid.UUID
+) -> None:
     """Тело TC-E2E-01 после применения: партиции текущих суток и строка в auth_events → откат
     ровно до 080 → объекты 080 сняты, чужие партиции и строка на месте → повторное применение."""
     conn = await asyncpg.connect(pg_dsn)
     try:
-        assert await conn.fetchval("select ensure_partitions(0)") == len(PARTITIONED)
         today = await utc_today(conn)
-        foreign_names = {
-            f"{table}_p{today:%Y%m%d}"
-            for table in ("auth_events", "subscription_access_log", "node_metrics")
-        }
+        expected = expected_partitions(PARTITIONED, [today])
+        assert await conn.fetchval("select ensure_partitions(0)") == len(expected - before)
+        assert expected <= set(await partitions(conn))
+        foreign_names = expected_partitions(
+            ["auth_events", "subscription_access_log", "node_metrics"], [today]
+        )
         await conn.execute(
             "insert into auth_events (user_id, kind, ts, result) "
             "values ($1, 'login', $2, 'denied')",
-            uuid.uuid4(),
+            probe_user,
             dt.datetime.combine(today, dt.time(12), tzinfo=dt.UTC),
         )
     finally:
@@ -144,12 +164,15 @@ async def check_rollback_keeps_foreign_partitions(pg_dsn: str, migrate_env: dict
             "('ensure_partitions', 'drop_expired_partitions', 'traffic_hourly_only_grows')"
         )
         assert functions == 0, "функции обслуживания и триггерная функция удалены откатом"
-        assert set(await partitions(conn)) == foreign_names, (
-            "откат оставляет партиции чужих таблиц присоединёнными"
+        remaining = set(await partitions(conn))
+        assert foreign_names <= remaining, "откат оставляет партиции чужих таблиц присоединёнными"
+        assert not {n for n in remaining if n.startswith("traffic_")}, (
+            "партиции 080 ушли с таблицами"
         )
-        assert await conn.fetchval("select count(*) from auth_events") == 1, (
-            "откат не трогает данные чужих таблиц"
-        )
+        assert (
+            await conn.fetchval("select count(*) from auth_events where user_id = $1", probe_user)
+            == 1
+        ), "откат не трогает данные чужих таблиц"
     finally:
         await conn.close()
 
@@ -343,27 +366,26 @@ async def check_accounting_constraints(conn: asyncpg.Connection) -> None:
 
 
 async def test_ensure_and_drop_partitions(pg_dsn: str, migrate_env: dict[str, str]) -> None:
-    """ensure_partitions(1) под app_rw создаёт по две суточные партиции на каждую из пяти таблиц
-    реестра (владелец app_owner, запреты §4.6 на партициях traffic_*), повтор ничего не создаёт,
-    days_ahead вне 0…366 отклоняется; drop_expired_partitions удаляет просроченные; на партиции
-    traffic_hourly действует триггер «только рост». Созданные партиции удаляются в конце."""
+    """ensure_partitions(1) под app_rw создаёт недостающие суточные партиции на сегодня и завтра
+    для пяти таблиц реестра (владелец app_owner, запреты §4.6 на партициях traffic_*), повтор
+    ничего не создаёт, days_ahead вне 0…366 отклоняется; drop_expired_partitions удаляет
+    просроченные; на партиции traffic_hourly действует триггер «только рост». Стенд живой:
+    партиции, существовавшие до теста (планировщик 001.14), не трогаются; созданные тестом
+    удаляются в конце."""
     assert run_cli(migrate_env, "migrate").returncode == 0
     conn = await asyncpg.connect(pg_dsn)
+    before = set()
     try:
-        assert await partitions(conn) == {}, "стенд без партиций до теста"
+        before = set(await partitions(conn))
+        today = await utc_today(conn)  # сутки базы в UTC, не машины и не сессии
+        expected_names = expected_partitions(PARTITIONED, [today, today + dt.timedelta(days=1)])
         created = await conn.fetchval("select ensure_partitions(1)")
-        assert created == 2 * len(PARTITIONED)
+        assert created == len(expected_names - before), "создаются только недостающие"
         assert await conn.fetchval("select ensure_partitions(1)") == 0, "идемпотентность"
         with pytest.raises(asyncpg.RaiseError):
             await conn.fetchval("select ensure_partitions(400)")
-        today = await utc_today(conn)  # сутки базы в UTC, не машины и не сессии
         parts = await partitions(conn)
-        expected_names = {
-            f"{table}_p{day:%Y%m%d}"
-            for table in PARTITIONED
-            for day in (today, today + dt.timedelta(days=1))
-        }
-        assert set(parts) == expected_names, parts
+        assert expected_names <= set(parts), parts
         owners = await conn.fetch(
             "select distinct pg_get_userbyid(c.relowner) as owner from pg_inherits i "
             "join pg_class c on c.oid = i.inhrelid where c.relkind = 'r'"
@@ -377,10 +399,14 @@ async def test_ensure_and_drop_partitions(pg_dsn: str, migrate_env: dict[str, st
             else:
                 assert "app_rw=arwd/" in acl, name
 
-        # Триггер монотонности на партиции traffic_hourly под app_rw.
+        # Триггер монотонности на партиции traffic_hourly под app_rw — на партиции суток за
+        # горизонтом планировщика (её создаёт и удаляет тест, строки не остаются на стенде).
+        probe_day = today + dt.timedelta(days=30)
+        with owner_connection(migrate_env) as owner:
+            create_partition(owner, "traffic_hourly", probe_day)
         node_id = uuid.uuid4()
         user_id = uuid.uuid4()
-        hour = dt.datetime.combine(today, dt.time(10), tzinfo=dt.UTC)
+        hour = dt.datetime.combine(probe_day, dt.time(10), tzinfo=dt.UTC)
         await conn.execute(
             "insert into traffic_hourly (user_id, node_id, hour_start, raw_uplink_bytes, "
             "raw_downlink_bytes, billable_bytes, multiplier_milli, billing_group_id) "
@@ -405,10 +431,10 @@ async def test_ensure_and_drop_partitions(pg_dsn: str, migrate_env: dict[str, st
             await conn.fetchval("select ensure_partitions(NULL::int)")
     finally:
         await conn.close()
-        await drop_all_partitions(migrate_env, pg_dsn)
+        await drop_partitions_except(migrate_env, pg_dsn, before)
     conn = await asyncpg.connect(pg_dsn)
     try:
-        assert await partitions(conn) == {}, "после теста партиций нет"
+        assert set(await partitions(conn)) == before, "после теста — как до теста"
     finally:
         await conn.close()
 
@@ -421,16 +447,18 @@ async def test_maintenance_uses_utc_regardless_of_session_timezone(
     ensure_partitions(0) создаёт партиции суток UTC, а граница срока хранения не сдвигается."""
     assert run_cli(migrate_env, "migrate").returncode == 0
     conn = await asyncpg.connect(pg_dsn)
+    before = set()
     try:
-        assert await partitions(conn) == {}, "стенд без партиций до теста"
+        before = set(await partitions(conn))
         today = await utc_today(conn)
+        expected = expected_partitions(PARTITIONED, [today])
         for zone in ("Etc/GMT+12", "Etc/GMT-14"):  # POSIX-знак: GMT+12 — это UTC-12
             await conn.execute(f"SET timezone = '{zone}'")
-            assert await conn.fetchval("select ensure_partitions(0)") == len(PARTITIONED)
+            assert await conn.fetchval("select ensure_partitions(0)") == len(expected - before)
             names = set(await partitions(conn))
-            assert names == {f"{table}_p{today:%Y%m%d}" for table in PARTITIONED}, (zone, names)
+            assert names == before | expected, (zone, names - before)
             await assert_retention_boundary(conn, migrate_env, today)
-            await drop_all_partitions(migrate_env, pg_dsn)
+            await drop_partitions_except(migrate_env, pg_dsn, before)
     finally:
         await conn.close()
-        await drop_all_partitions(migrate_env, pg_dsn)
+        await drop_partitions_except(migrate_env, pg_dsn, before)

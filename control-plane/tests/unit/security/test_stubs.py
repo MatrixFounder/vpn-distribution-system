@@ -11,6 +11,7 @@ import redis.asyncio as redis_async
 from app.redis import close_redis, get_redis
 from app.security import csrf, deps, ratelimit, sessions
 from fastapi import Request
+from redis.exceptions import RedisError
 
 
 def _request(method: str) -> Request:
@@ -19,18 +20,22 @@ def _request(method: str) -> Request:
     )
 
 
-async def test_session_store_interface_is_stubbed() -> None:
-    store = sessions.SessionStore(redis_async.Redis.from_url("redis://127.0.0.1:1/0"))
+async def test_session_store_interface_and_keys() -> None:
+    """Ключи и сигнатура контракта; поведение — tests/unit/security/test_sessions.py (001.14).
+    Без Redis операции поднимают ошибку клиента, а не молча «успешны»."""
+    store = sessions.SessionStore(
+        redis_async.Redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.5)
+    )
     assert sessions.session_key("abc") == "sess:abc"
     assert sessions.subject_sessions_key("u1") == "user_sessions:u1"
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RedisError):
         await store.create("user", "u1", "203.0.113.1", "ua", 3600)
-    with pytest.raises(NotImplementedError):
+    assert inspect.signature(sessions.SessionStore.create).return_annotation in (
+        "Session",
+        sessions.Session,
+    ), "create возвращает сессию с csrf (ревью 001.14 L-1)"
+    with pytest.raises(RedisError):
         await store.get("abc")
-    with pytest.raises(NotImplementedError):
-        await store.revoke("abc")
-    with pytest.raises(NotImplementedError):
-        await store.revoke_all("u1", except_sid="abc")
     assert set(inspect.signature(sessions.SessionStore.create).parameters) == {
         "self",
         "kind",
@@ -41,12 +46,12 @@ async def test_session_store_interface_is_stubbed() -> None:
     }
 
 
-async def test_csrf_dependency() -> None:
-    for method in ("GET", "HEAD", "OPTIONS"):
-        await csrf.require_csrf(_request(method))  # безопасные методы проходят
-    with pytest.raises(NotImplementedError):
-        await csrf.require_csrf(_request("POST"))
-    assert csrf.CSRF_HEADER == "X-CSRF-Token"
+async def test_csrf_dependency_safe_methods_and_anonymous() -> None:
+    """Безопасные методы и запросы без сессионной cookie проходят без обращения к Redis;
+    проверка с сессией — tests/e2e/test_auth.py (001.14)."""
+    for method in ("GET", "HEAD", "OPTIONS", "POST", "DELETE"):
+        await csrf.require_csrf(_request(method))
+    assert csrf.CSRF_HEADER == "X-CSRF-Token" and csrf.CSRF_COOKIE == "csrf"
 
 
 def test_ratelimit_keys_follow_section_5_12() -> None:

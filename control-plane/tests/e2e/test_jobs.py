@@ -94,7 +94,9 @@ async def test_failures_unknown_type_and_run_at(
     ключ свободен."""
     async with stand_pool(pg_dsn, monkeypatch, tmp_path) as pool:
         async with pool.acquire() as conn:
-            unknown = await jobs.enqueue(conn, "background", "test-unknown", {}, f"{PREFIX}u")
+            # Очередь critical: в background на стенде живут задачи send_email (обработчик —
+            # 001.52), и выборка «любых типов» вернула бы их.
+            unknown = await jobs.enqueue(conn, "critical", "test-unknown", {}, f"{PREFIX}u")
             failing = await jobs.enqueue(conn, "background", BOOM, {"x": 7}, f"{PREFIX}f")
             vanishing = await jobs.enqueue(conn, "background", VANISH, {}, f"{PREFIX}v")
             later = await jobs.enqueue(
@@ -106,6 +108,7 @@ async def test_failures_unknown_type_and_run_at(
                 run_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
             )
         assert await worker.run_once(pool, "background", "w") == 2, "boom и vanish обработаны"
+        assert await worker.run_once(pool, "critical", "w") == 0, "неизвестный тип не выбирается"
         async with pool.acquire() as conn:
             assert await conn.fetchval("select count(*) from jobs where id = $1", vanishing) == 0
         assert await job_row(pool, failing) == {
@@ -118,8 +121,8 @@ async def test_failures_unknown_type_and_run_at(
         assert (await job_row(pool, unknown))["status"] == "pending", "неизвестный тип не выбран"
         assert (await job_row(pool, later))["status"] == "pending", "run_at в будущем"
         async with pool.acquire() as conn:  # пустой набор типов — ничего, None — любые
-            assert await jobs.claim(conn, "background", "w", types=()) is None
-            anything = await jobs.claim(conn, "background", "w", types=None)
+            assert await jobs.claim(conn, "critical", "w", types=()) is None
+            anything = await jobs.claim(conn, "critical", "w", types=None)
             assert anything is not None and anything.id == unknown
             await jobs.fail(conn, unknown, "проба types=None")
         async with pool.acquire() as conn:
@@ -329,9 +332,18 @@ async def test_scheduler_leadership_lock(
             f"{PREFIX}tick", dt.timedelta(minutes=5), "background", NOOP, {}
         )
         now = dt.datetime.now(dt.UTC)
-        assert await scheduler.tick(pool, now, [periodic]) == 1
-        assert await scheduler.tick(pool, now, [periodic]) == 0, "тот же слот — no-op"
-        assert await scheduler.tick(pool, now + dt.timedelta(minutes=5), [periodic]) == 1
+        placed: dict[str, int] = {}
+        assert await scheduler.tick(pool, now, [periodic], placed) == 1
+        assert await scheduler.tick(pool, now, [periodic], placed) == 0, "тот же слот — no-op"
+        assert await scheduler.tick(pool, now, [periodic]) == 0, "и без памяти: дубль в очереди"
+        # Задача слота выполнена (ключ свободен) — экземпляр с памятью слот не повторяет,
+        # иначе ежесекундный tick ставил бы задачу заново каждую секунду (найдено на стенде).
+        async with pool.acquire() as conn:
+            job = await jobs.claim(conn, "background", "s", types=(NOOP,))
+            assert job is not None and job.idempotency_key == periodic.idempotency_key(now)
+            await jobs.complete(conn, job.id)
+        assert await scheduler.tick(pool, now, [periodic], placed) == 0, "слот уже ставился"
+        assert await scheduler.tick(pool, now + dt.timedelta(minutes=5), [periodic], placed) == 1
 
 
 async def test_metrics_report_queue_depth(

@@ -4,9 +4,13 @@
 Живость сессии-держателя не проверяется: при разрыве её сессии блокировку получит другой
 экземпляр, и короткое время могут работать два лидера — расщепление обезврежено ключом слота
 (один enqueue на слот), а не исключительностью процесса. Ошибки базы в цикле журналируются,
-подключения пула обновляются, цикл продолжается. Задача 001.11 — каркас без задач: ``SCHEDULE``
-пуст; периодические задачи (истечение подписок, пороги, агрегация, сверки, партиции, сроки
-хранения, Offline) добавляют LOGIC-задачи.
+подключения пула обновляются, цикл продолжается. Лидер помнит поставленные им слоты: ключ
+идемпотентности свободен, как только задача выполнена (§4.4), и без этой памяти ежесекундный
+``tick`` ставил бы задачу заново каждую секунду (замечено на стенде в 001.14); после смены лидера
+слот может быть поставлен ещё раз — периодические задачи идемпотентны. Расписание: с 001.14 —
+``ensure_partitions`` раз в час (партиции журналов, задача 001.37 частично); остальные
+периодические задачи (истечение подписок, пороги, агрегация, сверки, сроки хранения, Offline)
+добавляют LOGIC-задачи.
 """
 
 from __future__ import annotations
@@ -60,13 +64,31 @@ class Periodic:
         return f"{self.name}:{self.slot(now)}"
 
 
-SCHEDULE: list[Periodic] = []  # заполняют LOGIC-задачи (001.11 — каркас)
+# Расписание пополняют LOGIC-задачи. 001.14: партиции на семь суток вперёд раз в час — первый
+# слот ставится сразу после захвата лидерства, партиции нужны журналу auth_events.
+SCHEDULE: list[Periodic] = [
+    Periodic("ensure_partitions", dt.timedelta(hours=1), "background", "ensure_partitions", {}),
+]
 
 
-async def tick(pool: asyncpg.Pool, now: dt.datetime, schedule: Sequence[Periodic]) -> int:
-    """Поставить задачи всех периодических элементов на текущий слот; вернуть число новых."""
+async def tick(
+    pool: asyncpg.Pool,
+    now: dt.datetime,
+    schedule: Sequence[Periodic],
+    placed: dict[str, int] | None = None,
+) -> int:
+    """Поставить задачи всех периодических элементов на текущий слот; вернуть число новых.
+
+    ``placed`` — слоты, уже поставленные этим экземпляром (имя → слот): ключ идемпотентности
+    свободен, как только задача выполнена (§4.4), и без памяти о слоте ежесекундный ``tick``
+    ставил бы задачу заново каждую секунду; дубли между экземплярами по-прежнему ловит
+    очередь.
+    """
     enqueued = 0
     for periodic in schedule:
+        slot = periodic.slot(now)
+        if placed is not None and placed.get(periodic.name) == slot:
+            continue
         async with pool.acquire() as conn, conn.transaction():
             try:
                 await jobs.enqueue(
@@ -77,7 +99,11 @@ async def tick(pool: asyncpg.Pool, now: dt.datetime, schedule: Sequence[Periodic
                     periodic.idempotency_key(now),
                 )
             except jobs.DuplicateJobError:
-                continue  # слот уже поставлен (этим или прежним экземпляром)
+                if placed is not None:
+                    placed[periodic.name] = slot
+                continue  # слот уже поставлен другим экземпляром
+        if placed is not None:
+            placed[periodic.name] = slot
         enqueued += 1
     return enqueued
 
@@ -129,9 +155,10 @@ async def run(
         if stop.is_set():
             return
         log.info("планировщик — лидер; расписание: %d", len(schedule))
+        placed: dict[str, int] = {}
         while not stop.is_set():
             try:
-                await tick(pool, dt.datetime.now(dt.UTC), schedule)
+                await tick(pool, dt.datetime.now(dt.UTC), schedule, placed)
             except RECOVERABLE as exc:
                 await recover(pool, exc, "планировщик")
                 await _sleep(stop, RECOVERY_PAUSE)

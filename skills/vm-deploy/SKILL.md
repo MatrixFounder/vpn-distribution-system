@@ -45,6 +45,10 @@ STOP if you are thinking:
   `id_ed25519_parallels`). **Never hardcode the IP**; when an address is needed, derive it:
   `ssh -G vm | awk '/^hostname /{print $2}'`.
 - Smoke test: `ssh vm 'echo ok && docker ps --format "{{.Names}}" | grep control-plane'`
+- Client address as the app sees it: `curl` from the VM host to a published port arrives via the
+  Docker bridge, so nginx's `$remote_addr` (and therefore the app's client IP and the `rl:*:ip:`
+  keys) is the bridge gateway (`172.20.0.1` on 2026-09-09), not `127.0.0.1`. Check with
+  `redis-cli --scan --pattern "rl:*"` before clearing or reasoning about per-IP counters.
 - VM facts (2026-09-08): Ubuntu 24.04 aarch64, Docker 28.5, Compose v5.4, 4 CPU, 7.7 GiB RAM,
   ~35 GB free. Ports **already taken by other projects**: 3000, 5432, 5433, 5678, 6543, 8000,
   8009, 8443, 9000 — never bind them.

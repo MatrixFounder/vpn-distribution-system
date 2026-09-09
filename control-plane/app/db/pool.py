@@ -22,6 +22,10 @@ _loop: asyncio.AbstractEventLoop | None = None
 _lock = asyncio.Lock()
 
 
+class DatabaseUnavailable(Exception):  # noqa: N818 — парное имя к RateLimitUnavailable
+    """PostgreSQL недоступен: C-01 отвечает 503 (reliability.md §9.1)."""
+
+
 async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
     """Единственный пул процесса; ``settings`` читаются из окружения, если не переданы."""
     global _pool, _loop
@@ -35,9 +39,16 @@ async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
         if _pool is None:
             _loop = loop
             settings = settings or Settings.load()
-            _pool = await asyncpg.create_pool(
-                settings.pg_dsn_with_password, min_size=1, max_size=10, command_timeout=30
-            )
+            try:
+                _pool = await asyncpg.create_pool(
+                    settings.pg_dsn_with_password,
+                    min_size=1,
+                    max_size=10,
+                    command_timeout=30,
+                    timeout=5,
+                )
+            except (TimeoutError, OSError, asyncpg.PostgresConnectionError) as exc:
+                raise DatabaseUnavailable(f"{type(exc).__name__}: {exc}") from exc
     return _pool
 
 

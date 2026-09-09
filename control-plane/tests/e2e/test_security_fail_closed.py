@@ -54,11 +54,35 @@ async def test_rate_limited_endpoints_fail_closed_without_redis(
         await close_redis()
 
 
-async def test_rate_limited_endpoints_answer_when_redis_is_up(
+async def test_database_outage_is_fail_closed_too(
     redis_url: str, monkeypatch: pytest.MonkeyPatch, app_client: httpx.AsyncClient
 ) -> None:
+    """§9.1: PostgreSQL недоступен → C-01 отвечает 503 (тем же обработчиком, с Retry-After);
+    маршруты без базы (`/s/{token}` — заглушка) не зависят."""
+    from app.db.pool import close_pool
+
     monkeypatch.setenv("REDIS_URL", redis_url)
     monkeypatch.setenv("PG_DSN", "postgresql://app_rw@127.0.0.1:1/control_plane")
+    await close_redis()
+    await close_pool()
+    try:
+        login = await app_client.post(
+            "/api/v1/auth/login", json={"email": "a@b.io", "password": "x" * 8}
+        )
+        assert login.status_code == 503 and login.headers["retry-after"] == "5"
+        assert login.json()["error"]["code"] == "service_unavailable"
+        assert "127.0.0.1" not in login.text
+        assert (await app_client.get("/s/sometoken")).status_code == 501
+    finally:
+        await close_redis()
+        await close_pool()
+
+
+async def test_rate_limited_endpoints_answer_when_redis_is_up(
+    pg_dsn: str, redis_url: str, monkeypatch: pytest.MonkeyPatch, app_client: httpx.AsyncClient
+) -> None:
+    monkeypatch.setenv("REDIS_URL", redis_url)
+    monkeypatch.setenv("PG_DSN", pg_dsn)
     await close_redis()
     try:
         login = await app_client.post("/api/v1/auth/login")  # без тела → валидация, не 503
