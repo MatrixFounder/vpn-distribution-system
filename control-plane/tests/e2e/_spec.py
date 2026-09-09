@@ -87,3 +87,16 @@ SUBSCRIPTIONS_TABLES = {
     "orders",
     "payments",
 }
+ACCOUNTING_TABLES = {
+    "traffic_reports",
+    "traffic_lines",
+    "traffic_hourly",
+    "traffic_daily",
+    "node_interface_hourly",
+    "traffic_gaps",
+    "reconciliation_runs",
+    "quota_grants",
+    "user_online_ips",
+    "user_blocked_ips",
+    "partition_policies",
+}

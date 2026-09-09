@@ -2,7 +2,8 @@
 
 - ``migrate`` — применить миграции yoyo из ``control-plane/migrations`` под ролью ``app_migrate``
   (docs/architectures/data-model.md §4.6, deployment.md §10.2); ``--rollback`` откатывает последнюю
-  применённую, ``--rollback-all`` — все.
+  применённую, ``--rollback-all`` — все; ``--break-lock`` снимает замок yoyo, оставшийся от
+  клиента, умершего посреди миграции (после него ``migrate`` падает по таймауту замка).
   Подключение: ``MIGRATE_DSN`` (``postgresql://app_migrate@host:5432/db`` — пароль из файла
   ``MIGRATE_PASSWORD_FILE``, либо полный URL с паролем). Миграции выполняются с блокировкой yoyo,
   поэтому несколько экземпляров ``api`` при старте не мешают друг другу.
@@ -61,11 +62,14 @@ def migrate_dsn(dsn: str | None = None, password_file: str | None = None) -> str
     return urlunsplit((scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-def run_migrate(dsn: str, *, rollback: bool = False, rollback_all: bool = False) -> int:
+def run_migrate(
+    dsn: str, *, rollback: bool = False, rollback_all: bool = False, break_lock: bool = False
+) -> int:
     """Применить миграции из ``MIGRATIONS_DIR``, либо откатить последнюю (``rollback``) или все
-    (``rollback_all``); возвращает код завершения."""
+    (``rollback_all``); ``break_lock`` перед этим снимает зависший замок yoyo. Код завершения."""
     from psycopg import OperationalError
     from yoyo import get_backend, read_migrations
+    from yoyo.exceptions import LockTimeout
 
     try:
         backend = get_backend(dsn)
@@ -74,17 +78,30 @@ def run_migrate(dsn: str, *, rollback: bool = False, rollback_all: bool = False)
         print(f"migrate: нет подключения к базе — {exc}".rstrip(), file=sys.stderr)
         return 1
     migrations = read_migrations(str(MIGRATIONS_DIR))
-    with backend.lock():
-        if rollback or rollback_all:
-            selected = backend.to_rollback(migrations)
-            if rollback:
-                selected = selected[:1]  # новейшая применённая
-            backend.rollback_migrations(selected)
-            print(f"migrate: откачено миграций — {len(selected)}")
-        else:
-            selected = backend.to_apply(migrations)
-            backend.apply_migrations(selected)
-            print(f"migrate: применено — {len(selected)}, всего в источнике — {len(migrations)}")
+    if break_lock:
+        backend.break_lock()
+        print("migrate: замок yoyo снят", file=sys.stderr)
+    try:
+        with backend.lock():
+            if rollback or rollback_all:
+                selected = backend.to_rollback(migrations)
+                if rollback:
+                    selected = selected[:1]  # новейшая применённая
+                backend.rollback_migrations(selected)
+                print(f"migrate: откачено миграций — {len(selected)}")
+            else:
+                selected = backend.to_apply(migrations)
+                backend.apply_migrations(selected)
+                print(
+                    f"migrate: применено — {len(selected)}, всего в источнике — {len(migrations)}"
+                )
+    except LockTimeout as exc:
+        # Замок держит другой процесс (параллельный старт api — дождаться) либо он остался от
+        # клиента, умершего посреди миграции: тогда migrate --break-lock.
+        print(
+            f"migrate: база заблокирована — {exc}; если процесса нет: --break-lock", file=sys.stderr
+        )
+        return 1
     return 0
 
 
@@ -97,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     direction.add_argument("--rollback", action="store_true", help="откатить последнюю миграцию")
     direction.add_argument(
         "--rollback-all", action="store_true", help="откатить все применённые миграции"
+    )
+    migrate.add_argument(
+        "--break-lock",
+        action="store_true",
+        help="снять замок yoyo, оставшийся от прерванного запуска, перед выполнением",
     )
     admin = sub.add_parser("admin", help="управление административными учётными записями")
     admin_sub = admin.add_subparsers(dest="admin_command", required=True)
@@ -111,7 +133,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = build_parser().parse_args(argv)
     if args.command == "migrate":
-        return run_migrate(migrate_dsn(), rollback=args.rollback, rollback_all=args.rollback_all)
+        return run_migrate(
+            migrate_dsn(),
+            rollback=args.rollback,
+            rollback_all=args.rollback_all,
+            break_lock=args.break_lock,
+        )
     if args.command == "admin" and args.admin_command == "create":
         print(
             "admin create: реализуется задачей 001.47 (первый Super Admin, §10.4)", file=sys.stderr

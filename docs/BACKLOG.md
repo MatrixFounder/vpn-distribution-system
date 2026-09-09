@@ -74,6 +74,7 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
+- **WI-3** [app.cli migrate: interrupted rollback leaves a migration mark without objects](backlog/wi-3-migrate-interrupted-rollback-leaves-mark-without-objects.md) — effort `S`, status `open`, opened 2026-09-09
 
 ## Closed
 

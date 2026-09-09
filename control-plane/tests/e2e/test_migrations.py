@@ -207,3 +207,29 @@ def test_admin_create_is_a_stub(migrate_env: dict[str, str]) -> None:
     result = run_cli(migrate_env, "admin", "create")
     assert result.returncode == 69
     assert "001.47" in result.stderr
+
+
+def test_migrate_break_lock(migrate_env: dict[str, str]) -> None:
+    """Замок yoyo, оставшийся от клиента, умершего посреди миграции: ``migrate`` завершается
+    кодом 1 по таймауту замка с подсказкой, ``migrate --break-lock`` снимает замок, применяет
+    миграции и оставляет таблицу замка пустой. Строка замка вставляется тестом от app_migrate."""
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
+    with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        conn.execute("INSERT INTO yoyo_lock (locked, ctime, pid) VALUES (1, now(), 0)")
+    try:
+        blocked = run_cli(migrate_env, "migrate")  # таймаут замка yoyo — 10 с
+        assert blocked.returncode == 1, blocked.stderr
+        assert "заблокирована" in blocked.stderr and "--break-lock" in blocked.stderr, (
+            blocked.stderr
+        )
+        freed = run_cli(migrate_env, "migrate", "--break-lock")
+        assert freed.returncode == 0, freed.stderr
+        assert "замок yoyo снят" in freed.stderr and "применено — 0" in freed.stdout, freed
+        with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+            assert conn.execute("SELECT count(*) FROM yoyo_lock").fetchone() == (0,), (
+                "после --break-lock и штатного выхода замок снят"
+            )
+    finally:
+        with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+            conn.execute("DELETE FROM yoyo_lock")
