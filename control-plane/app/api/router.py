@@ -6,13 +6,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.errors import not_implemented
+from app.security.deps import redis_required
 
 router = APIRouter(prefix="/api/v1")
 
-auth = APIRouter(prefix="/auth", tags=["auth"])
+# Раздел /auth — операции с лимитом частоты (§5.12): без Redis отвечают 503 (fail-closed, §9.1).
+auth = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(redis_required)])
 me = APIRouter(prefix="/me", tags=["me"])
 admin = APIRouter(prefix="/admin", tags=["admin"])
 

@@ -15,6 +15,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.security.ratelimit import RETRY_AFTER_SECONDS, RateLimitUnavailable
+
 log = logging.getLogger(__name__)
 
 # Коды по статусам для ошибок, которые поднимает сам фреймворк (маршрутизация, методы).
@@ -28,6 +30,7 @@ STATUS_CODES: dict[int, str] = {
     422: "validation_error",
     429: "rate_limited",
     501: "not_implemented",
+    503: "service_unavailable",
 }
 
 
@@ -96,6 +99,14 @@ async def _validation_handler(_: Request, exc: Exception) -> JSONResponse:
     return error_response(422, "validation_error", "запрос не прошёл проверку", {"errors": errors})
 
 
+async def _unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Fail-closed (§9.1): Redis недоступен → 503 с Retry-After, без подробностей клиенту."""
+    log.error("503 %s %s: %s", request.method, request.url.path, exc)
+    response = error_response(503, "service_unavailable", "сервис временно недоступен")
+    response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
+    return response
+
+
 async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     log.exception("необработанная ошибка: %s %s", request.method, request.url.path)
     return error_response(500, "internal_error", "внутренняя ошибка сервера")
@@ -106,4 +117,5 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _api_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
+    app.add_exception_handler(RateLimitUnavailable, _unavailable_handler)
     app.add_exception_handler(Exception, _unhandled_handler)

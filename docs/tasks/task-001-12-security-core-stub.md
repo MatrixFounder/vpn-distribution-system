@@ -36,6 +36,51 @@
 `SessionStore` и `RateLimiter` получают клиент Redis из `app/redis.py`. `FieldCipher` читает ключ из
 `Settings.encryption_key_path`.
 
+Уточнения при реализации:
+
+- `passwords.py`: `PasswordHasher(memory_cost=65536, time_cost=3, parallelism=4, type=ID)` —
+  §7.2; `verify_password` возвращает ложь и при несовпадении, и при негодном хеше
+  (`VerificationError`, `InvalidHashError`) — единственное «ветвление» — перевод исключений
+  библиотеки в `bool`;
+- `crypto.py`: `FieldCipher(key: bytes, key_version=1)` поверх `cryptography` `AESGCM`; формат
+  контейнера `key_version (1 байт) || nonce (12 байт, случайный) || шифртекст+тег`, версия — в
+  AAD; `decrypt` чужой версии, усечённого или подделанного контейнера → `InvalidTag`; ключ —
+  ровно 32 байта, версия 1…255 (`ValueError`); `FieldCipher.from_settings(settings)` читает файл
+  `encryption_key_path` как base64 от 32 байт (`openssl rand -base64 32`, как в
+  `deploy/compose/secrets/README.md`) — иначе `SecretError`; ротация по `key_version` — позже;
+- `sessions.py`: `Session` (frozen dataclass), `SessionKind = user | admin`, ключи `sess:{id}`,
+  `user_sessions:{subject_id}`; методы `SessionStore` поднимают `NotImplementedError` (001.14);
+- `csrf.py`: `require_csrf` — безопасные методы (GET/HEAD/OPTIONS) проходят, изменяющие →
+  `NotImplementedError` (001.14): заглушка падает громко, а не пропускает молча;
+- `ratelimit.py`: имя `RateLimitUnavailable` — из контракта (`noqa N818`); ключи §5.12 —
+  функции `login_ip`, `login_account`, `register_ip`, `register_email_domain`, `reset_email`,
+  `resend_email`, `subscription_token`, `subscription_unknown_ip`, `redeem_account`, `redeem_ip`,
+  `token_reissue_account`, `api_account`, `node_identity`, плюс `enrollment(ip, token_hash)` по
+  security.md §7.1 (§5.12 ключа для запроса без identity не задаёт); формат
+  `rl:<операция>:<измерение>:<значение>`; `RateLimiter.ensure_available()` — `PING`, отказ →
+  `RateLimitUnavailable`; `check()` сначала `ensure_available()`, затем `NotImplementedError`
+  (счётчик — 001.14);
+- `deps.py`: `current_user`, `current_admin`, `require_permission(name)` → `NotImplementedError`
+  (001.14 / 001.47 / 001.46); сверх контракта `redis_required` — зависимость fail-closed (§9.1):
+  подключена к роутерам `/api/v1/auth` и `/s` (операции с лимитом частоты §5.12), поэтому уже
+  заглушки отвечают 503 при недоступном Redis; `/api/v1/me` и `/admin` не ограничены до
+  появления сессий (001.14/001.16); `/agent/v1` fail-closed не подключает намеренно —
+  security.md §7.3 задаёт состав fail-closed как `/s/{token}`, вход, восстановление, активацию
+  кодов; лимит Node API по identity (§5.12) добавит задача 001.2x вместе с самим Node API;
+- `errors.py`: обработчик `RateLimitUnavailable` → 503 `service_unavailable` с `Retry-After: 5`,
+  подробности отказа — в журнал, не клиенту; `app/redis.py`: таймауты подключения 1 с и
+  команды 2 с — fail-closed отвечает быстро, а не висит (страж: сокет, принимающий соединение и
+  молчащий, — `RateLimitUnavailable` за < 5 с; ревью раунда 1 показало, что закрытый порт эту
+  половину поведения не проверяет);
+- TC-E2E-01: вход — `POST /api/v1/auth/login` (§5.1; `GET` в контракте — описка); «Redis
+  остановлен» в тестах моделируется адресом на закрытый порт (Redis стенда общий), на стенде
+  проверено `docker compose pause redis` через nginx;
+- сопутствующее: `get_pool()`/`get_redis()`/`close_*` учитывают цикл событий — объект чужого
+  (закрытого) цикла отбрасывается и создаётся заново (под uvicorn и в исполнителях цикл один; в
+  тестах цикл на каждый тест, иначе «Event loop is closed»); `tests/conftest.py` — autouse-фикстура
+  `app_environment` даёт полное окружение `Settings` (роль `api`, временный файл ключа), потому что
+  ленивые пул и Redis загружают настройки целиком.
+
 <!-- contract:tests -->
 
 ## Тестовые случаи

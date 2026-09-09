@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.errors import not_implemented
+from app.security.deps import redis_required
 
-router = APIRouter(prefix="/s", tags=["subscription"])
+# Лимит частоты по токену (§5.12): без Redis — 503 (fail-closed, §9.1).
+router = APIRouter(prefix="/s", tags=["subscription"], dependencies=[Depends(redis_required)])
 
 
 @router.get("/{token}", summary="Подписка по токену (001.3x)")
