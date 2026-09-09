@@ -26,6 +26,13 @@ class DatabaseUnavailable(Exception):  # noqa: N818 — парное имя к R
     """PostgreSQL недоступен: C-01 отвечает 503 (reliability.md §9.1)."""
 
 
+async def db_pool() -> asyncpg.Pool:
+    """Зависимость FastAPI для пула: ``Depends(db_pool)``, а не ``Depends(get_pool)`` — у
+    ``get_pool`` есть параметр ``settings: Settings | None``, который FastAPI счёл бы телом
+    запроса и вынес схему настроек в OpenAPI (ревью 001.15, S-1)."""
+    return await get_pool()
+
+
 async def get_pool(settings: Settings | None = None) -> asyncpg.Pool:
     """Единственный пул процесса; ``settings`` читаются из окружения, если не переданы."""
     global _pool, _loop

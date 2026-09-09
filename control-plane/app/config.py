@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 AppRole = Literal["api", "worker-critical", "worker-background", "scheduler"]
@@ -81,15 +81,30 @@ class Settings(BaseSettings):
             raise ValueError("пустой адрес")
         return value
 
+    @model_validator(mode="after")
+    def _api_needs_subscription_domains(self) -> Settings:
+        """Кабинет и подписка (§4.2, §5.6) без доменов не работают: роль ``api`` не стартует
+        с пустым ``SUBSCRIPTION_DOMAINS`` — ошибка конфигурации видна на старте, а не 500 по
+        одной операции (ревью 001.15)."""
+        if self.app_role == "api" and not self.subscription_domains:
+            raise ValueError("SUBSCRIPTION_DOMAINS: для роли api нужен хотя бы один домен")
+        return self
+
     @classmethod
     def load(cls) -> Settings:
         """Прочитать окружение и проверить секреты: файл ключа и файл пароля (если задан) должны
         существовать и быть непустыми — иначе ``SecretError`` при старте."""
-        settings = cls()  # type: ignore[call-arg]  # значения — из окружения (pydantic-settings)
+        settings = cls.read()
         read_secret(settings.encryption_key_path)
         if settings.pg_password_file:
             read_secret(settings.pg_password_file)
         return settings
+
+    @classmethod
+    def read(cls) -> Settings:
+        """Только окружение, без обращения к файлам секретов — для обработчиков, которым нужны
+        несекретные значения на запрос (домены подписки); секреты проверяет ``load()`` на старте."""
+        return cls()  # type: ignore[call-arg]  # значения — из окружения (pydantic-settings)
 
     @property
     def pg_dsn_with_password(self) -> str:

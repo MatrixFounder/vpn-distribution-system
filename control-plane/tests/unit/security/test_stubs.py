@@ -8,6 +8,7 @@ import inspect
 
 import pytest
 import redis.asyncio as redis_async
+from app.errors import ApiError
 from app.redis import close_redis, get_redis
 from app.security import csrf, deps, ratelimit, sessions
 from fastapi import Request
@@ -108,9 +109,12 @@ async def test_fail_closed_is_bounded_when_redis_accepts_but_never_answers(
         await server.wait_closed()
 
 
-async def test_deps_are_stubbed() -> None:
-    with pytest.raises(NotImplementedError):
+async def test_current_user_active_other_deps_stubbed() -> None:
+    """``current_user`` действует с 001.15: без cookie — 401 до обращения к Redis; администратор
+    и разрешения — заглушки до 001.46/001.47."""
+    with pytest.raises(ApiError) as denied:
         await deps.current_user(_request("GET"))
+    assert (denied.value.status, denied.value.code) == (401, "unauthenticated")
     with pytest.raises(NotImplementedError):
         await deps.current_admin(_request("GET"))
     with pytest.raises(NotImplementedError, match="users.read"):

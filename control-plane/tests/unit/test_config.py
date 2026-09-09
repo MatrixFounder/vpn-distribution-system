@@ -76,6 +76,18 @@ def test_invalid_values_are_rejected(
         Settings.load()
 
 
+def test_api_role_requires_subscription_domains(
+    stand_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Кабинет и подписка без доменов не работают: роль api не стартует с пустым
+    SUBSCRIPTION_DOMAINS, остальным ролям домены не нужны (001.15)."""
+    monkeypatch.setenv("SUBSCRIPTION_DOMAINS", " , ")
+    with pytest.raises(ValidationError, match="SUBSCRIPTION_DOMAINS"):
+        Settings.load()
+    monkeypatch.setenv("APP_ROLE", "worker-background")
+    assert Settings.load().subscription_domains == []
+
+
 def test_dsn_with_password_keeps_ipv6_and_explicit_password(tmp_path: Path) -> None:
     secret = tmp_path / "s"
     secret.write_text("x")

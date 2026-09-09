@@ -1,18 +1,22 @@
 """Зависимости FastAPI для обработчиков: текущий пользователь, текущий администратор, проверка
-разрешения (R-35), fail-closed при недоступном Redis (§9.1). Задача 001.12 — интерфейс: субъекты и
-разрешения поднимают ``NotImplementedError`` до 001.14/001.46; ``redis_required`` действует уже
-сейчас — заглушки входа, восстановления, активации кодов и подписки отвечают 503, когда Redis
-недоступен (TC-E2E-01)."""
+разрешения (R-35), fail-closed при недоступном Redis (§9.1). Задача 001.12 — интерфейс;
+``redis_required`` действует с 001.12 (вход, восстановление, активация кодов и подписка отвечают
+503 без Redis); ``current_user`` — с 001.15 (сессия пользователя по cookie ``sid`` §7.1,
+хранилище 001.14); администратор и разрешения — ``NotImplementedError`` до 001.46/001.47."""
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request
 
+from app.errors import ApiError
 from app.redis import get_redis
 from app.security.ratelimit import RateLimiter
+from app.security.sessions import SESSION_COOKIE, Session, SessionStore
 
 
 async def redis_required() -> None:
@@ -21,9 +25,35 @@ async def redis_required() -> None:
     await RateLimiter(await get_redis()).ensure_available()
 
 
-async def current_user(request: Request) -> Any:
-    """Пользователь по сессионной cookie — 001.14."""
-    raise NotImplementedError("current_user — задача 001.14")
+@dataclass(frozen=True, slots=True)
+class CurrentUser:
+    """Аутентифицированный пользователь кабинета: идентификатор и его сессия."""
+
+    id: uuid.UUID
+    session: Session
+
+
+def unauthenticated() -> ApiError:
+    return ApiError("unauthenticated", "требуется вход", status=401)
+
+
+async def current_user(request: Request) -> CurrentUser:
+    """Пользователь по сессионной cookie ``sid`` (§7.1): сессии нет, она истекла, отозвана или
+    принадлежит администратору — 401 ``unauthenticated``. Чтение продлевает TTL бездействия.
+    Без Redis сессию проверить нельзя — роутеры под сессией подключают ``redis_required``
+    (fail-closed §9.1); отказ Redis уже посреди запроса здесь не перехватывается — его переводит
+    в 503 обработчик ошибок приложения (``errors.py``, вторая линия)."""
+    sid = request.cookies.get(SESSION_COOKIE)
+    if not sid:
+        raise unauthenticated()
+    session = await SessionStore(await get_redis()).get(sid)
+    if session is None or session.kind != "user":
+        raise unauthenticated()
+    try:
+        user_id = uuid.UUID(session.subject_id)
+    except ValueError as exc:  # повреждённая запись — не сессия пользователя
+        raise unauthenticated() from exc
+    return CurrentUser(id=user_id, session=session)
 
 
 async def current_admin(request: Request) -> Any:

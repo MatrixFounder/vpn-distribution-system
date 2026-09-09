@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from http.cookies import SimpleCookie
 from typing import Any
 
 import asyncpg
@@ -23,6 +24,26 @@ from app.security.sessions import SessionStore, subject_sessions_key
 
 DOMAIN = "test-auth.local"
 PASSWORD = "correct horse battery staple"  # noqa: S105 — тестовый пароль
+
+
+def cookie_attributes(header: str, name: str = "sid") -> tuple[str, dict[str, str]]:
+    """Разобрать Set-Cookie: значение и атрибуты в нижнем регистре (без подстрочных догадок)."""
+    jar: SimpleCookie = SimpleCookie()
+    jar.load(header)
+    assert name in jar, header
+    morsel = jar[name]
+    attributes = {
+        key: str(value).lower() for key, value in morsel.items() if value not in ("", False)
+    }
+    return morsel.value, attributes
+
+
+def cookies_of(response: httpx.Response) -> dict[str, tuple[str, dict[str, str]]]:
+    """Все cookie ответа по имени: (значение, атрибуты)."""
+    return {
+        header.split("=", 1)[0]: cookie_attributes(header, header.split("=", 1)[0])
+        for header in response.headers.get_list("set-cookie")
+    }
 
 
 @dataclass

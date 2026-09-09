@@ -30,6 +30,7 @@ def app_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         "REDIS_URL": "redis://127.0.0.1:6379/0",
         "APP_ROLE": "api",
         "APP_ENCRYPTION_KEY_FILE": str(key_file),
+        "SUBSCRIPTION_DOMAINS": "sub1.example.com,sub2.example.com",  # два домена §4.2
     }
     added = [name for name in defaults if name not in os.environ]
     for name in added:

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-import asyncpg
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -99,7 +98,6 @@ async def get_rate_limiter() -> ratelimit.RateLimiter:
 Users = Annotated[UserService, Depends(get_user_service)]
 Sessions = Annotated[SessionStore, Depends(get_session_store)]
 Limiter = Annotated[ratelimit.RateLimiter, Depends(get_rate_limiter)]
-Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 
 
 def client_ip(request: Request) -> str:

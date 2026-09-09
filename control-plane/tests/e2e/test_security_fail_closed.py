@@ -10,6 +10,8 @@ import pytest
 from app.main import create_app
 from app.redis import close_redis
 
+from ._me import ME_OPERATIONS, REQUEST_BODY
+
 # Все семь маршрутов /auth с валидными телами: fail-closed должен закрывать каждый (§7.3, §9.1).
 AUTH_REQUESTS: list[tuple[str, dict[str, object] | None]] = [
     ("/api/v1/auth/register", {"email": "a@b.io", "password": "x" * 8, "aup_version": "1"}),
@@ -48,7 +50,18 @@ async def test_rate_limited_endpoints_fail_closed_without_redis(
                 assert response.headers["retry-after"] == "5", path
                 assert "set-cookie" not in response.headers, path
             assert (await client.get("/s/sometoken")).status_code == 503
-            assert (await client.get("/api/v1/me")).status_code == 501, "без лимита — не зависит"
+            # Кабинет живёт на сессиях в Redis (001.15): без Redis каждая из восьми операций —
+            # 503 до поиска сессии, а не 401 и не 500 (ревью 001.15, C-2).
+            for method, path in ME_OPERATIONS:
+                cabinet = await client.request(
+                    method, path, params={"confirm": "true"}, json=REQUEST_BODY.get(path)
+                )
+                assert cabinet.status_code == 503, (method, path, cabinet.text)
+                assert cabinet.headers["retry-after"] == "5", (method, path)
+                assert "set-cookie" not in cabinet.headers, (method, path)
+            assert (await client.get("/api/v1/admin/dashboard")).status_code == 501, (
+                "без лимита и сессии — не зависит"
+            )
             assert (await client.get("/healthz")).status_code == 200
     finally:
         await close_redis()

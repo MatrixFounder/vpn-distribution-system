@@ -16,7 +16,6 @@ import asyncio
 import datetime as dt
 import statistics
 import time
-from http.cookies import SimpleCookie
 
 import httpx
 import pytest
@@ -25,7 +24,7 @@ from app.domain.users import UserService, hash_token
 from app.security import ratelimit
 from app.security.sessions import SessionStore
 
-from ._auth import PASSWORD, AuthStand, auth_stand
+from ._auth import PASSWORD, AuthStand, auth_stand, cookies_of
 
 AUTH_ROUTES = {
     "/api/v1/auth/register": "RegisterIn",
@@ -46,25 +45,6 @@ VOLATILE_HEADERS = {"date"}  # различаются между любыми д
 ROUNDS = 12  # выборка времени ответа reset-request на каждый из двух случаев
 TIMING_FLOOR_MS = 3.0  # шум стенда: сеть до VM и планировщик Python
 TIMING_RATIO = 0.25
-
-
-def cookie_attributes(header: str, name: str = "sid") -> tuple[str, dict[str, str]]:
-    """Разобрать Set-Cookie: значение и атрибуты в нижнем регистре (без подстрочных догадок)."""
-    jar: SimpleCookie = SimpleCookie()
-    jar.load(header)
-    assert name in jar, header
-    morsel = jar[name]
-    attributes = {
-        key: str(value).lower() for key, value in morsel.items() if value not in ("", False)
-    }
-    return morsel.value, attributes
-
-
-def cookies_of(response: httpx.Response) -> dict[str, tuple[str, dict[str, str]]]:
-    return {
-        header.split("=", 1)[0]: cookie_attributes(header, header.split("=", 1)[0])
-        for header in response.headers.get_list("set-cookie")
-    }
 
 
 def stable_headers(response: httpx.Response) -> dict[str, str]:

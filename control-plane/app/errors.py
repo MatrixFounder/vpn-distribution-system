@@ -14,6 +14,8 @@ import asyncpg
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db.pool import DatabaseUnavailable
@@ -130,4 +132,10 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RateLimitUnavailable, _unavailable_handler)
     app.add_exception_handler(DatabaseUnavailable, _unavailable_handler)
     app.add_exception_handler(asyncpg.PostgresConnectionError, _unavailable_handler)
+    # Сессии и счётчики живут в Redis: его недоступность посреди запроса (после redis_required
+    # или на маршруте без него) — тоже 503, а не 500 (ревью 001.15). Только отказы подключения и
+    # таймауты: прочие RedisError (WRONGTYPE, ошибка Lua) — дефекты кода, им положен 500 с
+    # трассировкой в журнале.
+    app.add_exception_handler(RedisConnectionError, _unavailable_handler)
+    app.add_exception_handler(RedisTimeoutError, _unavailable_handler)
     app.add_exception_handler(Exception, _unhandled_handler)
