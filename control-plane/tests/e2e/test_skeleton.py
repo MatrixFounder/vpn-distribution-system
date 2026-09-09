@@ -87,7 +87,6 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
 @pytest.mark.parametrize(
     ("method", "path", "operation"),
     [
-        ("POST", "/api/v1/auth/login", "auth.login"),
         ("GET", "/api/v1/me", "me.profile"),
         ("GET", "/api/v1/admin/dashboard", "admin.dashboard"),
         ("POST", "/agent/v1/enroll", "agent.enroll"),

@@ -11,8 +11,25 @@ from dataclasses import dataclass
 from typing import Literal
 
 import redis.asyncio as redis_async
+from fastapi import Response
 
 SessionKind = Literal["user", "admin"]
+
+# Cookie сессии (§7.1): непрозрачный идентификатор, HttpOnly, Secure, SameSite=Lax, весь сайт.
+SESSION_COOKIE = "sid"
+USER_SESSION_TTL = 30 * 24 * 3600  # 30 суток бездействия — до уточнения в 001.14
+
+
+def set_session_cookie(response: Response, sid: str, ttl: int) -> None:
+    """Выставить cookie сессии с атрибутами §7.1."""
+    response.set_cookie(
+        SESSION_COOKIE, sid, max_age=ttl, path="/", httponly=True, secure=True, samesite="lax"
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    """Снять cookie сессии теми же атрибутами (иначе браузер не сопоставит cookie)."""
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, secure=True, samesite="lax")
 
 
 def session_key(sid: str) -> str:
