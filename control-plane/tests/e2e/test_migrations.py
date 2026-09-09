@@ -12,7 +12,7 @@ import asyncpg
 import psycopg
 from app.cli import migrate_dsn
 
-from ._cli import MIGRATIONS_DIR, migration_count, run_cli
+from ._cli import MIGRATIONS_DIR, migration_count, rollback_through, run_cli
 from ._spec import EXPECTED_ENUMS
 
 EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
@@ -238,3 +238,45 @@ def test_migrate_break_lock(migrate_env: dict[str, str]) -> None:
     finally:
         with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
             conn.execute("DELETE FROM yoyo_lock")
+
+
+def test_migrate_detects_mark_without_objects_and_unmark_repairs(
+    migrate_env: dict[str, str],
+) -> None:
+    """WI-3: клиент, умерший между транзакцией отката и снятием отметки yoyo, оставляет миграцию
+    «применённой» без объектов; прежняя ``migrate`` считала бы это нормой («применено — 0»).
+    Теперь самопроверка перед применением и откатом завершает команду кодом 65 с подсказкой,
+    ``--unmark`` снимает отметку (ремонт), и ``migrate`` применяет миграцию заново. Состояние
+    воспроизводится так же, как оно возникает: откат миграции, затем отметка без объектов."""
+    from yoyo import get_backend, read_migrations
+
+    target = "090_schema_ops"
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    steps = rollback_through(migrate_env, target)
+    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
+    backend = get_backend(dsn)
+    backend.mark_migrations(read_migrations(str(MIGRATIONS_DIR)).filter(lambda m: m.id == target))
+    backend.connection.close()
+    try:
+        for direction in ((), ("--rollback",)):
+            broken = run_cli(migrate_env, "migrate", *direction)
+            assert broken.returncode == 65, (direction, broken.stdout, broken.stderr)
+            assert target in broken.stderr and "control_plane.events" in broken.stderr, (
+                broken.stderr
+            )
+            assert f"--unmark {target}" in broken.stderr, broken.stderr
+        with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+            assert conn.execute("SELECT to_regclass('control_plane.events')").fetchone() == (
+                None,
+            ), "самопроверка ничего не применяет и не откатывает"
+        unknown = run_cli(migrate_env, "migrate", "--unmark", "999_nope")
+        assert unknown.returncode == 64 and "нет в источнике" in unknown.stderr, unknown.stderr
+        repaired = run_cli(migrate_env, "migrate", "--unmark", target)
+        assert repaired.returncode == 0 and "отметка снята" in repaired.stdout, repaired
+        applied = run_cli(migrate_env, "migrate")
+        assert applied.returncode == 0 and f"применено — {steps}" in applied.stdout, applied
+    finally:
+        if run_cli(migrate_env, "migrate").returncode != 0:  # стенд не остаётся полуразобранным
+            run_cli(migrate_env, "migrate", "--unmark", target)
+            assert run_cli(migrate_env, "migrate").returncode == 0
+    assert run_cli(migrate_env, "migrate").returncode == 0

@@ -74,11 +74,11 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-5** [security.md should state the no-provider CAPTCHA state and one-verification-per-request rule](backlog/wi-5-security-md-should-state-the-no-provider-captcha-state-and-one-verification-per-request-rule.md) — effort `S`, status `open`, opened 2026-09-09
-- **WI-4** [Tolerance guards must be calibrated against measured noise and planted above the bound](backlog/wi-4-tolerance-guards-must-be-calibrated-against-measured-noise-and-planted-above-the-bound.md) — effort `S`, status `open`, opened 2026-09-09
-- **WI-3** [app.cli migrate: interrupted rollback leaves a migration mark without objects](backlog/wi-3-migrate-interrupted-rollback-leaves-mark-without-objects.md) — effort `S`, status `open`, opened 2026-09-09
 
 ## Closed
 
+- **WI-4** [Tolerance guards must be calibrated against measured noise and planted above the bound](backlog/wi-4-tolerance-guards-must-be-calibrated-against-measured-noise-and-planted-above-the-bound.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
+- **WI-5** [security.md should state the no-provider CAPTCHA state and one-verification-per-request rule](backlog/wi-5-security-md-should-state-the-no-provider-captcha-state-and-one-verification-per-request-rule.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
+- **WI-3** [app.cli migrate: interrupted rollback leaves a migration mark without objects](backlog/wi-3-migrate-interrupted-rollback-leaves-mark-without-objects.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-2** [Builder-side guards need a planted regression before trust](backlog/wi-2-builder-side-guards-need-a-planted-regression-before-trust.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08
 - **WI-1** [Test gate 'no tests → skip' must derive from runner discovery rules](backlog/wi-1-test-gate-no-tests-skip-must-derive-from-runner-discovery-rules.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08
