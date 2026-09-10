@@ -74,7 +74,6 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-15** [Числа в отчёте задачи получаются командой, а не по памяти](backlog/wi-15-counts-in-reports-come-from-a-command.md) — effort `S`, status `open`, opened 2026-09-10
 - **WI-14** [Отпечаток дерева обязан быть в задании линзе ревью](backlog/wi-14-fingerprint-in-the-review-brief.md) — effort `S`, status `open`, opened 2026-09-10
 - **WI-13** [Посадка обязана снимать проверяемое поведение, а не просто менять файл](backlog/wi-13-planting-must-remove-the-behaviour.md) — effort `M`, status `open`, opened 2026-09-10
 - **WI-12** [Прогон под посадкой без остановки на первом падении](backlog/wi-12-planting-run-without-exitfirst.md) — effort `S`, status `open`, opened 2026-09-10
