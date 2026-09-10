@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import textwrap
@@ -44,89 +45,129 @@ KINDS = {
     "STUB CREATION": "заглушки",
     "LOGIC IMPLEMENTATION": "логика",
 }
-STATES = {"принята": "done", "в работе": "wip", "готова": "ready", "ждёт": "waits"}
+# Диаграмма Ганта без календаря: единица оси — час оценки, задача стартует после всех своих
+# зависимостей (``after``). Mermaid gantt умеет только даты, поэтому час оценки кодируется
+# миллисекундой от эпохи (``dateFormat x``, длительность ``Nms``), а ось подписана ``%-L`` —
+# миллисекундами, то есть часами от старта. Подпись справа от полосы, если правый отступ не
+# меньше ширины подписи плюс половины левого — иначе mermaid переносит её влево.
+GANTT_INIT = {
+    "theme": "base",
+    "themeVariables": {
+        "fontSize": "12px",
+        "taskBkgColor": "#ffffff",
+        "taskBorderColor": "#9e9e9e",
+        "taskTextColor": "#212121",
+        "taskTextOutsideColor": "#212121",
+        "taskTextDarkColor": "#212121",
+        "taskTextLightColor": "#212121",
+        "doneTaskBkgColor": "#c8e6c9",
+        "doneTaskBorderColor": "#2e7d32",
+        "activeTaskBkgColor": "#fff3c4",
+        "activeTaskBorderColor": "#f9a825",
+        "critBkgColor": "#ffffff",
+        "critBorderColor": "#c62828",
+        "sectionBkgColor": "#f5f5f5",
+        "sectionBkgColor2": "#ffffff",
+        "altSectionBkgColor": "#ffffff",
+        "gridColor": "#e0e0e0",
+    },
+    "gantt": {
+        "axisFormat": "%-L",
+        "tickInterval": "5millisecond",
+        "useWidth": 1150,
+        "leftPadding": 250,
+        "rightPadding": 330,
+        "topPadding": 40,
+        "barHeight": 16,
+        "barGap": 4,
+        "fontSize": 12,
+        "sectionFontSize": 12,
+        "numberSectionStyles": 2,
+    },
+}
 PRIORITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
-# Короткие подписи узлов диаграммы: полное название задачи слишком длинно для узла. Задача без
-# подписи получает усечённое название.
+# Короткие подписи задач на диаграмме: полное название слишком длинно для строки Ганта. Задача
+# без подписи получает усечённое название. Двоеточие в подписи недопустимо — в синтаксисе gantt
+# оно отделяет текст от параметров задачи.
 LABELS = {
     "01": "Каркас репозитория",
     "02": "Compose стенда",
     "03": "Миграции и роли",
-    "04": "Схема: аккаунты",
-    "05": "Схема: тарифы",
-    "06": "Схема: ноды",
-    "07": "Схема: подписки",
-    "08": "Схема: учёт трафика",
-    "09": "Схема: события, очередь",
+    "04": "Схема — аккаунты",
+    "05": "Схема — тарифы",
+    "06": "Схема — ноды",
+    "07": "Схема — подписки",
+    "08": "Схема — учёт трафика",
+    "09": "Схема — события, очередь",
     "10": "Каркас FastAPI",
-    "11": "Очередь: заглушки",
-    "12": "Безопасность: заглушки",
-    "74": "Очередь: повторы, DLQ",
-    "13": "Auth API: заглушки",
-    "14": "Auth API: логика",
-    "15": "/me: заглушки",
+    "11": "Очередь — заглушки",
+    "12": "Безопасность — заглушки",
+    "74": "Очередь — повторы, DLQ",
+    "13": "Auth API — заглушки",
+    "14": "Auth API — логика",
+    "15": "/me — заглушки",
     "84": "Сессии, CSRF, лимиты входа",
-    "18": "Admin-каталог: заглушки",
+    "18": "Admin-каталог — заглушки",
     "19": "Тарифы и группы",
-    "21": "Подписки: заглушки",
-    "22": "Подписки: логика",
-    "20": "Коды: логика",
+    "21": "Подписки — заглушки",
+    "22": "Подписки — логика",
+    "20": "Коды — логика",
     "83": "Истечение подписок",
-    "24": "Nodes API: заглушки",
+    "24": "Nodes API — заглушки",
     "25": "Enrollment, identity",
-    "26": "Inbound, Xray: заглушки",
-    "28": "Node API: заглушки",
+    "26": "Inbound, Xray — заглушки",
+    "28": "Node API — заглушки",
     "29": "Поток состава",
-    "27": "Inbound, Xray: логика",
+    "27": "Inbound, Xray — логика",
     "30": "Heartbeat, статусы",
     "31": "Версии, update_agent",
     "32": "Внешние пробы",
     "75": "Снапшот, long-poll",
     "76": "Служба команд",
-    "33": "Отчёты, учёт: заглушки",
+    "33": "Отчёты, учёт — заглушки",
     "23": "Коэффициент по дате",
-    "34": "Приём отчёта: проверки",
-    "77": "Приём отчёта: факты",
+    "34": "Приём отчёта — проверки",
+    "77": "Приём отчёта — факты",
     "35": "Лимиты 80/95/100",
     "36": "Гранты квоты",
     "37": "Сверки, партиции",
     "38": "Лимит адресов",
     "39": "Признаки перепродажи",
     "40": "Стратегия разрыва",
-    "41": "/s/token: заглушки",
+    "41": "/s/token — заглушки",
     "42": "Токен подписки",
-    "16": "/me: логика",
+    "16": "/me — логика",
     "17": "Удаление аккаунта",
     "43": "Генераторы форматов",
     "44": "Состав серверов",
     "45": "Два домена подписки",
-    "46": "Admin auth, RBAC: заглушки",
+    "46": "Admin auth, RBAC — заглушки",
     "47": "TOTP, сессии админов",
     "48": "RBAC, Audit Log",
-    "49": "API панели: заглушки",
-    "50": "API панели: пользователи",
-    "85": "API панели: ноды, дашборд",
-    "51": "События, почта: заглушки",
+    "49": "API панели — заглушки",
+    "50": "API панели — пользователи",
+    "85": "API панели — ноды, дашборд",
+    "51": "События, почта — заглушки",
     "52": "Уведомления",
     "78": "Доставка почты",
     "79": "Доставка webhook",
-    "53": "Agent: каркас",
-    "54": "Agent: enrollment",
-    "55": "Agent: long-poll",
-    "56": "Agent: счётчики, отчёты",
-    "80": "Agent: применение конфига",
-    "60": "Agent: разрыв readd",
-    "57": "Agent: локальный грант",
-    "58": "Agent: блокировка адресов",
-    "59": "Agent: heartbeat, метрики",
+    "53": "Agent — каркас",
+    "54": "Agent — enrollment",
+    "55": "Agent — long-poll",
+    "56": "Agent — счётчики, отчёты",
+    "80": "Agent — применение конфига",
+    "60": "Agent — разрыв readd",
+    "57": "Agent — локальный грант",
+    "58": "Agent — блокировка адресов",
+    "59": "Agent — heartbeat, метрики",
     "61": "Bootstrap ноды, systemd",
-    "81": "Agent: команды, update",
-    "82": "Agent: route_block, restart",
-    "86": "Agent: nftables",
-    "62": "Web: каркасы",
-    "63": "Web: кабинет",
-    "64": "Web: панель",
+    "81": "Agent — команды, update",
+    "82": "Agent — route_block, restart",
+    "86": "Agent — nftables",
+    "62": "Web — каркасы",
+    "63": "Web — кабинет",
+    "64": "Web — панель",
     "65": "Локализация RU/EN",
     "66": "Compose prod, mTLS",
     "67": "pgbackrest, восстановление",
@@ -134,8 +175,8 @@ LABELS = {
     "69": "Правила, Suspended",
     "70": "Страница состояния",
     "71": "Документация",
-    "72": "Rate limits: полный список",
-    "73": "Стенд: приёмка",
+    "72": "Rate limits — полный список",
+    "73": "Стенд — приёмка",
 }
 
 
@@ -337,41 +378,36 @@ def render(plan: Plan) -> str:
         ),
         "",
         wrap(
-            "Диаграмма: узел — задача `NN`; форма — тип (двойная рамка — конфигурация, "
-            "скруглённая — заглушки, прямоугольник — логика); заливка — состояние (зелёная — "
-            "принята, синяя — в работе, жёлтая — готова к началу, без заливки — ждёт "
-            "зависимостей); стрелка — «нужна для». Полные названия — в разделе "
+            "Диаграмма — Гант без календаря: горизонталь — часы оценки от старта, полоса задачи "
+            "начинается после всех её зависимостей и длится её оценку; секции — этапы. Заливка — "
+            "состояние (зелёная — принята, жёлтая — готова к началу или в работе, белая — ждёт "
+            "зависимостей), красная рамка — критический путь. Полные названия — в разделе "
             "«Последовательность выполнения задач»."
         ),
         "",
         "```mermaid",
-        "flowchart LR",
-        "  classDef done fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20",
-        "  classDef wip fill:#bbdefb,stroke:#1565c0,color:#0d47a1",
-        "  classDef ready fill:#fff3c4,stroke:#f9a825,color:#5d4037",
-        "  classDef waits fill:#ffffff,stroke:#9e9e9e,color:#424242",
+        "%%{init: " + json.dumps(GANTT_INIT, ensure_ascii=False, indent=2) + "}%%",
+        "gantt",
+        "  title Порядок задач по графу зависимостей — часы оценки от старта, не календарь",
+        "  dateFormat x",
+        "  todayMarker off",
     ]
     for stage in sorted(plan.stages):
-        name = plan.stages[stage].replace('"', "'")
-        lines.append(f'  subgraph S{stage}["{name}"]')
-        lines.append("    direction TB")
+        lines.append(f"  section {plan.stages[stage]}")
         for t in plan.order:
             task = tasks[t]
             if task.stage != stage:
                 continue
-            label = LABELS.get(task.nn) or (task.title[:24] + "…")
-            label = label.replace('"', "'")
-            text = f'"{task.nn}<br/>{label}"'
-            shape = {
-                "CONFIGURATION": f"[[{text}]]",
-                "STUB CREATION": f"({text})",
-                "LOGIC IMPLEMENTATION": f"[{text}]",
-            }[task.kind]
-            lines.append(f"    T{task.nn}{shape}:::{STATES[plan.state(task)]}")
-        lines.append("  end")
-    for t in plan.order:
-        for dep in tasks[t].deps:
-            lines.append(f"  T{tasks[dep].nn} --> T{tasks[t].nn}")
+            label = LABELS.get(task.nn) or task.title[:24] + "…"
+            label = label.replace(":", " —")
+            state = plan.state(task)
+            tags = ["done"] if state == "принята" else ["active"] if state != "ждёт" else []
+            if t in cp:
+                tags.append("crit")
+            suffix = " · в работе" if state == "в работе" else ""
+            start = f"after {' '.join('t' + tasks[d].nn for d in task.deps)}" if task.deps else "0"
+            meta = ", ".join([*tags, f"t{task.nn}", start, f"{task.estimate}ms"])
+            lines.append(f"    {task.nn} {label}{suffix} :{meta}")
     lines += ["```", "", END]
     return "\n".join(lines)
 

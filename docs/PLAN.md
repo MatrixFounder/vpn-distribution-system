@@ -67,308 +67,150 @@
 Критический путь до задачи 001.73 — 62 ч по оценкам, 7 из 18 задач приняты: 01 → 02 → 03 → 04 → 09 →
 10 → 12 → 24 → 28 → 33 → 23 → 34 → 77 → 56 → 80 → 58 → 86 → 73.
 
-Диаграмма: узел — задача `NN`; форма — тип (двойная рамка — конфигурация, скруглённая — заглушки,
-прямоугольник — логика); заливка — состояние (зелёная — принята, синяя — в работе, жёлтая — готова к
-началу, без заливки — ждёт зависимостей); стрелка — «нужна для». Полные названия — в разделе
-«Последовательность выполнения задач».
+Диаграмма — Гант без календаря: горизонталь — часы оценки от старта, полоса задачи начинается после
+всех её зависимостей и длится её оценку; секции — этапы. Заливка — состояние (зелёная — принята,
+жёлтая — готова к началу или в работе, белая — ждёт зависимостей), красная рамка — критический путь.
+Полные названия — в разделе «Последовательность выполнения задач».
 
 ```mermaid
-flowchart LR
-  classDef done fill:#c8e6c9,stroke:#2e7d32,color:#1b5e20
-  classDef wip fill:#bbdefb,stroke:#1565c0,color:#0d47a1
-  classDef ready fill:#fff3c4,stroke:#f9a825,color:#5d4037
-  classDef waits fill:#ffffff,stroke:#9e9e9e,color:#424242
-  subgraph S0["Этап 0 — репозиторий и стенд"]
-    direction TB
-    T01[["01<br/>Каркас репозитория"]]:::done
-    T02[["02<br/>Compose стенда"]]:::done
-    T03[["03<br/>Миграции и роли"]]:::done
-  end
-  subgraph S1["Этап 1 — схема данных и каркас Control Plane"]
-    direction TB
-    T04[["04<br/>Схема: аккаунты"]]:::done
-    T05[["05<br/>Схема: тарифы"]]:::done
-    T06[["06<br/>Схема: ноды"]]:::done
-    T07[["07<br/>Схема: подписки"]]:::done
-    T08[["08<br/>Схема: учёт трафика"]]:::done
-    T09[["09<br/>Схема: события, очередь"]]:::done
-    T10("10<br/>Каркас FastAPI"):::done
-    T11("11<br/>Очередь: заглушки"):::done
-    T12("12<br/>Безопасность: заглушки"):::done
-    T74["74<br/>Очередь: повторы, DLQ"]:::done
-  end
-  subgraph S2["Этап 2 — пользователи и кабинет"]
-    direction TB
-    T13("13<br/>Auth API: заглушки"):::done
-    T14["14<br/>Auth API: логика"]:::done
-    T15("15<br/>/me: заглушки"):::done
-    T84["84<br/>Сессии, CSRF, лимиты входа"]:::done
-  end
-  subgraph S3["Этап 3 — тарифы, подписки, коды"]
-    direction TB
-    T18("18<br/>Admin-каталог: заглушки"):::done
-    T19["19<br/>Тарифы и группы"]:::ready
-    T21("21<br/>Подписки: заглушки"):::ready
-    T22["22<br/>Подписки: логика"]:::waits
-    T20["20<br/>Коды: логика"]:::waits
-    T83["83<br/>Истечение подписок"]:::waits
-  end
-  subgraph S4["Этап 4 — парк нод и Node API"]
-    direction TB
-    T24("24<br/>Nodes API: заглушки"):::ready
-    T25["25<br/>Enrollment, identity"]:::waits
-    T26("26<br/>Inbound, Xray: заглушки"):::waits
-    T28("28<br/>Node API: заглушки"):::waits
-    T29["29<br/>Поток состава"]:::waits
-    T27["27<br/>Inbound, Xray: логика"]:::waits
-    T30["30<br/>Heartbeat, статусы"]:::waits
-    T31["31<br/>Версии, update_agent"]:::waits
-    T32["32<br/>Внешние пробы"]:::waits
-    T75["75<br/>Снапшот, long-poll"]:::waits
-    T76["76<br/>Служба команд"]:::waits
-  end
-  subgraph S5["Этап 5 — учёт трафика и лимиты"]
-    direction TB
-    T33("33<br/>Отчёты, учёт: заглушки"):::waits
-    T23["23<br/>Коэффициент по дате"]:::waits
-    T34["34<br/>Приём отчёта: проверки"]:::waits
-    T77["77<br/>Приём отчёта: факты"]:::waits
-    T35["35<br/>Лимиты 80/95/100"]:::waits
-    T36["36<br/>Гранты квоты"]:::waits
-    T37["37<br/>Сверки, партиции"]:::waits
-    T38["38<br/>Лимит адресов"]:::waits
-    T39["39<br/>Признаки перепродажи"]:::waits
-    T40["40<br/>Стратегия разрыва"]:::waits
-  end
-  subgraph S6["Этап 6 — subscription-эндпоинт и логика кабинета"]
-    direction TB
-    T41("41<br/>/s/token: заглушки"):::ready
-    T42["42<br/>Токен подписки"]:::waits
-    T16["16<br/>/me: логика"]:::waits
-    T17["17<br/>Удаление аккаунта"]:::waits
-    T43["43<br/>Генераторы форматов"]:::waits
-    T44["44<br/>Состав серверов"]:::waits
-    T45["45<br/>Два домена подписки"]:::waits
-  end
-  subgraph S7["Этап 7 — администрирование, RBAC, аудит, поддержка"]
-    direction TB
-    T46("46<br/>Admin auth, RBAC: заглушки"):::ready
-    T47["47<br/>TOTP, сессии админов"]:::waits
-    T48["48<br/>RBAC, Audit Log"]:::waits
-    T49("49<br/>API панели: заглушки"):::waits
-    T50["50<br/>API панели: пользователи"]:::waits
-    T85["85<br/>API панели: ноды, дашборд"]:::waits
-  end
-  subgraph S8["Этап 8 — уведомления и почта"]
-    direction TB
-    T51("51<br/>События, почта: заглушки"):::ready
-    T52["52<br/>Уведомления"]:::waits
-    T78["78<br/>Доставка почты"]:::waits
-    T79["79<br/>Доставка webhook"]:::waits
-  end
-  subgraph S9["Этап 9 — Node Agent (Go)"]
-    direction TB
-    T53("53<br/>Agent: каркас"):::waits
-    T54["54<br/>Agent: enrollment"]:::waits
-    T55["55<br/>Agent: long-poll"]:::waits
-    T56["56<br/>Agent: счётчики, отчёты"]:::waits
-    T80["80<br/>Agent: применение конфига"]:::waits
-    T60["60<br/>Agent: разрыв readd"]:::waits
-    T57["57<br/>Agent: локальный грант"]:::waits
-    T58["58<br/>Agent: блокировка адресов"]:::waits
-    T59["59<br/>Agent: heartbeat, метрики"]:::waits
-    T61[["61<br/>Bootstrap ноды, systemd"]]:::waits
-    T81["81<br/>Agent: команды, update"]:::waits
-    T82["82<br/>Agent: route_block, restart"]:::waits
-    T86["86<br/>Agent: nftables"]:::waits
-  end
-  subgraph S10["Этап 10 — интерфейсы web"]
-    direction TB
-    T62("62<br/>Web: каркасы"):::ready
-    T63["63<br/>Web: кабинет"]:::waits
-    T64["64<br/>Web: панель"]:::waits
-    T65["65<br/>Локализация RU/EN"]:::waits
-  end
-  subgraph S11["Этап 11 — эксплуатация"]
-    direction TB
-    T66[["66<br/>Compose prod, mTLS"]]:::waits
-    T67[["67<br/>pgbackrest, восстановление"]]:::waits
-    T68[["68<br/>Метрики, алерты"]]:::waits
-    T69["69<br/>Правила, Suspended"]:::waits
-    T70[["70<br/>Страница состояния"]]:::waits
-    T71[["71<br/>Документация"]]:::waits
-  end
-  subgraph S12["Этап 12 — интеграция и приёмка"]
-    direction TB
-    T72["72<br/>Rate limits: полный список"]:::waits
-    T73[["73<br/>Стенд: приёмка"]]:::waits
-  end
-  T01 --> T02
-  T02 --> T03
-  T03 --> T04
-  T03 --> T05
-  T05 --> T06
-  T05 --> T07
-  T06 --> T08
-  T07 --> T08
-  T04 --> T09
-  T09 --> T10
-  T10 --> T11
-  T10 --> T12
-  T11 --> T74
-  T12 --> T13
-  T13 --> T14
-  T04 --> T14
-  T13 --> T15
-  T14 --> T84
-  T12 --> T18
-  T05 --> T18
-  T18 --> T19
-  T07 --> T21
-  T11 --> T21
-  T21 --> T22
-  T19 --> T22
-  T18 --> T20
-  T22 --> T20
-  T22 --> T83
-  T06 --> T24
-  T12 --> T24
-  T24 --> T25
-  T24 --> T26
-  T24 --> T28
-  T11 --> T28
-  T28 --> T29
-  T22 --> T29
-  T26 --> T29
-  T26 --> T27
-  T29 --> T27
-  T28 --> T30
-  T29 --> T30
-  T29 --> T31
-  T25 --> T31
-  T30 --> T32
-  T44 --> T32
-  T49 --> T32
-  T29 --> T75
-  T29 --> T76
-  T28 --> T33
-  T08 --> T33
-  T19 --> T23
-  T33 --> T23
-  T33 --> T34
-  T23 --> T34
-  T22 --> T34
-  T34 --> T77
-  T23 --> T77
-  T29 --> T35
-  T33 --> T35
-  T77 --> T35
-  T35 --> T36
-  T09 --> T37
-  T77 --> T37
-  T29 --> T38
-  T77 --> T38
-  T38 --> T39
-  T86 --> T39
-  T35 --> T40
-  T31 --> T40
-  T10 --> T41
-  T07 --> T41
-  T14 --> T42
-  T22 --> T42
-  T41 --> T42
-  T84 --> T42
-  T15 --> T16
-  T22 --> T16
-  T42 --> T16
-  T77 --> T16
-  T84 --> T16
-  T16 --> T17
-  T29 --> T17
-  T41 --> T43
-  T27 --> T43
-  T43 --> T44
-  T30 --> T44
-  T42 --> T45
-  T12 --> T46
-  T09 --> T46
-  T14 --> T47
-  T46 --> T47
-  T84 --> T47
-  T46 --> T48
-  T47 --> T48
-  T46 --> T49
-  T30 --> T50
-  T48 --> T50
-  T49 --> T50
-  T77 --> T50
-  T49 --> T85
-  T30 --> T85
-  T48 --> T85
-  T11 --> T51
-  T09 --> T51
-  T51 --> T52
-  T65 --> T52
-  T52 --> T78
-  T65 --> T78
-  T52 --> T79
-  T01 --> T53
-  T28 --> T53
-  T53 --> T54
-  T25 --> T54
-  T54 --> T55
-  T29 --> T55
-  T53 --> T56
-  T77 --> T56
-  T55 --> T80
-  T56 --> T80
-  T40 --> T60
-  T80 --> T60
-  T36 --> T57
-  T56 --> T57
-  T60 --> T57
-  T38 --> T58
-  T80 --> T58
-  T30 --> T59
-  T54 --> T59
-  T54 --> T61
-  T55 --> T81
-  T54 --> T81
-  T60 --> T82
-  T58 --> T82
-  T58 --> T86
-  T01 --> T62
-  T10 --> T62
-  T62 --> T63
-  T16 --> T63
-  T50 --> T64
-  T62 --> T64
-  T85 --> T64
-  T62 --> T65
-  T15 --> T65
-  T02 --> T66
-  T25 --> T66
-  T66 --> T67
-  T29 --> T67
-  T37 --> T68
-  T30 --> T68
-  T14 --> T69
-  T30 --> T69
-  T68 --> T70
-  T68 --> T71
-  T61 --> T71
-  T14 --> T72
-  T25 --> T72
-  T42 --> T72
-  T84 --> T72
-  T60 --> T73
-  T61 --> T73
-  T63 --> T73
-  T66 --> T73
-  T67 --> T73
-  T72 --> T73
-  T82 --> T73
-  T86 --> T73
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontSize": "12px",
+    "taskBkgColor": "#ffffff",
+    "taskBorderColor": "#9e9e9e",
+    "taskTextColor": "#212121",
+    "taskTextOutsideColor": "#212121",
+    "taskTextDarkColor": "#212121",
+    "taskTextLightColor": "#212121",
+    "doneTaskBkgColor": "#c8e6c9",
+    "doneTaskBorderColor": "#2e7d32",
+    "activeTaskBkgColor": "#fff3c4",
+    "activeTaskBorderColor": "#f9a825",
+    "critBkgColor": "#ffffff",
+    "critBorderColor": "#c62828",
+    "sectionBkgColor": "#f5f5f5",
+    "sectionBkgColor2": "#ffffff",
+    "altSectionBkgColor": "#ffffff",
+    "gridColor": "#e0e0e0"
+  },
+  "gantt": {
+    "axisFormat": "%-L",
+    "tickInterval": "5millisecond",
+    "useWidth": 1150,
+    "leftPadding": 250,
+    "rightPadding": 330,
+    "topPadding": 40,
+    "barHeight": 16,
+    "barGap": 4,
+    "fontSize": 12,
+    "sectionFontSize": 12,
+    "numberSectionStyles": 2
+  }
+}}%%
+gantt
+  title Порядок задач по графу зависимостей — часы оценки от старта, не календарь
+  dateFormat x
+  todayMarker off
+  section Этап 0 — репозиторий и стенд
+    01 Каркас репозитория :done, crit, t01, 0, 3ms
+    02 Compose стенда :done, crit, t02, after t01, 4ms
+    03 Миграции и роли :done, crit, t03, after t02, 3ms
+  section Этап 1 — схема данных и каркас Control Plane
+    04 Схема — аккаунты :done, crit, t04, after t03, 3ms
+    05 Схема — тарифы :done, t05, after t03, 3ms
+    06 Схема — ноды :done, t06, after t05, 4ms
+    07 Схема — подписки :done, t07, after t05, 3ms
+    08 Схема — учёт трафика :done, t08, after t06 t07, 4ms
+    09 Схема — события, очередь :done, crit, t09, after t04, 3ms
+    10 Каркас FastAPI :done, crit, t10, after t09, 4ms
+    11 Очередь — заглушки :done, t11, after t10, 3ms
+    12 Безопасность — заглушки :done, crit, t12, after t10, 3ms
+    74 Очередь — повторы, DLQ :done, t74, after t11, 3ms
+  section Этап 2 — пользователи и кабинет
+    13 Auth API — заглушки :done, t13, after t12, 3ms
+    14 Auth API — логика :done, t14, after t13 t04, 4ms
+    15 /me — заглушки :done, t15, after t13, 3ms
+    84 Сессии, CSRF, лимиты входа :done, t84, after t14, 4ms
+  section Этап 3 — тарифы, подписки, коды
+    18 Admin-каталог — заглушки :done, t18, after t12 t05, 3ms
+    19 Тарифы и группы :active, t19, after t18, 4ms
+    21 Подписки — заглушки :active, t21, after t07 t11, 2ms
+    22 Подписки — логика :t22, after t21 t19, 4ms
+    20 Коды — логика :t20, after t18 t22, 4ms
+    83 Истечение подписок :t83, after t22, 2ms
+  section Этап 4 — парк нод и Node API
+    24 Nodes API — заглушки :active, crit, t24, after t06 t12, 3ms
+    25 Enrollment, identity :t25, after t24, 4ms
+    26 Inbound, Xray — заглушки :t26, after t24, 3ms
+    28 Node API — заглушки :crit, t28, after t24 t11, 3ms
+    29 Поток состава :t29, after t28 t22 t26, 4ms
+    27 Inbound, Xray — логика :t27, after t26 t29, 4ms
+    30 Heartbeat, статусы :t30, after t28 t29, 4ms
+    31 Версии, update_agent :t31, after t29 t25, 3ms
+    32 Внешние пробы :t32, after t30 t44 t49, 3ms
+    75 Снапшот, long-poll :t75, after t29, 4ms
+    76 Служба команд :t76, after t29, 3ms
+  section Этап 5 — учёт трафика и лимиты
+    33 Отчёты, учёт — заглушки :crit, t33, after t28 t08, 4ms
+    23 Коэффициент по дате :crit, t23, after t19 t33, 2ms
+    34 Приём отчёта — проверки :crit, t34, after t33 t23 t22, 4ms
+    77 Приём отчёта — факты :crit, t77, after t34 t23, 4ms
+    35 Лимиты 80/95/100 :t35, after t29 t33 t77, 4ms
+    36 Гранты квоты :t36, after t35, 3ms
+    37 Сверки, партиции :t37, after t09 t77, 4ms
+    38 Лимит адресов :t38, after t29 t77, 3ms
+    39 Признаки перепродажи :t39, after t38 t86, 2ms
+    40 Стратегия разрыва :t40, after t35 t31, 2ms
+  section Этап 6 — subscription-эндпоинт и логика кабинета
+    41 /s/token — заглушки :active, t41, after t10 t07, 3ms
+    42 Токен подписки :t42, after t14 t22 t41 t84, 4ms
+    16 /me — логика :t16, after t15 t22 t42 t77 t84, 4ms
+    17 Удаление аккаунта :t17, after t16 t29, 2ms
+    43 Генераторы форматов :t43, after t41 t27, 4ms
+    44 Состав серверов :t44, after t43 t30, 3ms
+    45 Два домена подписки :t45, after t42, 2ms
+  section Этап 7 — администрирование, RBAC, аудит, поддержка
+    46 Admin auth, RBAC — заглушки :active, t46, after t12 t09, 3ms
+    47 TOTP, сессии админов :t47, after t14 t46 t84, 4ms
+    48 RBAC, Audit Log :t48, after t46 t47, 4ms
+    49 API панели — заглушки :t49, after t46, 3ms
+    50 API панели — пользователи :t50, after t30 t48 t49 t77, 4ms
+    85 API панели — ноды, дашборд :t85, after t49 t30 t48, 4ms
+  section Этап 8 — уведомления и почта
+    51 События, почта — заглушки :active, t51, after t11 t09, 2ms
+    52 Уведомления :t52, after t51 t65, 3ms
+    78 Доставка почты :t78, after t52 t65, 3ms
+    79 Доставка webhook :t79, after t52, 3ms
+  section Этап 9 — Node Agent (Go)
+    53 Agent — каркас :t53, after t01 t28, 4ms
+    54 Agent — enrollment :t54, after t53 t25, 4ms
+    55 Agent — long-poll :t55, after t54 t29, 4ms
+    56 Agent — счётчики, отчёты :crit, t56, after t53 t77, 4ms
+    80 Agent — применение конфига :crit, t80, after t55 t56, 4ms
+    60 Agent — разрыв readd :t60, after t40 t80, 3ms
+    57 Agent — локальный грант :t57, after t36 t56 t60, 3ms
+    58 Agent — блокировка адресов :crit, t58, after t38 t80, 3ms
+    59 Agent — heartbeat, метрики :t59, after t30 t54, 3ms
+    61 Bootstrap ноды, systemd :t61, after t54, 4ms
+    81 Agent — команды, update :t81, after t55 t54, 4ms
+    82 Agent — route_block, restart :t82, after t60 t58, 3ms
+    86 Agent — nftables :crit, t86, after t58, 4ms
+  section Этап 10 — интерфейсы web
+    62 Web — каркасы :active, t62, after t01 t10, 4ms
+    63 Web — кабинет :t63, after t62 t16, 4ms
+    64 Web — панель :t64, after t50 t62 t85, 4ms
+    65 Локализация RU/EN :t65, after t62 t15, 3ms
+  section Этап 11 — эксплуатация
+    66 Compose prod, mTLS :t66, after t02 t25, 4ms
+    67 pgbackrest, восстановление :t67, after t66 t29, 4ms
+    68 Метрики, алерты :t68, after t37 t30, 4ms
+    69 Правила, Suspended :t69, after t14 t30, 3ms
+    70 Страница состояния :t70, after t68, 2ms
+    71 Документация :t71, after t68 t61, 4ms
+  section Этап 12 — интеграция и приёмка
+    72 Rate limits — полный список :t72, after t14 t25 t42 t84, 3ms
+    73 Стенд — приёмка :crit, t73, after t60 t61 t63 t66 t67 t72 t82 t86, 4ms
 ```
 
 <!-- generated:plan-status end -->
