@@ -3,7 +3,7 @@ id: WI-13
 type: work-item
 status: open
 opened_at: 2026-09-10
-slug: planting-must-remove-the-behaviour
+slug: wi-13-planting-must-remove-the-behaviour
 effort: M
 source: 'vdd-03-develop 001.28'
 provenance: machine

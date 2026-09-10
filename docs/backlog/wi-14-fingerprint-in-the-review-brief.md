@@ -3,7 +3,7 @@ id: WI-14
 type: work-item
 status: open
 opened_at: 2026-09-10
-slug: fingerprint-in-the-review-brief
+slug: wi-14-fingerprint-in-the-review-brief
 effort: S
 source: 'vdd-03-develop 001.28'
 provenance: machine

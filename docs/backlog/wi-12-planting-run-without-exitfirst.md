@@ -3,7 +3,7 @@ id: WI-12
 type: work-item
 status: open
 opened_at: 2026-09-10
-slug: planting-run-without-exitfirst
+slug: wi-12-planting-run-without-exitfirst
 effort: S
 source: 'vdd-03-develop 001.28'
 provenance: machine

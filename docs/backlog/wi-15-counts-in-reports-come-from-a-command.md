@@ -3,7 +3,7 @@ id: WI-15
 type: work-item
 status: open
 opened_at: 2026-09-10
-slug: counts-in-reports-come-from-a-command
+slug: wi-15-counts-in-reports-come-from-a-command
 effort: S
 source: 'vdd-03-develop 001.28'
 provenance: machine
