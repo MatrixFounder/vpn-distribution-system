@@ -16,11 +16,11 @@ GOLANGCI_VERSION := 2.13.2
 GOLANGCI := $(BIN)/golangci-lint
 
 .PHONY: check lint typecheck test fmt setup test-contract \
-        lint-py lint-go lint-web typecheck-py typecheck-web test-py test-go test-web fmt-py fmt-go fmt-web tools
+        lint-py lint-go lint-web lint-plan typecheck-py typecheck-web test-py test-go test-web fmt-py fmt-go fmt-web tools
 
 check: tools lint typecheck test
 
-lint: lint-py lint-go lint-web
+lint: lint-py lint-go lint-web lint-plan
 typecheck: typecheck-py typecheck-web
 test: test-py test-go test-web
 fmt: fmt-py fmt-go fmt-web
@@ -51,6 +51,14 @@ lint-py:
 	$(RUFF) format --check control-plane
 typecheck-py:
 	cd control-plane && .venv/bin/mypy
+
+# --- план: блок состояния и чек-лист RTM в docs/PLAN.md собраны из строк задач
+# (docs/scripts/plan_graph.py); отставание блока — ошибка, а не тихий дрейф. Скрипт вне
+# control-plane, поэтому конфигурация ruff передаётся явно.
+lint-plan:
+	$(RUFF) check --config control-plane/pyproject.toml docs/scripts
+	$(RUFF) format --check --config control-plane/pyproject.toml docs/scripts
+	$(PY) docs/scripts/plan_graph.py --check
 # pytest: пока тестовых файлов нет — честный пропуск по факту их отсутствия;
 # с первым test_*.py код pytest пробрасывается как есть (в том числе 5).
 # Маска совпадает с python_files в control-plane/pyproject.toml.
