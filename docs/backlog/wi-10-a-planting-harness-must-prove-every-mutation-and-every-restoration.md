@@ -11,7 +11,7 @@ provenance: machine
 component: developer-guidelines
 fingerprint: 024a576ab15bed4b
 resolved_at: 2026-09-10
-resolved_by: 'agentic-development (framework source, uncommitted there): developer-guidelines §6.3 rule 8 (v1.7 → v1.8) — appended, rules 1–7 keep their numbers because vdd-03-develop cites §6.3 p.5 and p.6; cited from Sarcasmotron rule 6, vdd-adversarial §4 item 6 and 09_code_reviewer_prompt; CHANGELOG.md / CHANGELOG.ru.md'
+resolved_by: 'agentic-development (framework source, uncommitted there): developer-guidelines §6.3 rule 8 (v1.7 → v1.8) — appended, rules 1–7 keep their numbers because vdd-03-develop cites §6.3 p.5 and p.6; cited from Sarcasmotron rule 6 and 09_code_reviewer_prompt; stated inline in vdd-adversarial §4 item 6, which ships standalone via Universal-skills and may not have the framework beside it; CHANGELOG.md / CHANGELOG.ru.md'
 finding_ref: fnd-20260910-134631-024a576a
 ---
 
@@ -24,8 +24,12 @@ finding_ref: fnd-20260910-134631-024a576a
 > as a report template. The rule is appended, never inserted: `vdd-03-develop` cites `§6.3 p.5` and
 > `p.6` live, so renumbering would have broken both citations.
 >
-> The reviewer side does not restate it — Sarcasmotron rule 6, `vdd-adversarial` §4 item 6 and
-> `09_code_reviewer_prompt` cite `§6.3 p.8`, so the mechanics have one source and bind whoever plants.
+> The framework-internal reviewer sites do not restate it — Sarcasmotron rule 6 and
+> `09_code_reviewer_prompt` cite `§6.3 p.8`, so inside the framework the mechanics have one source.
+> `vdd-adversarial` is the exception and states them **inline**: it is published standalone through
+> the `Universal-skills` marketplace, where neither `developer-guidelines` nor
+> `skill-parallel-orchestration` exists, so a citation there would be a rule that loses its content
+> the moment the skill is installed anywhere else.
 >
 > Verified: the four framework checks and `pytest tests/` 448 passed. The framework commit is the
 > owner's.
