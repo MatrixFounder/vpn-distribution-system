@@ -508,8 +508,9 @@ async def test_scheduler_leadership_lock(
     pg_dsn: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Планировщик держит pg_advisory_lock своего ключа, пока работает, и отпускает при
-    остановке (ключ тестов — не ключ планировщика стенда, который лидер всегда); второй
-    экземпляр с тем же ключом лидером не становится; пустое расписание ничего не ставит;
+    остановке; второй экземпляр с тем же ключом лидером не становится; ключ теста отличается от
+    боевого, поэтому тест не отбирает лидерство у планировщика стенда и не зависит от того,
+    запущен ли тот (в CI база пустая и потребителей нет); пустое расписание ничего не ставит;
     периодический элемент ставится один раз на слот; нулевой интервал отклоняется."""
     async with stand_pool(pg_dsn, monkeypatch, tmp_path) as pool:
         stop = asyncio.Event()
@@ -528,8 +529,9 @@ async def test_scheduler_leadership_lock(
             assert await scheduler.acquire_leadership(probe, TEST_LOCK_KEY) is False, (
                 "второй экземпляр не лидер, пока первый жив"
             )
-            assert await scheduler.acquire_leadership(probe, scheduler.LEADER_LOCK_KEY) is False, (
-                "боевой ключ держит планировщик стенда"
+            assert TEST_LOCK_KEY != scheduler.LEADER_LOCK_KEY, (
+                "ключ теста отличается от боевого: совпадение отбирало бы лидерство у "
+                "планировщика стенда и делало бы этот тест зависимым от того, запущен ли он"
             )
             stop.set()
             await asyncio.wait_for(task, timeout=10)

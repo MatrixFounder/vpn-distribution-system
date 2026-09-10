@@ -15,7 +15,7 @@ BIN := $(CURDIR)/.bin
 GOLANGCI_VERSION := 2.13.2
 GOLANGCI := $(BIN)/golangci-lint
 
-.PHONY: check lint typecheck test fmt setup test-contract \
+.PHONY: check lint typecheck test fmt setup migrate test-contract \
         lint-py lint-go lint-web lint-plan typecheck-py typecheck-web test-py test-go test-web fmt-py fmt-go fmt-web tools
 
 check: tools lint typecheck test
@@ -59,9 +59,19 @@ lint-plan:
 	$(RUFF) check --config control-plane/pyproject.toml docs/scripts
 	$(RUFF) format --check --config control-plane/pyproject.toml docs/scripts
 	$(PY) docs/scripts/plan_graph.py --check
+# Схема базы — предусловие набора: сквозные тесты ходят в живую базу и ждут её мигрированной
+# (партиции, функции обслуживания, перечисления). На стенде миграции применяет роль api при
+# старте (docker-entrypoint.sh), поэтому локально цель ниже не нужна; на пустой базе — нужна,
+# и CI вызывает её перед `make test`. Идемпотентна: yoyo применяет только недостающие шаги.
+migrate:
+	@test -n "$$MIGRATE_DSN" || { echo "нет MIGRATE_DSN — миграции применять некуда"; exit 1; }
+	cd control-plane && $(CURDIR)/$(PY) -m app.cli migrate
+
 # pytest: пока тестовых файлов нет — честный пропуск по факту их отсутствия;
 # с первым test_*.py код pytest пробрасывается как есть (в том числе 5).
 # Маска совпадает с python_files в control-plane/pyproject.toml.
+# Пустая база даёт «function ensure_partitions(integer) does not exist» — это не дефект тестов,
+# а непримененные миграции: выполните `make migrate` (см. выше).
 test-py:
 	@cd control-plane && \
 	if [ -z "$$(find tests -name 'test_*.py' -print -quit)" ]; then \
