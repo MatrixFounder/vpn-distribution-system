@@ -96,5 +96,6 @@ jobs:
       - name: control-plane (образ Docker появляется в 001.02)
         run: |
           if [ -f control-plane/Dockerfile ]; then docker build -t control-plane:ci control-plane; else echo "Dockerfile появится в 001.02"; fi
-      - uses: actions/upload-artifact@v4
+      # v4 работает на Node 20 (объявлен устаревшим на раннерах); v7 — текущий мажор.
+      - uses: actions/upload-artifact@v7
         with: { name: node-agent, path: dist/ }
