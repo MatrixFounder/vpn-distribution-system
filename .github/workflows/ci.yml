@@ -65,14 +65,20 @@ jobs:
       - run: make tools test
 
   contract:
-    # Контрактные тесты /agent/v1 и эталонные ответы подписки — наполняются задачами 001.28, 001.43.
+    # Контрактные тесты /agent/v1 (001.28); эталонные ответы подписки добавит 001.43.
+    # Служебные контейнеры не нужны: прогон герметичен, пул подменён объектом-часовым.
     runs-on: ubuntu-24.04
     needs: unit
     steps:
       - uses: actions/checkout@v5
-      # Fail-fast: как только каталог контрактов появится (001.28), стадия обязана запускать тесты.
-      - run: |
-          if [ -d contracts/agent_v1 ]; then make test-contract; else echo "каталог contracts/agent_v1 появится в 001.28"; fi
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.14" }
+      - uses: actions/setup-go@v6
+        with: { go-version: "1.27", cache-dependency-path: node-agent/go.mod }
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .nvmrc, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: make setup
+      - run: make test-contract
 
   build:
     runs-on: ubuntu-24.04

@@ -45,7 +45,12 @@ Country = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 Fqdn = Annotated[str, StringConstraints(min_length=1, max_length=253, pattern=r"^[A-Za-z0-9.-]+$")]
-Version = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+# Версию агента и Xray администратор сверяет глазами (UC-01 шаг 6), а присылает их
+# недоверенная нода (§11.3): алфавит закрыт печатаемым ASCII без управляющих символов —
+# U+202E внутри строки перерисовал бы «0.0.1» как «1.0.0» в панели.
+Version = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[0-9A-Za-z][0-9A-Za-z.+_-]*$")
+]
 
 
 class NodeIn(BaseModel):

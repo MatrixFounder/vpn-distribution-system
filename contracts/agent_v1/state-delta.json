@@ -1,0 +1,128 @@
+{
+  "operation": "state",
+  "summary": "Нода отстала по обоим курсорам: конфигурация, дельта состава и команда канала",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/agent/v1/state",
+    "query": {
+      "config_version": "0",
+      "users_seq": "0",
+      "generation": "1"
+    },
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store"
+    },
+    "body": {
+      "config": {
+        "version": 1,
+        "checksum": "664b6ba348336aaede6f8ad31a0c9cb88db35a84cbf70e14f94640457bf821c1",
+        "json": {
+          "log": {
+            "loglevel": "warning"
+          },
+          "inbounds": [
+            {
+              "tag": "vless_raw_vision",
+              "port": 443,
+              "protocol": "vless",
+              "settings": {
+                "clients": [],
+                "decryption": "none"
+              },
+              "streamSettings": {
+                "network": "raw",
+                "security": "reality"
+              }
+            }
+          ],
+          "outbounds": [
+            {
+              "tag": "direct",
+              "protocol": "freedom"
+            },
+            {
+              "tag": "blackhole",
+              "protocol": "blackhole"
+            }
+          ]
+        }
+      },
+      "users": {
+        "seq": 4,
+        "full": false,
+        "rows": [
+          {
+            "user_id": "00000000-0000-7000-8000-0000000000a1",
+            "state": "active",
+            "xray_email": "u00000000-0000-7000-8000-0000000000a1",
+            "quota_grant_bytes": 1073741824,
+            "blocked_ips": [],
+            "updated_seq": 1,
+            "credentials": {
+              "vless_uuid": "ec20433e-33cc-57a1-a241-fa3c266e4067",
+              "trojan_password": "stub-trojan-ec20433e33cc57a1a241fa3c266e4067",
+              "version": 1
+            }
+          },
+          {
+            "user_id": "00000000-0000-7000-8000-0000000000a2",
+            "state": "suspended_quota",
+            "xray_email": "u00000000-0000-7000-8000-0000000000a2",
+            "quota_grant_bytes": 0,
+            "blocked_ips": [
+              "203.0.113.77"
+            ],
+            "updated_seq": 2,
+            "credentials": null
+          },
+          {
+            "user_id": "00000000-0000-7000-8000-0000000000a3",
+            "state": "removed",
+            "xray_email": "u00000000-0000-7000-8000-0000000000a3",
+            "quota_grant_bytes": 0,
+            "blocked_ips": [],
+            "updated_seq": 3,
+            "credentials": null
+          },
+          {
+            "user_id": "00000000-0000-7000-8000-0000000000a4",
+            "state": "active",
+            "xray_email": "u00000000-0000-7000-8000-0000000000a4",
+            "quota_grant_bytes": 1073741824,
+            "blocked_ips": [],
+            "updated_seq": 4,
+            "credentials": {
+              "vless_uuid": "5d45057a-8eec-5128-bce9-5ef1f50c77fb",
+              "trojan_password": "stub-trojan-5d45057a8eec5128bce95ef1f50c77fb",
+              "version": 1
+            }
+          }
+        ]
+      },
+      "generation": 1,
+      "resync_required": false,
+      "commands": [
+        {
+          "id": "00000000-0000-7000-8000-0000000000c1",
+          "type": "restart_xray",
+          "payload": {},
+          "issued_at": "2026-09-01T00:00:00Z",
+          "expires_at": "2036-09-01T00:00:00Z"
+        }
+      ]
+    }
+  }
+}

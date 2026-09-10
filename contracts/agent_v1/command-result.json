@@ -1,0 +1,28 @@
+{
+  "operation": "command-result",
+  "summary": "Отчёт об исполнении команды: перезапуск Xray применён",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/commands/00000000-0000-7000-8000-0000000000c1/result",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "status": "applied",
+      "error": null
+    }
+  },
+  "response": {
+    "status": 204,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": null
+  }
+}

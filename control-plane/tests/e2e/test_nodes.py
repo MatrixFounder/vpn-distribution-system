@@ -369,6 +369,10 @@ async def test_enroll_validates_body_and_needs_no_session(app_client: httpx.Asyn
     for bad in (
         {},
         {**VALID_ENROLL, "bootstrap_token": "short"},
+        # Алфавит токена — base64url выданного (001.28): вход сужается до отказа, а не после
+        # него, потому что значение уедет в поиск по хешу (001.25).
+        {**VALID_ENROLL, "bootstrap_token": "x" * 40 + "!"},
+        {**VALID_ENROLL, "bootstrap_token": "x" * 20 + " " + "x" * 20},
         {**VALID_ENROLL, "csr_pem": "not a csr"},
         {**VALID_ENROLL, "csr_pem": cert_as_csr},
         {**VALID_ENROLL, "csr_pem": domain.STUB_CSR_PEM.replace("Y29u", "!!!!")},

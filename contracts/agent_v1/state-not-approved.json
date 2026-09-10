@@ -1,0 +1,36 @@
+{
+  "operation": "state",
+  "summary": "Нода не подтверждена администратором: 403, раздел ей не выдаёт ничего (§4.6)",
+  "given": {
+    "node_status": "pending"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/agent/v1/state",
+    "query": {
+      "config_version": "0",
+      "users_seq": "0",
+      "generation": "1"
+    },
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json",
+      "Retry-After": "300"
+    },
+    "body": {
+      "error": {
+        "code": "node_not_approved",
+        "message": "нода не подтверждена администратором",
+        "details": {}
+      }
+    }
+  }
+}

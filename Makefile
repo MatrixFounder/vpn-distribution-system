@@ -90,9 +90,13 @@ test-go:
 fmt-go:
 	cd node-agent && gofmt -w .
 
-# --- контрактные тесты /agent/v1 и эталоны подписки: наполняются задачами 001.28, 001.43
+# --- стадия «Контракты» (deployment.md §10.2) со стороны Control Plane: зафиксированные
+# запросы contracts/agent_v1/*.json воспроизводятся против приложения (001.28). Прогон
+# герметичен — пул подменён, база и Redis не нужны. Эталоны подписки добавит 001.43.
+# Пустая выборка — не успех: pytest выходит с кодом 5, и цель падает вместе с ним.
 test-contract:
-	@echo "test-contract: не реализовано — контракты появляются в задаче 001.28"; exit 1
+	@test -d contracts/agent_v1 || { echo "нет contracts/agent_v1 — воспроизводить нечего"; exit 1; }
+	cd control-plane && .venv/bin/pytest -q tests/contract
 
 # --- web
 lint-web:

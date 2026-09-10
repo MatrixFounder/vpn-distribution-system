@@ -1,27 +1,25 @@
-"""Node API ``/agent/v1`` (interfaces.md §5.2): enrollment (``agent_api/enroll.py``, 001.24 —
-заглушка со схемами); состояние, отчёты и команды — заглушки 501 задачи 001.10 до задач 001.28,
-001.33. Аутентификация нод — mTLS на nginx (§7.1), отпечаток клиента приходит в
-``X-Client-Fingerprint``; enrollment — единственный маршрут без него."""
+"""Node API ``/agent/v1`` (interfaces.md §5.2): enrollment (``enroll.py``, 001.24), состояние и
+подтверждение (``state.py``), heartbeat и телеметрия (``heartbeat.py``), результат команды
+(``commands.py``) — заглушки со схемами задачи 001.28; отчёты о трафике и запрос гранта квоты —
+001.33.
+
+Аутентификация нод — mTLS на nginx (§7.1): отпечаток клиента приходит в ``X-Client-Fingerprint``,
+токен identity — в ``X-Node-Identity``, версия агента — в ``X-Agent-Version`` (``deps.py``).
+Enrollment — единственный маршрут раздела без всех трёх заголовков: он обслуживается отдельным
+``server`` прокси, а версии агента и Xray несёт его тело.
+"""
 
 from __future__ import annotations
 
-from typing import Annotated
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Query
-
+from app.agent_api.commands import router as commands
 from app.agent_api.enroll import router as enroll
-from app.errors import not_implemented
+from app.agent_api.heartbeat import router as heartbeat
+from app.agent_api.state import router as state
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
 router.include_router(enroll)
-
-
-@router.get("/state", summary="Состояние: дельты, курсоры, команды (001.2x)")
-async def state(
-    config_version: Annotated[int, Query(ge=0)],
-    users_seq: Annotated[int, Query(ge=0)],
-    generation: Annotated[int, Query(ge=0)],
-) -> dict[str, str]:
-    """Курсоры агента (§5.2) — типизированы уже в заглушке: единый формат 422 проверяется здесь.
-    Форма ``?full=1`` без курсоров (§5.2, полный снапшот) в заглушке даёт 422 — её вводит 001.2x."""
-    raise not_implemented("agent.state")
+router.include_router(state)
+router.include_router(heartbeat)
+router.include_router(commands)

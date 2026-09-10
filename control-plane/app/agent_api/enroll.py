@@ -34,7 +34,11 @@ class EnrollIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    bootstrap_token: Annotated[str, StringConstraints(min_length=32, max_length=128)]
+    # Алфавит — base64url выданного токена (``generate_bootstrap_token``, 256 бит §7.2):
+    # вход сужается до отказа, а не после него — значение уедет в поиск по хешу (001.25).
+    bootstrap_token: Annotated[
+        str, StringConstraints(min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    ]
     csr_pem: Annotated[str, StringConstraints(min_length=1, max_length=CSR_MAX_CHARS)]
     agent_version: Version
     xray_version: Version
@@ -56,8 +60,10 @@ class EnrollOut(BaseModel):
     node_id: uuid.UUID
 
 
-async def get_node_service() -> NodeService:
-    return NodeService(await db_pool())
+async def get_node_service(pool: Annotated[object, Depends(db_pool)]) -> NodeService:
+    """Пул — зависимостью, а не вызовом внутри фабрики: так его подмена в тесте видна всему графу
+    зависимостей раздела (контрактные тесты 001.28 подставляют объект-часовой вместо базы)."""
+    return NodeService(pool)
 
 
 Nodes = Annotated[NodeService, Depends(get_node_service)]

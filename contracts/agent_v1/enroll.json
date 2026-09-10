@@ -1,0 +1,33 @@
+{
+  "operation": "enroll",
+  "summary": "Обмен bootstrap-токена на identity: сертификат ноды, сертификат CA, токен identity",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/enroll",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0"
+    },
+    "body": {
+      "bootstrap_token": "stub-bootstrap-token-0000000000000000000000",
+      "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\nY29udHJvbC1wbGFuZSBzdHViIENTUiAwMDEuMjQ=\n-----END CERTIFICATE REQUEST-----\n",
+      "agent_version": "0.1.0",
+      "xray_version": "26.9.1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "client_cert_pem": "-----BEGIN CERTIFICATE-----\nY29udHJvbC1wbGFuZSBzdHViIG5vZGUgY2xpZW50IGNlcnRpZmljYXRlIDAwMS4y\nNAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n-----END CERTIFICATE-----\n",
+      "ca_pem": "-----BEGIN CERTIFICATE-----\nY29udHJvbC1wbGFuZSBzdHViIENBIGNlcnRpZmljYXRlIDAwMS4yNAAAAAAAAAAA\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n-----END CERTIFICATE-----\n",
+      "identity_token": "stub-identity-token-000000000000000000000000000",
+      "node_id": "00000000-0000-7000-8000-0000000000b1"
+    }
+  }
+}

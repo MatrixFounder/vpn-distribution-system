@@ -1,0 +1,33 @@
+{
+  "operation": "state",
+  "summary": "Запрос без признаков identity (пришёл не с агентского порта): 401",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/agent/v1/state",
+    "query": {
+      "config_version": "0",
+      "users_seq": "0",
+      "generation": "1"
+    },
+    "headers": {
+      "X-Agent-Version": "0.1.0"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "error": {
+        "code": "unauthenticated",
+        "message": "identity ноды не предъявлена или неизвестна",
+        "details": {}
+      }
+    }
+  }
+}

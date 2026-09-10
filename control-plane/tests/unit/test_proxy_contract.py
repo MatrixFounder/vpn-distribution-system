@@ -96,6 +96,55 @@ def test_uvicorn_trusts_only_overwritten_headers() -> None:
         assert "--proxy-headers" in line and "--forwarded-allow-ips '*'" in line, line
 
 
+def test_the_fingerprint_header_is_set_by_the_proxy_and_never_by_the_client() -> None:
+    """Единственное, что делает ``X-Client-Fingerprint`` пригодным как признак identity, — три
+    директивы в этом файле: агентский ``server`` перезаписывает его сертификатом клиента,
+    публичный и enrollment обнуляют. Снять или подменить любую — и заголовок становится
+    клиентским, то есть любая нода с валидным сертификатом объявляет себя любой другой
+    (§7.1, `app/agent_api/deps.py::current_node`). Правило держалось на обещании в докстринге
+    соседнего теста, а не на ассерте."""
+    text = re.sub(r"#[^\n]*", "", NGINX_CONF.read_text(encoding="utf-8"))
+    assert "$http_x_client_fingerprint" not in text, (
+        "значение заголовка от клиента не попадает в апстрим ни на одном server"
+    )
+    expected = {"8443": "$ssl_client_fingerprint", "443 ssl": '""', "8444": '""'}
+    for port, value in expected.items():
+        block = _server_by_listen(text, port)
+        found = re.findall(r"proxy_set_header\s+X-Client-Fingerprint\s+(\S+);", block)
+        assert found == [value], (port, found)
+    # Отпечаток осмыслен ровно настолько, насколько доверен якорь, по которому прокси проверяет
+    # сертификат: подменённый ``ssl_client_certificate`` оставил бы всю схему на месте, только
+    # доверять она стала бы другому CA.
+    agent = _server_by_listen(text, "8443")
+    assert re.findall(r"ssl_client_certificate\s+(\S+);", agent) == ["/etc/nginx/certs/ca.crt"]
+    assert re.findall(r"ssl_verify_client\s+(\S+);", agent) == ["on"], "не optional"
+    assert re.findall(r"ssl_verify_depth\s+(\d+);", agent) == ["2"]
+
+
+def test_agent_server_holds_long_poll_longer_than_the_application_does() -> None:
+    """Удержание состояния до 30 с (interfaces.md §5.2, реализация — 001.75) переживёт прокси
+    только с запасом по ``proxy_read_timeout``: без него nginx рвёт соединение раньше и агент
+    получает 504 вместо 204."""
+    text = re.sub(r"#[^\n]*", "", NGINX_CONF.read_text(encoding="utf-8"))
+    agent = _server_by_listen(text, "8443")
+    # ``findall`` и равенство, а не первое совпадение: ``proxy_read_timeout`` внутри ``location``
+    # перекрывает уровень ``server``, а long-poll обслуживает именно ``location``.
+    timeouts = re.findall(r"proxy_read_timeout\s+(\d+)s;", agent)
+    assert len(timeouts) == 1, ("предел объявлен один раз, на уровне server", timeouts)
+    assert int(timeouts[0]) >= 60, timeouts
+
+
+def test_agent_server_does_not_accept_report_sized_bodies_everywhere() -> None:
+    """Тело запроса nginx принимает до того, как приложение проверит версию агента и identity
+    (FastAPI читает его перед разрешением зависимостей). Поэтому предел агентского `server` —
+    по самой большой операции раздела, а не по будущим отчётам о трафике: их предел вводит
+    001.33 отдельным `location`."""
+    text = re.sub(r"#[^\n]*", "", NGINX_CONF.read_text(encoding="utf-8"))
+    agent = _server_by_listen(text, "8443")
+    limits = re.findall(r"client_max_body_size\s+(\S+);", agent)
+    assert limits == ["64k"], "предел агентского server — по операциям 001.28"
+
+
 def test_enrollment_is_served_only_by_its_own_server() -> None:
     """Граница §7.1: enrollment проксируется единственным server (8444, без клиентского
     сертификата) и ровно одним точным location; агентский server (8443, ``ssl_verify_client

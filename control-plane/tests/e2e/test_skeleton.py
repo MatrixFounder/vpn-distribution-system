@@ -17,6 +17,12 @@ from app.main import create_app
 from app.redis import close_redis, get_redis
 
 PREFIXES = ("/api/v1/", "/agent/v1/", "/s/")
+# Заголовки ноды (001.28): без них раздел /agent/v1 отвечает 426 или 401 до разбора запроса.
+AGENT_HEADERS = {
+    "X-Agent-Version": "0.1.0",
+    "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+    "X-Node-Identity": "stub-identity-token-000000000000000000000000000",
+}
 
 
 async def test_app_starts_and_publishes_schema(
@@ -61,7 +67,12 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
     assert wrong_method.json()["error"]["code"] == "method_not_allowed"
     assert wrong_method.headers.get("allow"), "заголовок Allow сохраняется"
 
-    invalid = await app_client.get("/agent/v1/state?config_version=abc&users_seq=1")
+    # Раздел /agent/v1 сперва проверяет версию агента и признаки identity (001.28), поэтому
+    # запрос с негодными курсорами предъявляет и заголовки — иначе ответом был бы 426 или 401,
+    # а показать здесь надо формат 422 с перечнем полей.
+    invalid = await app_client.get(
+        "/agent/v1/state?config_version=abc&users_seq=1", headers=AGENT_HEADERS
+    )
     assert invalid.status_code == 422
     error = invalid.json()["error"]
     assert error["code"] == "validation_error"
@@ -70,7 +81,7 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
     assert all({"loc", "msg", "type"} == set(e) for e in error["details"]["errors"])
     for cursor in ("config_version", "users_seq", "generation"):  # каждый курсор §5.2 — int ≥ 0
         query = {"config_version": 0, "users_seq": 0, "generation": 0, cursor: -1}
-        negative = await app_client.get("/agent/v1/state", params=query)
+        negative = await app_client.get("/agent/v1/state", params=query, headers=AGENT_HEADERS)
         assert negative.status_code == 422, cursor
         assert [(e["loc"], e["type"]) for e in negative.json()["error"]["details"]["errors"]] == [
             (["query", cursor], "greater_than_equal")
@@ -86,10 +97,8 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
 
 @pytest.mark.parametrize(
     ("method", "path", "operation"),
-    [
-        ("GET", "/agent/v1/state?config_version=0&users_seq=0&generation=0", "agent.state"),
-        ("GET", "/s/sometoken", "subscription.get"),
-    ],
+    # Состояние ноды перестало быть заглушкой 501 с задачей 001.28.
+    [("GET", "/s/sometoken", "subscription.get")],
 )
 async def test_stubs_return_501(
     app_client: httpx.AsyncClient, method: str, path: str, operation: str

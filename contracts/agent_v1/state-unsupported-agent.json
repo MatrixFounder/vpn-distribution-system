@@ -1,0 +1,39 @@
+{
+  "operation": "state",
+  "summary": "Версия агента ниже поддерживаемой: 426, повторять запрос бессмысленно",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/agent/v1/state",
+    "query": {
+      "config_version": "0",
+      "users_seq": "0",
+      "generation": "1"
+    },
+    "headers": {
+      "X-Agent-Version": "0.0.9",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 426,
+    "headers": {
+      "Content-Type": "application/json",
+      "Retry-After": "3600"
+    },
+    "body": {
+      "error": {
+        "code": "unsupported_agent_version",
+        "message": "версия агента не поддерживается: требуется не ниже 0.1.0",
+        "details": {
+          "min_version": "0.1.0",
+          "header": "X-Agent-Version"
+        }
+      }
+    }
+  }
+}

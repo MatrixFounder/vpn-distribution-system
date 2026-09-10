@@ -1,0 +1,38 @@
+{
+  "operation": "state",
+  "summary": "Нода предъявила чужое поколение identity: 409, требуется снапшот",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/agent/v1/state",
+    "query": {
+      "config_version": "0",
+      "users_seq": "0",
+      "generation": "2"
+    },
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "Content-Type": "application/json",
+      "Retry-After": "1"
+    },
+    "body": {
+      "error": {
+        "code": "generation_mismatch",
+        "message": "поколение identity не совпадает: требуется полный снапшот",
+        "details": {
+          "generation": 1
+        }
+      }
+    }
+  }
+}
