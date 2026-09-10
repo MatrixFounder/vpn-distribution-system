@@ -1,8 +1,9 @@
 ---
 id: WI-12
 type: work-item
-status: open
+status: done
 opened_at: 2026-09-10
+resolved_at: 2026-09-10
 slug: wi-12-planting-run-without-exitfirst
 effort: S
 source: 'vdd-03-develop 001.28'
@@ -45,3 +46,7 @@ finding_ref: fnd-20260910-220618-741ecca7
 В `vdd-adversarial` это не вносится. Скилл универсальный и синхронизируется в Universal-skills;
 он описывает работу адверсария с тем, что ему дали, а как исполнитель ставит и меряет свои
 посадки — не его предмет.
+
+## Решено
+
+developer-guidelines §6.3 п.8 (v1.8 → v1.9) и шаг 2.2 vdd-03-develop: прогон под посадкой доводится до конца, рядом с числом падений — команда. Правка внесена в `/Users/sergey/dev-projects/agentic-development` (коммит — за владельцем репозитория); проверки `validate_skills.py`, `check_prompt_references.py`, `check_loop_contract.py`, `smoke_workflows.py` — зелёные, набор тестов фреймворка — 448 passed.

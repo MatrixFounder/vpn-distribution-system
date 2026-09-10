@@ -1,8 +1,9 @@
 ---
 id: WI-13
 type: work-item
-status: open
+status: done
 opened_at: 2026-09-10
+resolved_at: 2026-09-10
 slug: wi-13-planting-must-remove-the-behaviour
 effort: M
 source: 'vdd-03-develop 001.28'
@@ -54,3 +55,7 @@ finding_ref: fnd-20260910-220630-aff4a6d9
 
 В `vdd-adversarial` это не вносится: посадки ставит исполнитель, скилл универсальный, и правила
 измерения чужой работы ему не принадлежат.
+
+## Решено
+
+developer-guidelines §6.3 п.8 (v1.8 → v1.9) и шаг 2.2 vdd-03-develop: правка обязана снимать поведение, которое называет подпись, а подпись — называть его целиком. Правка внесена в `/Users/sergey/dev-projects/agentic-development` (коммит — за владельцем репозитория); проверки `validate_skills.py`, `check_prompt_references.py`, `check_loop_contract.py`, `smoke_workflows.py` — зелёные, набор тестов фреймворка — 448 passed.

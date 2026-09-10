@@ -1,8 +1,9 @@
 ---
 id: WI-14
 type: work-item
-status: open
+status: done
 opened_at: 2026-09-10
+resolved_at: 2026-09-10
 slug: wi-14-fingerprint-in-the-review-brief
 effort: S
 source: 'vdd-03-develop 001.28'
@@ -47,3 +48,7 @@ read-only ролей нет инструмента исполнения.
 В `vdd-adversarial` не вносится ничего. Линза работает по своим правилам с тем, что ей дали;
 требовать от неё знания о том, чем её обязаны были снабдить, — способ снова зашить в
 универсальный скилл чужую обязанность.
+
+## Решено
+
+vdd-03-develop шаг 3: задание линзе несёт файл задачи, доказательства прогона и отпечаток дерева; vdd-03-develop внесён в CALLER_SITES стража tests/test_frozen_tree_contract.py. Правка внесена в `/Users/sergey/dev-projects/agentic-development` (коммит — за владельцем репозитория); проверки `validate_skills.py`, `check_prompt_references.py`, `check_loop_contract.py`, `smoke_workflows.py` — зелёные, набор тестов фреймворка — 448 passed.
