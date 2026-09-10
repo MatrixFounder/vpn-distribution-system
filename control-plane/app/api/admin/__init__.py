@@ -1,9 +1,9 @@
 """Раздел ``/api/v1/admin`` — панель администратора (interfaces.md §5.1). Подроутеры:
-``plans``, ``groups``, ``codes`` (001.18, заглушки), далее ``users``, ``nodes``, ``dashboard``,
-``settings``, ``audit``, ``auth`` (001.24…, 001.46…). Общие зависимости раздела (``_common``):
-``current_admin`` (сессия администратора, минимальный вид до 001.47), ``require_csrf`` на
-мутациях; разрешение операции (R-35) объявляется в OpenAPI как ``x-permission`` и до 001.46
-не проверяется (``require_permission`` — заглушка)."""
+``plans``, ``groups``, ``codes`` (001.18, заглушки), ``nodes`` (001.24, заглушки), далее
+``users``, ``dashboard``, ``settings``, ``audit``, ``auth`` (001.46…). Общие зависимости
+раздела (``_common``): ``current_admin`` (сессия администратора, минимальный вид до 001.47),
+``require_csrf`` на мутациях; разрешение операции (R-35) объявляется в OpenAPI как
+``x-permission`` и до 001.46 не проверяется (``require_permission`` — заглушка)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from app.api.admin._common import Admin, permission
 from app.api.admin.codes import router as codes
 from app.api.admin.groups import router as groups
+from app.api.admin.nodes import router as nodes
 from app.api.admin.plans import router as plans
 from app.errors import not_implemented
 
@@ -30,3 +31,4 @@ async def dashboard(admin: Admin) -> dict[str, str]:
 router.include_router(plans)
 router.include_router(groups)
 router.include_router(codes)
+router.include_router(nodes)

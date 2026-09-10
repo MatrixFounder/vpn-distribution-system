@@ -1,9 +1,13 @@
-"""Контракт прокси между nginx и uvicorn (задача 001.10, ревью раунда 2).
+"""Статический контракт границы nginx: заголовки прокси (задача 001.10, ревью раунда 2) и
+разделение серверов Node API (задача 001.24, ревью раунда 1).
 
 uvicorn с ``--forwarded-allow-ips '*'`` берёт крайний левый элемент ``X-Forwarded-For``; значит
 nginx обязан перезаписывать заголовок адресом соединения (``$remote_addr``), а не дополнять его
-(``$proxy_add_x_forwarded_for``) — иначе клиент подставляет себе любой адрес. Здесь оба файла
-сверяются статически (сеть в тесте не поднимается); поведение на стенде — в отчёте задачи.
+(``$proxy_add_x_forwarded_for``) — иначе клиент подставляет себе любой адрес. Enrollment
+(``POST /agent/v1/enroll``) — единственный маршрут ``/agent/v1`` без клиентского сертификата
+(security.md §7.1), поэтому он обслуживается отдельным ``server`` и обязан быть недоступен на
+агентском (mTLS) и публичном. Файлы сверяются статически (сеть в тесте не поднимается);
+поведение на стенде — в отчётах задач.
 """
 
 from __future__ import annotations
@@ -41,6 +45,21 @@ def _location_blocks(server: str) -> list[str]:
     return _blocks(server, "location")
 
 
+def _locations(server: str) -> list[tuple[str, str]]:
+    """Пары «матчер location — тело блока» в порядке объявления."""
+    matchers = [m.group(1).strip() for m in re.finditer(r"\blocation\b([^{;]*)\{", server)]
+    return list(zip(matchers, _location_blocks(server), strict=True))
+
+
+def _server_by_listen(text: str, port: str) -> str:
+    found = [b for b in _server_blocks(text) if re.search(rf"listen\s+{port}\b", b)]
+    assert len(found) == 1, f"ровно один server слушает {port}"
+    return found[0]
+
+
+ENROLL_PATH = "/agent/v1/enroll"
+
+
 def test_nginx_overwrites_forwarded_headers() -> None:
     """Во всём файле каждое вхождение X-Forwarded-For / X-Real-IP — только $remote_addr, каждое
     X-Forwarded-Proto — $scheme или https, дополнения $proxy_add_x_forwarded_for нет; в каждом
@@ -75,3 +94,37 @@ def test_uvicorn_trusts_only_overwritten_headers() -> None:
     assert len(launches) == 2, "ветки --reload и --workers"
     for line in launches:
         assert "--proxy-headers" in line and "--forwarded-allow-ips '*'" in line, line
+
+
+def test_enrollment_is_served_only_by_its_own_server() -> None:
+    """Граница §7.1: enrollment проксируется единственным server (8444, без клиентского
+    сертификата) и ровно одним точным location; агентский server (8443, ``ssl_verify_client
+    on``) отдаёт на этот путь 404, публичный не знает ``/agent`` вовсе. Проверяется статически —
+    ручной curl в отчёте задачи 001.24 не удерживает конфигурацию от правки."""
+    text = re.sub(r"#[^\n]*", "", NGINX_CONF.read_text(encoding="utf-8"))
+    public, agent, enrollment = (
+        _server_by_listen(text, port) for port in ("443 ssl", "8443", "8444")
+    )
+
+    assert "ssl_verify_client      on" in agent or "ssl_verify_client on" in agent
+    assert not re.search(r"ssl_verify_client\s+on", enrollment), (
+        "на enrollment-server клиентского сертификата ещё нет (§7.1)"
+    )
+    assert not re.search(r"ssl_verify_client\s+on", public)
+
+    enroll_locations = [(m, b) for m, b in _locations(enrollment) if "proxy_pass" in b]
+    assert [m for m, _ in enroll_locations] == [f"= {ENROLL_PATH}"], (
+        f"enrollment-server проксирует только {ENROLL_PATH}: {enroll_locations}"
+    )
+    for matcher, body in _locations(enrollment):
+        if matcher != f"= {ENROLL_PATH}":
+            assert "return 404" in body, (matcher, body)
+
+    agent_enroll = [b for m, b in _locations(agent) if m == f"= {ENROLL_PATH}"]
+    assert len(agent_enroll) == 1 and "return 404" in agent_enroll[0], (
+        "агентский server обязан отдавать 404 на enrollment, а не проксировать его"
+    )
+    assert "proxy_pass" not in agent_enroll[0]
+
+    for matcher, body in _locations(public):
+        assert "/agent" not in matcher or "return 404" in body, (matcher, body)

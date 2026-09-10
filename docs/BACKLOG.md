@@ -74,6 +74,9 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
+- **WI-11** [A limit guard must not derive its input from the constant under test](backlog/wi-11-a-limit-guard-must-not-derive-its-input-from-the-constant-under-test.md) — effort `S`, status `open`, opened 2026-09-10
+- **WI-10** [A planting harness must prove every mutation and every restoration](backlog/wi-10-a-planting-harness-must-prove-every-mutation-and-every-restoration.md) — effort `S`, status `open`, opened 2026-09-10
+- **WI-9** [An adversarial review stage must not be able to modify the artifact under review](backlog/wi-9-an-adversarial-review-stage-must-not-be-able-to-modify-the-artifact-under-review.md) — effort `S`, status `open`, opened 2026-09-10
 
 ## Closed
 

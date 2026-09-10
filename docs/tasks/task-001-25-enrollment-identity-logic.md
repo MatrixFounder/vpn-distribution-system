@@ -86,4 +86,17 @@ CA, подтверждение администратором и отзыв iden
 
 `tdd-strict` для `enroll` и `current_node`.
 
+Найдено при 001.24 (заглушки), решить здесь:
+
+- отпечаток: nginx отдаёт `$ssl_client_fingerprint` — это SHA-1, а `node_identities.cert_fingerprint`
+  и `InternalCA.fingerprint` — SHA-256 от DER; варианты — передавать `$ssl_client_escaped_cert`
+  заголовком и считать SHA-256 в C-01 (сохраняет модель) или хранить SHA-1 (меняет
+  data-model.md §4.2.3 и security.md §7.1); выбранный вариант закрепить в `deploy/nginx/nginx.conf`
+  и `tests/unit/test_proxy_contract.py`;
+- адрес источника enrollment, который администратор сверяет на шаге 6 UC-01, в модели не
+  хранится — нужна колонка (например, `node_identities.enrolled_from inet`) или запись в
+  `audit_log` с чтением в `GET /admin/nodes/{id}/state`;
+- в заглушке 001.24 отказ по токену объявлен как 401 (UC-01 A1): неизвестный, использованный и
+  просроченный токен отвечают одинаково.
+
 Зависимости: 001.24. Приоритет: Critical. Оценка: 4 ч. Этап: 4 — парк нод и Node API.

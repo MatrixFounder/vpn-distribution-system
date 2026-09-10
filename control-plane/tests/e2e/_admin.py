@@ -19,6 +19,28 @@ PLAN_ID = "00000000-0000-7000-8000-0000000000c1"
 GROUP_ID = "00000000-0000-7000-8000-0000000000f1"
 BATCH_ID = "00000000-0000-7000-8000-0000000000d2"
 CODE_ID = "00000000-0000-7000-8000-0000000000d1"
+NODE_ID = "00000000-0000-7000-8000-0000000000b1"
+# Идентификаторы заглушек в путях операций → параметры пути в OpenAPI.
+PATH_PARAMS = {
+    PLAN_ID: "{plan_id}",
+    GROUP_ID: "{group_id}",
+    BATCH_ID: "{batch_id}",
+    CODE_ID: "{code_id}",
+    NODE_ID: "{node_id}",
+}
+VALID_NODE: dict[str, Any] = {
+    "code": "JP-Tokyo-01",
+    "name": "Tokyo 1",
+    "country": "JP",
+    "city": "Tokyo",
+    "provider": "Example Hosting",
+    "public_ipv4": "203.0.113.10",
+    "billing_group_id": GROUP_ID,
+    "access_group_ids": [GROUP_ID],
+    "bandwidth_mbps": 1000,
+    "max_conn_per_ip": 32,
+    "legal_profile": {"jurisdiction": "JP"},
+}
 VALID_PLAN: dict[str, Any] = {
     "name": "Basic",
     "price_amount": "4.99",
@@ -48,8 +70,25 @@ ADMIN_OPERATIONS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", "/api/v1/admin/codes/batch", {"count": 3, "spec": {"kind": "redeem"}}),
     ("GET", f"/api/v1/admin/codes/batch/{BATCH_ID}/export", None),
     ("GET", f"/api/v1/admin/codes/{CODE_ID}/redemptions", None),
+    ("GET", "/api/v1/admin/nodes", None),
+    ("POST", "/api/v1/admin/nodes", VALID_NODE),
+    ("GET", f"/api/v1/admin/nodes/{NODE_ID}", None),
+    ("PATCH", f"/api/v1/admin/nodes/{NODE_ID}", {"name": "Tokyo 1a"}),
+    ("DELETE", f"/api/v1/admin/nodes/{NODE_ID}", None),
+    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/bootstrap-token", None),
+    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/approve", None),
+    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/status", {"status": "maintenance"}),
+    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/revoke-identity", None),
+    ("GET", f"/api/v1/admin/nodes/{NODE_ID}/state", None),
 ]
 MUTATIONS = [(m, p, b) for m, p, b in ADMIN_OPERATIONS if m != "GET"]
+
+
+def openapi_path(path: str) -> str:
+    """Путь операции с идентификаторами заглушек → шаблон пути OpenAPI."""
+    for value, param in PATH_PARAMS.items():
+        path = path.replace(value, param)
+    return path
 
 
 @dataclass

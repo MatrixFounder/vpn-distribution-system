@@ -1,6 +1,7 @@
-"""Node API ``/agent/v1`` (interfaces.md §5.2) — заглушки 501 задачи 001.10; enrollment, состояние,
-отчёты и команды появляются в задачах 001.2x. Аутентификация нод — mTLS на nginx (§7.1),
-отпечаток клиента приходит в ``X-Client-Fingerprint``."""
+"""Node API ``/agent/v1`` (interfaces.md §5.2): enrollment (``agent_api/enroll.py``, 001.24 —
+заглушка со схемами); состояние, отчёты и команды — заглушки 501 задачи 001.10 до задач 001.28,
+001.33. Аутентификация нод — mTLS на nginx (§7.1), отпечаток клиента приходит в
+``X-Client-Fingerprint``; enrollment — единственный маршрут без него."""
 
 from __future__ import annotations
 
@@ -8,14 +9,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
+from app.agent_api.enroll import router as enroll
 from app.errors import not_implemented
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
-
-
-@router.post("/enroll", summary="Enrollment ноды по bootstrap-токену (001.2x)")
-async def enroll() -> dict[str, str]:
-    raise not_implemented("agent.enroll")
+router.include_router(enroll)
 
 
 @router.get("/state", summary="Состояние: дельты, курсоры, команды (001.2x)")

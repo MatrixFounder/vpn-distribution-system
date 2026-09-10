@@ -1,9 +1,10 @@
 """Сквозные проверки панели: тарифы, группы, коды (задача 001.18; UC-09) на заглушках, живой
-стенд: восемнадцать операций `/admin` в OpenAPI с одним разрешением на операцию (R-35,
-``x-permission``), все под сессией администратора (401 без неё, сессия пользователя не
-подходит), мутации под CSRF, fail-closed без Redis (в ``test_security_fail_closed``),
-TC-E2E-01 CRUD тарифа 201/200/200/204, TC-E2E-02 экспорт партии в ``text/csv`` с заголовком
-``code,expires_at,plan``; коды в ответах проходят контрольную сумму (§16.8)."""
+стенд: каждая операция `/admin` из ``ADMIN_OPERATIONS`` (и никакая другая) есть в OpenAPI с одним
+разрешением на операцию (R-35, ``x-permission``), все под сессией администратора (401 без неё,
+сессия пользователя не подходит), мутации под CSRF, fail-closed без Redis (в
+``test_security_fail_closed``), TC-E2E-01 CRUD тарифа 201/200/200/204, TC-E2E-02 экспорт партии в
+``text/csv`` с заголовком ``code,expires_at,plan``; коды в ответах проходят контрольную сумму
+(§16.8). Операции нод (001.24) — в том же перечне, их сценарий — ``test_nodes``."""
 
 from __future__ import annotations
 
@@ -15,7 +16,14 @@ import pytest
 from app.domain import codes
 from app.security.sessions import SessionStore
 
-from ._admin import ADMIN_OPERATIONS, GROUP_ID, MUTATIONS, PLAN_ID, VALID_PLAN, admin_stand
+from ._admin import (
+    ADMIN_OPERATIONS,
+    GROUP_ID,
+    MUTATIONS,
+    VALID_PLAN,
+    admin_stand,
+    openapi_path,
+)
 from ._auth import PASSWORD, auth_stand, cookies_of
 
 
@@ -29,20 +37,9 @@ async def test_admin_operations_in_openapi_with_one_permission_each(
         if path.startswith("/api/v1/admin")
         for method, operation in methods.items()
     }
-    expected = {
-        (m, p.replace(PLAN_ID, "{plan_id}").replace(GROUP_ID, "{group_id}"))
-        for m, p, _ in ADMIN_OPERATIONS
-    }
-    expected = {
-        (
-            m,
-            p.replace("00000000-0000-7000-8000-0000000000d2", "{batch_id}").replace(
-                "00000000-0000-7000-8000-0000000000d1", "{code_id}"
-            ),
-        )
-        for m, p in expected
-    }
-    assert set(operations) == expected, "ровно восемнадцать операций раздела /admin"
+    expected = {(m, openapi_path(p)) for m, p, _ in ADMIN_OPERATIONS}
+    assert len(expected) == len(ADMIN_OPERATIONS) == 28, "перечень без дубликатов: 18 + 10 нод"
+    assert set(operations) == expected, "операции раздела /admin — ровно ADMIN_OPERATIONS"
     for (method, path), operation in operations.items():
         declared = operation.get("x-permission")
         assert declared, f"{(method, path)}: операция без разрешения (R-35)"
