@@ -2077,6 +2077,8 @@ ARCHITECTURE §8, 413 в двух картах, «map с тремя правил
   `proxy_max_temp_file_size 8m`, пути временных файлов, `resolver_timeout`, уровни журнала
   пределов, map Н-25 по `$uri` и `$request` без учёта регистра, `log_format` (предусмотрено
   001.28; пределы — по итогам роастов).
+- `docs/PLAN.md` — строка статуса задачи («в работе» на время работы, «принята — коммит 51484a0
+  (2026-09-15)» при закрытии) и пересобранный блок состояния (`plan_graph.py --write`).
 - `deploy/compose/docker-compose.yml` — `mem_limit` = `memswap_limit` у `api` (1g) и `nginx`
   (256m), `cpus` и `pids_limit`, tmpfs `/var/cache/nginx` (64 МиБ), предел журналов всех служб
   (`x-logging`); `deploy/README.md` — не менялся (команда запуска сверяется стражем).
