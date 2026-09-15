@@ -39,7 +39,8 @@ class NumeralForms(unittest.TestCase):
 class Matching(unittest.TestCase):
     def setUp(self) -> None:
         self.pattern = sweep.compile_pattern(
-            {"name": "частота", "value": 8, "forms": ["{n} r/s", "{n}r/s", "{n} в секунду"]})
+            {"name": "частота", "value": 8, "forms": ["{n} r/s", "{n}r/s", "{n} в секунду"]}
+        )
 
     def test_number_and_word_forms_match_and_other_numbers_do_not(self) -> None:
         for text in ("8 r/s", "8r/s", "8 в секунду", "восьми в секунду", "ВОСЕМЬ в секунду"):
@@ -49,7 +50,9 @@ class Matching(unittest.TestCase):
 
     def test_regex_and_literal_patterns_ignore_case(self) -> None:
         rx = sweep.compile_pattern({"name": "x", "regex": "два сертификата[^.;]*целиком"})
-        self.assertTrue(rx.regex.search("Два сертификата (2 × 5 > 15) выбирают частоту парка целиком"))
+        self.assertTrue(
+            rx.regex.search("Два сертификата (2 × 5 > 15) выбирают частоту парка целиком")
+        )
         lit = sweep.compile_pattern({"name": "y", "literal": "proxy_max_temp_file_size 0"})
         self.assertTrue(lit.regex.search("    PROXY_MAX_TEMP_FILE_SIZE 0;"))
         self.assertFalse(lit.regex.search("proxy_max_temp_file_size 8m;"))
@@ -73,29 +76,62 @@ class HistoryAndCli(unittest.TestCase):
         (self.root / "docs" / "task.md").write_text(
             "Частота парка — восемь в секунду.\n"
             "В раунде 7 стояло 8 r/s, теперь 15.\n"
-            "Ничего устаревшего здесь нет.\n", encoding="utf-8")
+            "Ничего устаревшего здесь нет.\n",
+            encoding="utf-8",
+        )
         (self.root / "docs" / "report.md").write_text(
-            "Текущее: 8r/s у зоны.\n## Раунд 1 — роаст\nВ раунде 1 было 8 в секунду.\n", encoding="utf-8")
+            "Текущее: 8r/s у зоны.\n## Раунд 1 — роаст\nВ раунде 1 было 8 в секунду.\n",
+            encoding="utf-8",
+        )
         self.patterns = self.root / "sweep.json"
-        self.patterns.write_text(json.dumps({
-            "task": "t", "history_sections": {"docs/report.md": "^## Раунд 1 — роаст"},
-            "patterns": [{"name": "частота", "value": 8, "current": "15 r/s",
-                          "forms": ["{n} r/s", "{n}r/s", "{n} в секунду"]}]}, ensure_ascii=False),
-            encoding="utf-8")
+        self.patterns.write_text(
+            json.dumps(
+                {
+                    "task": "t",
+                    "history_sections": {"docs/report.md": "^## Раунд 1 — роаст"},
+                    "patterns": [
+                        {
+                            "name": "частота",
+                            "value": 8,
+                            "current": "15 r/s",
+                            "forms": ["{n} r/s", "{n}r/s", "{n} в секунду"],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
     def run_cli(self, *extra: str) -> tuple[int, str]:
         out = io.StringIO()
         with redirect_stdout(out):
-            code = sweep.main(["--patterns", str(self.patterns), "--root", str(self.root),
-                               "docs/task.md", "docs/report.md", *extra])
+            code = sweep.main(
+                [
+                    "--patterns",
+                    str(self.patterns),
+                    "--root",
+                    str(self.root),
+                    "docs/task.md",
+                    "docs/report.md",
+                    *extra,
+                ]
+            )
         return code, out.getvalue()
 
     def test_history_markers_and_sections_separate_history_from_live_hits(self) -> None:
         s = sweep.load_sweep(self.patterns)
         hits = sweep.run(s, self.root, ["docs/task.md", "docs/report.md"])
         by_line = {(h.path, h.line): h.history for h in hits}
-        self.assertEqual(by_line, {("docs/task.md", 1): False, ("docs/task.md", 2): True,
-                                   ("docs/report.md", 1): False, ("docs/report.md", 3): True})
+        self.assertEqual(
+            by_line,
+            {
+                ("docs/task.md", 1): False,
+                ("docs/task.md", 2): True,
+                ("docs/report.md", 1): False,
+                ("docs/report.md", 3): True,
+            },
+        )
 
     def test_cli_reports_counts_and_strict_fails_on_live_hits(self) -> None:
         code, out = self.run_cli()

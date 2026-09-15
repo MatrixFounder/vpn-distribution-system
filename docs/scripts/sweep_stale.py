@@ -43,17 +43,34 @@ import argparse
 import itertools
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 EXTENSIONS = (".md", ".py", ".conf", ".yml", ".yaml", ".json", ".toml", ".sh", ".sql")
-DEFAULT_MARKERS = ("раунд", "стояло", "был", "прежн", "раньше", "до закрытия", "первый прогон",
-                   "исправлен", "снижен", "перемерен", "истори")
+DEFAULT_MARKERS = (
+    "раунд",
+    "стояло",
+    "был",
+    "прежн",
+    "раньше",
+    "до закрытия",
+    "первый прогон",
+    "исправлен",
+    "снижен",
+    "перемерен",
+    "истори",
+)
 # Собственные файлы развёртки и записи книг ретро цитируют старые значения по назначению.
-DEFAULT_EXCLUDES = ("docs/sweeps/", "docs/scripts/sweep_stale.py", "docs/scripts/tests/",
-                    "docs/backlog/", "docs/issues/")
+DEFAULT_EXCLUDES = (
+    "docs/sweeps/",
+    "docs/scripts/sweep_stale.py",
+    "docs/scripts/tests/",
+    "docs/backlog/",
+    "docs/issues/",
+)
 
 _UNITS = {
     1: ["один", "одна", "одно", "одного", "одной", "одному", "одним", "одном"],
@@ -188,8 +205,12 @@ def compile_pattern(spec: dict) -> Pattern:
         )
     else:
         raise ValueError(f"шаблон {name!r}: нужен regex, literal или value")
-    return Pattern(name=str(name), regex=re.compile(source, flags),
-                   current=str(spec.get("current", "")), since=str(spec.get("since", "")))
+    return Pattern(
+        name=str(name),
+        regex=re.compile(source, flags),
+        current=str(spec.get("current", "")),
+        since=str(spec.get("since", "")),
+    )
 
 
 def load_sweep(path: Path) -> Sweep:
@@ -200,17 +221,25 @@ def load_sweep(path: Path) -> Sweep:
     # Маркеры файла дополняют встроенные, а не заменяют их.
     markers = tuple(dict.fromkeys(DEFAULT_MARKERS + tuple(data.get("history_markers") or ())))
     sections = {k: re.compile(v) for k, v in (data.get("history_sections") or {}).items()}
-    ranges = [(r["file"], re.compile(r["from"]), re.compile(r["to"]))
-              for r in (data.get("history_ranges") or [])]
+    ranges = [
+        (r["file"], re.compile(r["from"]), re.compile(r["to"]))
+        for r in (data.get("history_ranges") or [])
+    ]
     excludes = tuple(data.get("exclude") or ()) + DEFAULT_EXCLUDES
-    return Sweep(task=str(data.get("task", path.stem)), patterns=patterns, markers=markers,
-                 history_sections=sections, history_ranges=ranges, excludes=excludes)
+    return Sweep(
+        task=str(data.get("task", path.stem)),
+        patterns=patterns,
+        markers=markers,
+        history_sections=sections,
+        history_ranges=ranges,
+        excludes=excludes,
+    )
 
 
 def scan_file(sweep: Sweep, path: Path, rel: str) -> list[Hit]:
     try:
         lines = path.read_text(encoding="utf-8").split("\n")
-    except (UnicodeDecodeError, OSError):
+    except UnicodeDecodeError, OSError:
         return []
     cutoff = None
     section = sweep.history_sections.get(rel)
@@ -239,34 +268,54 @@ def scan_file(sweep: Sweep, path: Path, rel: str) -> list[Hit]:
             in_fence = not in_fence
             if in_fence:
                 # Блок кода — история, если абзац перед ним помечен (например, «Раунд 7 (…):»).
-                lead = [x for x in lines[max(0, i - 4):i] if x.strip()]
+                lead = [x for x in lines[max(0, i - 4) : i] if x.strip()]
                 fence_history = bool(lead and marker_re.search(lead[-1]))
             continue
         for pattern in sweep.patterns:
             if pattern.regex.search(line):
-                history = ((cutoff is not None and i >= cutoff) or i in ranged
-                           or bool(marker_re.search(line)) or (in_fence and fence_history))
+                history = (
+                    (cutoff is not None and i >= cutoff)
+                    or i in ranged
+                    or bool(marker_re.search(line))
+                    or (in_fence and fence_history)
+                )
                 hits.append(Hit(pattern.name, rel, i + 1, line.strip(), history))
     return hits
 
 
+GIT = shutil.which("git") or "git"
+
+
 def _git(root: Path, *args: str) -> list[str]:
-    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
-    return [line for line in result.stdout.split("\n") if line.strip()] if result.returncode == 0 else []
+    # Аргументы — фиксированный список без оболочки; ревизия --since приходит от оператора.
+    result = subprocess.run(  # noqa: S603
+        [GIT, *args], cwd=root, capture_output=True, text=True, check=False
+    )
+    return (
+        [line for line in result.stdout.split("\n") if line.strip()]
+        if result.returncode == 0
+        else []
+    )
 
 
-def select_files(root: Path, since: str | None, explicit: list[str],
-                 excludes: tuple[str, ...] = DEFAULT_EXCLUDES) -> list[str]:
+def select_files(
+    root: Path, since: str | None, explicit: list[str], excludes: tuple[str, ...] = DEFAULT_EXCLUDES
+) -> list[str]:
     if explicit:
         names = explicit
     else:
         names = _git(root, "ls-files", "-m", "-o", "--exclude-standard")
         if since:
             names += _git(root, "diff", "--name-only", since)
-    unique = sorted(dict.fromkeys(
-        n for n in names
-        if n.endswith(EXTENSIONS) and (root / n).is_file()
-        and not (not explicit and any(n == e or n.startswith(e) for e in excludes))))
+    unique = sorted(
+        dict.fromkeys(
+            n
+            for n in names
+            if n.endswith(EXTENSIONS)
+            and (root / n).is_file()
+            and not (not explicit and any(n == e or n.startswith(e) for e in excludes))
+        )
+    )
     return unique
 
 
@@ -278,15 +327,19 @@ def run(sweep: Sweep, root: Path, files: list[str]) -> list[Hit]:
 
 
 def render(sweep: Sweep, hits: list[Hit], live_only: bool) -> str:
-    out = [f"развёртка {sweep.task}: шаблонов {len(sweep.patterns)}, совпадений {len(hits)}, "
-           f"в истории {sum(h.history for h in hits)}, вне истории {sum(not h.history for h in hits)}"]
+    out = [
+        f"развёртка {sweep.task}: шаблонов {len(sweep.patterns)}, совпадений {len(hits)}, "
+        f"в истории {sum(h.history for h in hits)}, вне истории {sum(not h.history for h in hits)}"
+    ]
     for pattern in sweep.patterns:
         mine = [h for h in hits if h.pattern == pattern.name]
         shown = [h for h in mine if not (live_only and h.history)]
         if not mine:
             continue
         current = f" — сейчас: {pattern.current}" if pattern.current else ""
-        out.append(f"== {pattern.name}: {len(mine)} (история {sum(h.history for h in mine)}){current}")
+        out.append(
+            f"== {pattern.name}: {len(mine)} (история {sum(h.history for h in mine)}){current}"
+        )
         for h in shown:
             tag = "[история] " if h.history else ""
             out.append(f"    {h.path}:{h.line}: {tag}{h.text[:160]}")
@@ -297,20 +350,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--patterns", required=True, type=Path, help="файл шаблонов задачи (JSON)")
     parser.add_argument("--since", help="ревизия git: добавить файлы, изменённые с неё")
-    parser.add_argument("--root", type=Path, default=None, help="корень репозитория (по умолчанию — из git)")
+    parser.add_argument(
+        "--root", type=Path, default=None, help="корень репозитория (по умолчанию — из git)"
+    )
     parser.add_argument("--live-only", action="store_true", help="не печатать строки истории")
-    parser.add_argument("--strict", action="store_true", help="код 1, если есть совпадения вне истории")
+    parser.add_argument(
+        "--strict", action="store_true", help="код 1, если есть совпадения вне истории"
+    )
     parser.add_argument("--json", action="store_true", help="машинный вывод")
     parser.add_argument("files", nargs="*", help="явный список файлов (относительно корня)")
     args = parser.parse_args(argv)
-    root = args.root or Path(_git(Path.cwd(), "rev-parse", "--show-toplevel")[0] if _git(Path.cwd(), "rev-parse", "--show-toplevel") else Path.cwd())
+    root = args.root or Path(
+        _git(Path.cwd(), "rev-parse", "--show-toplevel")[0]
+        if _git(Path.cwd(), "rev-parse", "--show-toplevel")
+        else Path.cwd()
+    )
     root = root.resolve()
     sweep = load_sweep(args.patterns if args.patterns.is_absolute() else (root / args.patterns))
     files = select_files(root, args.since, args.files, sweep.excludes)
     hits = run(sweep, root, files)
     if args.json:
-        print(json.dumps({"task": sweep.task, "files": files, "hits": [h.__dict__ for h in hits]},
-                         ensure_ascii=False, indent=1))
+        print(
+            json.dumps(
+                {"task": sweep.task, "files": files, "hits": [h.__dict__ for h in hits]},
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
     else:
         print(render(sweep, hits, args.live_only))
     live = sum(not h.history for h in hits)
