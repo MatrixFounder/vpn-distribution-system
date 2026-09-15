@@ -3,7 +3,7 @@ id: WI-21
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: plantings-harness-as-framework-tool
+slug: wi-21-plantings-harness-as-framework-tool
 effort: M
 value: 'посадки не пишутся заново на каждой задаче; копии на диске и double-fork встроены'
 source: 'vdd-03-develop 001.33 verification'

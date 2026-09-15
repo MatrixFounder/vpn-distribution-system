@@ -5,7 +5,7 @@ status: open
 opened_at: 2026-09-15
 category: test-flake
 severity: SEV-3
-slug: scheduler-leadership-lock-flake
+slug: rf-1-scheduler-leadership-lock-flake
 provenance: machine
 component: control-plane-tests
 fingerprint: 33ad4004f39c5374

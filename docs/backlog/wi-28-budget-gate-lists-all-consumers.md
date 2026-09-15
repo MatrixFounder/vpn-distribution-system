@@ -3,7 +3,7 @@ id: WI-28
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: budget-gate-lists-all-consumers
+slug: wi-28-budget-gate-lists-all-consumers
 effort: S
 value: 'enrollment и остальные операции не выпадают из окна'
 source: 'vdd-03-develop 001.33 develop'

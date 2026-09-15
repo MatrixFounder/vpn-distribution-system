@@ -3,7 +3,7 @@ id: WI-27
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: contract-rule-owner-window-model-check
+slug: wi-27-contract-rule-owner-window-model-check
 effort: M
 value: 'решение не отвергается на следующем раунде из-за непосчитанной стороны'
 source: 'vdd-03-develop 001.33 review'

@@ -3,7 +3,7 @@ id: WI-26
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: guard-classes-checklist
+slug: wi-26-guard-classes-checklist
 effort: S
 value: 'классы дыр, найденные линзами шесть раундов подряд, ставятся до ревью'
 source: 'vdd-03-develop 001.33 review'

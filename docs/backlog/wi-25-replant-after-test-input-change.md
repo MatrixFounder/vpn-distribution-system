@@ -3,7 +3,7 @@ id: WI-25
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: replant-after-test-input-change
+slug: wi-25-replant-after-test-input-change
 effort: S
 value: 'инертные посадки не считаются красными'
 source: 'vdd-03-develop 001.33 verification'

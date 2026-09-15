@@ -3,7 +3,7 @@ id: WI-29
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: config-rule-guards-by-input-table
+slug: wi-29-config-rule-guards-by-input-table
 effort: S
 value: 'пин текста не маскирует неверное правило'
 source: 'vdd-03-develop 001.33 develop'

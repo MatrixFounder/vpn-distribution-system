@@ -3,7 +3,7 @@ id: WI-24
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: contract-rule-pairs-walked-through-scenario
+slug: wi-24-contract-rule-pairs-walked-through-scenario
 effort: S
 value: 'незавершаемые интервалы ловятся до ревью'
 source: 'vdd-03-develop 001.33 review'

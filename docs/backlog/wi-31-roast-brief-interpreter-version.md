@@ -3,7 +3,7 @@ id: WI-31
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: roast-brief-interpreter-version
+slug: wi-31-roast-brief-interpreter-version
 effort: S
 value: 'четыре ложных CRITICAL по PEP 758 не повторяются'
 source: 'vdd-03-develop 001.33 roast'

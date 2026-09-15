@@ -3,7 +3,7 @@ id: WI-32
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: claims-after-artefacts
+slug: wi-32-claims-after-artefacts
 effort: S
 value: 'фантомные посадки и невыполненные обещания не попадают в отчёт'
 source: 'vdd-03-develop 001.33 report'

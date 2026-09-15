@@ -3,7 +3,7 @@ id: WI-23
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: dispositions-from-sweep-output
+slug: wi-23-dispositions-from-sweep-output
 effort: S
 value: 'ложные диспозиции не доходят до следующей линзы'
 source: 'vdd-03-develop 001.33 review'

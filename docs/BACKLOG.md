@@ -74,18 +74,18 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/claims-after-artefacts.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/roast-brief-interpreter-version.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-29** [Стражи правил конфигурации — таблицей входов через само правило, а не сверкой текста](backlog/config-rule-guards-by-input-table.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-28** [Гейт бюджета обязан перечислить всех потребителей ресурса или объявить границу](backlog/budget-gate-lists-all-consumers.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/contract-rule-owner-window-model-check.md) — effort `M`, status `open`, opened 2026-09-15
-- **WI-26** [Три класса стражей в чек-лист: положительное покрытие, явные умолчания, единый набор файлов](backlog/guard-classes-checklist.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-25** [После изменения входа теста перезапускать посадки, которые называют этот тест](backlog/replant-after-test-input-change.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-24** [Пара правил одной операции контракта прогоняется через общий сценарий до роаста](backlog/contract-rule-pairs-walked-through-scenario.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-23** [Диспозиции роаста пишутся из вывода развёртки по старым значениям](backlog/dispositions-from-sweep-output.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-22** [Гейт бюджета: каждый множитель — независимый замеренный литерал с собственной посадкой](backlog/budget-gate-independent-literals.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-21** [Харнес посадок регрессий как инструмент фреймворка, а не скрипт сессии](backlog/plantings-harness-as-framework-tool.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/wi-32-claims-after-artefacts.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/wi-31-roast-brief-interpreter-version.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/wi-30-stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-29** [Стражи правил конфигурации — таблицей входов через само правило, а не сверкой текста](backlog/wi-29-config-rule-guards-by-input-table.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-28** [Гейт бюджета обязан перечислить всех потребителей ресурса или объявить границу](backlog/wi-28-budget-gate-lists-all-consumers.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/wi-27-contract-rule-owner-window-model-check.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-26** [Три класса стражей в чек-лист: положительное покрытие, явные умолчания, единый набор файлов](backlog/wi-26-guard-classes-checklist.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-25** [После изменения входа теста перезапускать посадки, которые называют этот тест](backlog/wi-25-replant-after-test-input-change.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-24** [Пара правил одной операции контракта прогоняется через общий сценарий до роаста](backlog/wi-24-contract-rule-pairs-walked-through-scenario.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-23** [Диспозиции роаста пишутся из вывода развёртки по старым значениям](backlog/wi-23-dispositions-from-sweep-output.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-22** [Гейт бюджета: каждый множитель — независимый замеренный литерал с собственной посадкой](backlog/wi-22-budget-gate-independent-literals.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-21** [Харнес посадок регрессий как инструмент фреймворка, а не скрипт сессии](backlog/wi-21-plantings-harness-as-framework-tool.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-20** [Ячейки таблицы control-plane/app/.AGENTS.md сверх §5.1 documentation-standards](backlog/wi-20-control-plane-app-agents-md-5-1-documentation-standards.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-19** [Задачи-заглушки не несут инфраструктуру и бюджеты производительности: отдельная задача укрепления прокси и 001.73](backlog/wi-19-001-73.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-18** [Фоновые команды с пределом времени не должны держать посадки в дереве: копии на диске, double-fork, проверка после сбоя](backlog/wi-18-double-fork.md) — effort `S`, status `open`, opened 2026-09-15

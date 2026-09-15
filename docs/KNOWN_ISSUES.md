@@ -83,4 +83,4 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 
 ## test-flake
 
-- **RF-1** [test_scheduler_leadership_lock флакает против стенда](issues/scheduler-leadership-lock-flake.md) — severity `SEV-3`, status `open`, opened 2026-09-15
+- **RF-1** [test_scheduler_leadership_lock флакает против стенда](issues/rf-1-scheduler-leadership-lock-flake.md) — severity `SEV-3`, status `open`, opened 2026-09-15

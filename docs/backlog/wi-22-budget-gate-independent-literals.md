@@ -3,7 +3,7 @@ id: WI-22
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: budget-gate-independent-literals
+slug: wi-22-budget-gate-independent-literals
 effort: S
 value: 'гейт-тождество невозможен по правилу'
 source: 'vdd-03-develop 001.33 roast-4'

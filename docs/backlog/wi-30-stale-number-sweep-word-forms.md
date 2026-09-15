@@ -3,7 +3,7 @@ id: WI-30
 type: work-item
 status: open
 opened_at: 2026-09-15
-slug: stale-number-sweep-word-forms
+slug: wi-30-stale-number-sweep-word-forms
 effort: S
 value: 'устаревшие фразы не доходят до роаста'
 source: 'vdd-03-develop 001.33 verification'
