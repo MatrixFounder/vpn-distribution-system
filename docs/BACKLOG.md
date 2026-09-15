@@ -74,6 +74,24 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
+- **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/claims-after-artefacts.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/roast-brief-interpreter-version.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-29** [Стражи правил конфигурации — таблицей входов через само правило, а не сверкой текста](backlog/config-rule-guards-by-input-table.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-28** [Гейт бюджета обязан перечислить всех потребителей ресурса или объявить границу](backlog/budget-gate-lists-all-consumers.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/contract-rule-owner-window-model-check.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-26** [Три класса стражей в чек-лист: положительное покрытие, явные умолчания, единый набор файлов](backlog/guard-classes-checklist.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-25** [После изменения входа теста перезапускать посадки, которые называют этот тест](backlog/replant-after-test-input-change.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-24** [Пара правил одной операции контракта прогоняется через общий сценарий до роаста](backlog/contract-rule-pairs-walked-through-scenario.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-23** [Диспозиции роаста пишутся из вывода развёртки по старым значениям](backlog/dispositions-from-sweep-output.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-22** [Гейт бюджета: каждый множитель — независимый замеренный литерал с собственной посадкой](backlog/budget-gate-independent-literals.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-21** [Харнес посадок регрессий как инструмент фреймворка, а не скрипт сессии](backlog/plantings-harness-as-framework-tool.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-20** [Ячейки таблицы control-plane/app/.AGENTS.md сверх §5.1 documentation-standards](backlog/wi-20-control-plane-app-agents-md-5-1-documentation-standards.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-19** [Задачи-заглушки не несут инфраструктуру и бюджеты производительности: отдельная задача укрепления прокси и 001.73](backlog/wi-19-001-73.md) — effort `M`, status `open`, opened 2026-09-15
+- **WI-18** [Фоновые команды с пределом времени не должны держать посадки в дереве: копии на диске, double-fork, проверка после сбоя](backlog/wi-18-double-fork.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-17** [vm-deploy: после rsync файла под bind mount контейнер пересоздавать, не перечитывать (inode)](backlog/wi-17-vm-deploy-rsync-bind-mount-inode.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-16** [Правило для стражей конфигурации: тот же набор файлов, что у соседнего стража, и ast вместо подстроки](backlog/wi-16-ast.md) — effort `S`, status `open`, opened 2026-09-15
+- **WI-15** [Состояние сессии после приёмки остаётся «escalated» — закрывать явно при приёмке](backlog/wi-15-escalated.md) — effort `S`, status `open`, opened 2026-09-15
 - **WI-14** [Отпечаток дерева обязан быть в задании линзе ревью](backlog/wi-14-fingerprint-in-the-review-brief.md) — effort `S`, status `done`, opened 2026-09-10, resolved 2026-09-10
 - **WI-13** [Посадка обязана снимать проверяемое поведение, а не просто менять файл](backlog/wi-13-planting-must-remove-the-behaviour.md) — effort `M`, status `done`, opened 2026-09-10, resolved 2026-09-10
 - **WI-12** [Прогон под посадкой без остановки на первом падении](backlog/wi-12-planting-run-without-exitfirst.md) — effort `S`, status `done`, opened 2026-09-10, resolved 2026-09-10

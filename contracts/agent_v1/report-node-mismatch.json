@@ -1,0 +1,45 @@
+{
+  "operation": "reports",
+  "summary": "Отчёт с идентификатором другой ноды: 403, нода отчитывается только за себя (§11.3)",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/reports",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "node_id": "00000000-0000-7000-8000-0000000000bb",
+      "counter_epoch": "00000000-0000-7000-8000-0000000000e1",
+      "report_seq": 1,
+      "parts_total": 1,
+      "period_start": "2026-09-10T12:00:00Z",
+      "period_end": "2026-09-10T12:01:00Z",
+      "lines": [],
+      "online_ips": [],
+      "node_rx_bytes": 0,
+      "node_tx_bytes": 0
+    }
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json",
+      "Retry-After": "3600"
+    },
+    "body": {
+      "error": {
+        "code": "node_mismatch",
+        "message": "отчёт содержит идентификатор другой ноды",
+        "details": {
+          "node_id": "00000000-0000-7000-8000-0000000000b1"
+        }
+      }
+    }
+  }
+}

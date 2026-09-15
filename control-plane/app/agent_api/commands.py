@@ -11,11 +11,12 @@ import uuid
 
 from fastapi import APIRouter, status
 
+from app.agent_api.body import BoundedBodyRoute
 from app.agent_api.deps import Commands, Served
 from app.agent_api.state import AGENT_ERRORS
 from app.domain.commands import CommandResultIn
 
-router = APIRouter()
+router = APIRouter(route_class=BoundedBodyRoute, strict_content_type=True)
 
 
 @router.post(

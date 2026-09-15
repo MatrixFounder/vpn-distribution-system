@@ -24,6 +24,9 @@ from typing import Annotated
 
 from fastapi import Depends, Header
 
+from app.accounting.device_limit import DeviceLimitService
+from app.accounting.quota import QuotaService
+from app.accounting.service import AccountingService
 from app.db.pool import db_pool
 from app.domain.commands import CommandService
 from app.domain.composition import CompositionService, node_not_approved
@@ -168,7 +171,30 @@ async def served_node(node: Agent) -> CurrentNode:
     return node
 
 
+async def get_quota_service(pool: Annotated[object, Depends(db_pool)]) -> QuotaService:
+    return QuotaService(pool)
+
+
+async def get_device_limit_service(
+    pool: Annotated[object, Depends(db_pool)],
+) -> DeviceLimitService:
+    return DeviceLimitService(pool)
+
+
+async def get_accounting_service(
+    pool: Annotated[object, Depends(db_pool)],
+    quotas: Annotated[QuotaService, Depends(get_quota_service)],
+    device_limits: Annotated[DeviceLimitService, Depends(get_device_limit_service)],
+) -> AccountingService:
+    """Службы, которые приём отчёта вызывает в своей транзакции (001.77), берутся из графа
+    зависимостей, а не создаются внутри: иначе их подмена в тесте до приёма не доходила бы —
+    как у ``CompositionService`` и службы команд выше."""
+    return AccountingService(pool, quotas=quotas, device_limits=device_limits)
+
+
 Served = Annotated[CurrentNode, Depends(served_node)]
 Streams = Annotated[CompositionService, Depends(get_composition_service)]
 Commands = Annotated[CommandService, Depends(get_command_service)]
 Statuses = Annotated[StatusService, Depends(get_status_service)]
+Accounting = Annotated[AccountingService, Depends(get_accounting_service)]
+Quotas = Annotated[QuotaService, Depends(get_quota_service)]

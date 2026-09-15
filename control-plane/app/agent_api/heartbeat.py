@@ -13,11 +13,12 @@ import datetime as dt
 
 from fastapi import APIRouter, status
 
+from app.agent_api.body import BoundedBodyRoute
 from app.agent_api.deps import Served, Statuses, Streams
 from app.agent_api.state import AGENT_ERRORS
 from app.domain.statuses import HeartbeatIn, NodeMetrics
 
-router = APIRouter()
+router = APIRouter(route_class=BoundedBodyRoute, strict_content_type=True)
 
 
 @router.post(

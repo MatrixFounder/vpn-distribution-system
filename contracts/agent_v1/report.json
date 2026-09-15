@@ -1,0 +1,61 @@
+{
+  "operation": "reports",
+  "summary": "Первая из двух частей отчёта о трафике принята: ключ идемпотентности, период, две строки, два адреса, счётчики интерфейса (их несёт только первая часть)",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/reports",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "node_id": "00000000-0000-7000-8000-0000000000b1",
+      "counter_epoch": "00000000-0000-7000-8000-0000000000e1",
+      "report_seq": 1,
+      "parts_total": 2,
+      "period_start": "2026-09-10T12:00:00Z",
+      "period_end": "2026-09-10T12:01:00Z",
+      "lines": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "uplink_bytes": 1048576,
+          "downlink_bytes": 10485760
+        },
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a4",
+          "uplink_bytes": 0,
+          "downlink_bytes": 2048
+        }
+      ],
+      "online_ips": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "ip": "198.51.100.23",
+          "last_seen": "2026-09-10T12:00:57Z"
+        },
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "ip": "2001:db8::17",
+          "last_seen": "2026-09-10T12:00:40Z"
+        }
+      ],
+      "node_rx_bytes": 12582912,
+      "node_tx_bytes": 2097152
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "last_accepted_seq": 1,
+      "duplicate": false
+    }
+  }
+}

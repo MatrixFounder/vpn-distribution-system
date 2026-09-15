@@ -443,14 +443,56 @@ traffic_reports
   node_id                uuid FK nodes
   counter_epoch          uuid
   report_seq             bigint
+  parts_total            int                      — объявленное нодой число частей интервала
+                                                     (контракт 001.33; колонка — 001.34)
   period_start           timestamptz
   period_end             timestamptz
   received_at            timestamptz
   status                 report_status            — accepted | duplicate | rejected_time |
-                                                     held_anomaly
+                                                     held_anomaly | interval_closed (последнее —
+                                                     часть к закрытому интервалу, §5.2; значение
+                                                     добавляет миграция 001.34)
   node_rx_bytes          bigint                   — счётчики интерфейса (второй источник)
   node_tx_bytes          bigint
   PK (node_id, counter_epoch, report_seq)
+
+report_intervals                                   — состояние интервала отчёта: правила частей
+                                                     §5.2 требуют помнить его между частями
+                                                     (миграция — 001.34)
+  node_id                uuid FK nodes
+  counter_epoch          uuid
+  period_start           timestamptz
+  period_end             timestamptz
+  first_seq              bigint                   — report_seq первой принятой части
+  parts_total            int                      — последнее принятое объявленное число частей
+  parts_accepted         int                      — принятых частей (счётчик, не пересчёт)
+  accepted_uplink_bytes  bigint                   — нарастающие суммы raw по направлениям
+  accepted_downlink_bytes bigint                     принятых частей и списанной в пределах
+                                                     потолка канала доли удержанных — к каждой
+                                                     порог §5.9 (полоса × длительность; канал
+                                                     дуплексный)
+  held                   boolean                  — в интервале удержанная часть (held_anomaly):
+                                                     первая часть нового интервала открывает
+                                                     его с held, удержанное продолжение ставит
+                                                     held на существующей строке (второй строки
+                                                     с тем же ключом нет), удержание по потолку
+                                                     открытых строки не создаёт; предыдущий
+                                                     интервал не закрывается
+  first_received_at      timestamptz
+  last_received_at       timestamptz              — от него скользящий срок закрытия; потолок
+                                                     возраста (48 ч, REPORT_MAX_INTERVAL_AGE) —
+                                                     от first_received_at
+  closed_at              timestamptz NULL         — NULL — открыт
+  close_reason           text NULL CHECK (close_reason IN ('completed', 'superseded',
+                                                     'deadline', 'age'))
+  PK (node_id, counter_epoch, period_start, period_end)
+  INDEX (node_id, period_end DESC)                 — последний принятый интервал ноды:
+                                                     монотонность и якорь первого (§5.2)
+  INDEX (node_id, first_received_at)               — смены эпохи за скользящие сутки, потолок
+                                                     возраста открытых
+  INDEX (node_id) WHERE closed_at IS NULL          — открытые интервалы ноды (потолок и закрытие)
+  EXCLUDE USING gist (node_id WITH =, tstzrange(period_start, period_end) WITH &&)
+                                                   — интервалы ноды не перекрываются (§4.4)
 
 traffic_lines                                      — факт, партиционирование по суткам, 14 дней
   node_id                uuid
@@ -490,21 +532,30 @@ node_interface_hourly                              — второй источн
   rx_bytes, tx_bytes     bigint
   PK (node_id, hour_start)
 
-traffic_gaps
-  id                     uuid PK
-  node_id                uuid FK nodes
-  gap_start, gap_end     timestamptz
+traffic_gaps                                       — партиции по суткам gap_start, 90 дней
+  gap_start              timestamptz
+  node_id                uuid                     — без FK: внешних ключей на партициях нет
+                                                     (§4.3); 080 создаёт с FK — снять при
+                                                     пересоздании (001.37)
   reason                 text
+  gap_end                timestamptz
   estimated_bytes        bigint NULL
+  PK (gap_start, node_id, reason)                  — ключ партиционирования в PK (иначе
+                                                     PostgreSQL таблицу не создаст); тот же
+                                                     ключ — идемпотентность: повторный проход
+                                                     закрытия не дублирует разрыв (001.34/001.37;
+                                                     080 создаёт таблицу без партиций и с id —
+                                                     пересоздание в миграции 001.37)
 
-reconciliation_runs
-  id                     uuid PK
+reconciliation_runs                                — партиции по суткам created_at, 90 дней
+  created_at             timestamptz
+  id                     uuid
   kind                   reconciliation_kind      — arithmetic | cross_source | continuity
   scope                  jsonb                    — день, нода
   expected, actual       bigint
   delta_pct              numeric(6,3)
   status                 text
-  created_at             timestamptz
+  PK (created_at, id)                              — ключ партиционирования в PK (001.37)
 
 quota_grants
   id                     uuid PK
@@ -621,7 +672,8 @@ settings
 
 Диаграмма показывает ядро модели. Опущены журнальные и служебные таблицы: `traffic_daily`,
 `node_metrics`, `subscription_access_log`, `auth_events`, `jobs`, `settings`, `user_online_ips`,
-`user_blocked_ips`, `traffic_gaps`, `reconciliation_runs`, `node_ip_history`,
+`user_blocked_ips`, `traffic_gaps`, `reconciliation_runs`, `report_intervals` (состояние
+интервала отчёта — служебная таблица приёма при `traffic_reports`), `node_ip_history`,
 `node_country_availability`, `orders`, `payments`. Их связи — по идентификаторам, без внешних
 ключей на партициях.
 
@@ -674,6 +726,7 @@ erDiagram
 | Append-only Audit Log (R-37) | `REVOKE UPDATE, DELETE` у роли приложения; триггер `RAISE` |
 | Один активный период на пользователя | `subscriptions.current_period_id` + проверка в домене |
 | Датированность коэффициента (B-1) | интервалы `billing_group_multipliers` и `node_billing_assignments` без пересечений (`EXCLUDE`) |
+| Интервалы отчётов ноды не перекрываются (§5.2, §5.9) | `EXCLUDE USING gist` по `(node_id, tstzrange(period_start, period_end))` на `report_intervals`; монотонность и якорь первого интервала — в домене (001.34) |
 | Порядок изменений потока состава (M-2) | `updated_seq` только через `UPDATE nodes ... RETURNING`; выделение из последовательности запрещено |
 | Состав потока по группам доступа (§11.3) | строки `node_user_state` только для пересечения групп; проверка в домене и задача уплотнения |
 | Расшифровка credentials по identity | `node_id` берётся из `node_identities` по отпечатку; параметр запроса не используется |
@@ -690,6 +743,8 @@ erDiagram
 | Выдача подписки: ноды по группам доступа | `node_access_groups (access_group_id)`, `nodes (status)` |
 | Статистика пользователя за период | `traffic_lines (user_id, period_start)` |
 | Сверка по ноде за сутки | `traffic_lines (node_id, period_start)`, `node_interface_hourly` PK |
+| Приём части отчёта: последний принятый интервал ноды и открытые интервалы | `report_intervals (node_id, period_end DESC)`, частичный `(node_id) WHERE closed_at IS NULL` |
+| Приём части отчёта: смены эпохи ноды за скользящие сутки | `report_intervals (node_id, first_received_at)` |
 | Истечение подписок | `subscription_periods (period_end)` — без предиката: `now()` в предикате индекса PostgreSQL не допускает |
 | Выборка задач | `jobs (queue, status, run_at) WHERE status = 'pending'` |
 | Обращения к подписке в карточке | `subscription_access_log (user_id, ts DESC)` |
@@ -702,6 +757,8 @@ erDiagram
 | `traffic_lines` | по суткам | 14 дней | окно трассируемости §4.2.5 |
 | `traffic_hourly` | по суткам | 90 дней | Н-21, Н-22 |
 | `traffic_reports` | нет | 90 дней | дедупликация; не меньше глубины буфера Н-8 |
+| `report_intervals` | нет | 90 дней после `closed_at`; открытый интервал закрывается по возрасту (`close_reason = age`) периодической задачей 001.37 не позже потолка возраста (48 ч от первой части, `REPORT_MAX_INTERVAL_AGE`) | вместе с `traffic_reports`; открытых у ноды — не больше `REPORT_MAX_OPEN_INTERVALS` (001.33) |
+| `traffic_gaps`, `reconciliation_runs` | по суткам | 90 дней | темп роста разрывов задаёт нода (§11.3): срок обязателен; PK включает ключ партиционирования |
 | `traffic_daily` | нет | 24 месяца | Н-21 |
 | `auth_events` | по суткам | 90 дней | §16.2 |
 | `jobs` со статусом `done` | нет | 7 дней | обслуживание индекса |

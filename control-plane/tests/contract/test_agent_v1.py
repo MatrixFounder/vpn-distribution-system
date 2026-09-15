@@ -7,8 +7,8 @@
 файл правится осознанно и попадает в тот же коммит), либо дефект.
 
 Прогон герметичен: пул подменён объектом, который на любое обращение падает. Заглушки задачи
-001.28 в базу не ходят, и это проверяется здесь, а не декларируется, — поэтому `make
-test-contract` работает и на машине без стенда, и в CI без служебных контейнеров.
+001.28 и 001.33 в базу не ходят, и это проверяется здесь, а не декларируется, — поэтому
+`make test-contract` работает и на машине без стенда, и в CI без служебных контейнеров.
 """
 
 from __future__ import annotations
@@ -37,6 +37,11 @@ EXPECTED = {
     "enroll",
     "heartbeat",
     "metrics",
+    "quota-request",
+    "quota-request-refused",
+    "report",
+    "report-node-mismatch",
+    "report-continuation",
     "state-delta",
     "state-filtered",
     "state-cursor-ahead",
@@ -210,14 +215,46 @@ def test_every_answer_records_the_headers_its_status_requires() -> None:
     assert all(checked[status] for status in (200, 204, 403, 409, 426)), checked
 
 
+def test_the_report_fixtures_form_one_split_interval() -> None:
+    """`report.json` и `report-continuation.json` — две части одного интервала, каким его
+    описывает README (деление отказанной по размеру части): та же эпоха и те же границы
+    периода, номера подряд, первая часть объявляет не меньше двух частей (интервал из одной
+    части продолжения не имеет), продолжение объявляет не меньше первой (число только растёт)
+    и несёт нулевые счётчики интерфейса, пользователи частей не пересекаются, ответ каждой —
+    её номер. Иначе пара фикстур учила бы сторону Go невозможной последовательности."""
+    first = load(CONTRACTS / "report.json")["request"]["body"]
+    second = load(CONTRACTS / "report-continuation.json")["request"]["body"]
+    for key in ("node_id", "counter_epoch", "period_start", "period_end"):
+        assert first[key] == second[key], key
+    assert first["report_seq"] == 1 and second["report_seq"] == first["report_seq"] + 1
+    assert first["parts_total"] >= 2, "интервал из одной части продолжения не имеет"
+    # Пара показывает ровно тот случай, ради которого заведена, — рост объявленного числа
+    # после деления отказанной части: литералы (README: «вырос с 2 до 3»), не неравенство.
+    assert (first["parts_total"], second["parts_total"]) == (2, 3), "рост после деления"
+    assert second["report_seq"] <= first["report_seq"] + second["parts_total"] - 1
+    assert (second["node_rx_bytes"], second["node_tx_bytes"]) == (0, 0)
+    assert (first["node_rx_bytes"], first["node_tx_bytes"]) != (0, 0), "счётчики — в первой"
+    users = [{row["user_id"] for row in body["lines"]} for body in (first, second)]
+    assert users[0].isdisjoint(users[1]), "пользователь — в одной части интервала"
+    for name, body in (("report.json", first), ("report-continuation.json", second)):
+        answer = load(CONTRACTS / name)["response"]["body"]
+        assert answer == {"last_accepted_seq": body["report_seq"], "duplicate": False}, name
+
+
 def test_the_readme_table_lists_exactly_the_fixtures_on_disk() -> None:
     """Таблица в README — то, по чему вторая сторона обмена понимает, какие случаи закреплены.
     Строка, выпавшая из неё, оставляет фикстуру невидимой для читателя, а лишняя обещает случай,
     которого нет."""
     readme = (CONTRACTS / "README.md").read_text()
-    listed = set(
-        re.findall(r"`(state-[a-z-]+|enroll|ack|heartbeat|metrics|command-result)\.json`", readme)
-    )
+    # Только строки таблицы «Файл | Случай»: упоминание фикстуры в прозе README не заменяет
+    # строки таблицы, по которой читатель понимает, какие случаи закреплены.
+    table = readme[readme.index("| Файл | Случай |") :]
+    table = table[: table.index("\n\n")]
+    listed = {
+        match.group(1)
+        for line in table.splitlines()
+        if (match := re.match(r"\| `([a-z-]+)\.json` \|", line))
+    }
     assert listed == {path.stem for path in fixture_files()}
 
 

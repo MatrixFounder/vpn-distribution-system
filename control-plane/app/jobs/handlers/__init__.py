@@ -1,9 +1,10 @@
 """Реестр обработчиков задач: ``HANDLERS[тип задачи] → корутина(conn, job)``.
 
 Задача 001.11 регистрирует ``noop``; 001.14 — ``ensure_partitions`` (обслуживание партиций
-§4.5); 001.28 — ``composition.publish_user`` (заглушка потока состава). LOGIC-задачи (отзыв
-доступа, публикация состава, уведомления — ``send_email`` в 001.52, агрегация, сверки — §5.4)
-добавляют свои обработчики сюда. Задачи типов, которых здесь нет,
+§4.5); 001.28 — ``composition.publish_user`` (заглушка потока состава); 001.33 — ``limits.check``
+(``limits.py``) и три типа обслуживания хранения (``maintenance.py``) — заглушки, в расписание
+не входят. LOGIC-задачи (отзыв доступа, публикация состава, уведомления — ``send_email`` в
+001.52, агрегация, сверки — §5.4) добавляют свои обработчики сюда. Задачи типов, которых здесь нет,
 исполнитель не выбирает — они ждут выпуска с обработчиком. Обработчик выполняется после выборки
 задачи, вне транзакции выборки; свои транзакции он открывает сам.
 """
@@ -15,6 +16,15 @@ from collections.abc import Awaitable, Callable
 import asyncpg
 
 from app.jobs.handlers.composition import PUBLISH_USER, publish_user
+from app.jobs.handlers.limits import LIMITS_CHECK, check_limits
+from app.jobs.handlers.maintenance import (
+    PARTITIONS_DROP_EXPIRED,
+    PARTITIONS_ENSURE,
+    RETENTION_PURGE,
+    drop_expired,
+    ensure,
+    purge,
+)
 from app.jobs.handlers.partitions import ensure_partitions
 from app.jobs.queue import Job
 
@@ -29,4 +39,8 @@ HANDLERS: dict[str, Handler] = {
     "noop": noop,
     "ensure_partitions": ensure_partitions,
     PUBLISH_USER: publish_user,
+    LIMITS_CHECK: check_limits,
+    PARTITIONS_ENSURE: ensure,
+    PARTITIONS_DROP_EXPIRED: drop_expired,
+    RETENTION_PURGE: purge,
 }

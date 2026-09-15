@@ -49,6 +49,8 @@ AGENT_PATHS = {
     "/agent/v1/heartbeat",
     "/agent/v1/metrics",
     "/agent/v1/commands/{command_id}/result",
+    "/agent/v1/reports",  # 001.33
+    "/agent/v1/quota/request",  # 001.33
 }
 BODY_SCHEMAS = ("AckIn", "HeartbeatIn", "NodeMetrics", "CommandResultIn")
 FINGERPRINT = "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e"
@@ -158,7 +160,8 @@ def enum_of(schema: dict[str, Any], name: str, field: str) -> list[str]:
 async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> None:
     """Критерии приёмки: все операции §5.2 этой задачи — в схеме, версия API в пути, `426`
     объявлен. Наборы полей и обязательность сверяются равенством: выпавшее поле контракта или
-    ставшее необязательным иначе прошло бы молча."""
+    ставшее необязательным иначе прошло бы молча. Отчёт и грант (001.33) входят в инвентарь
+    путей; их схемы — `tests/e2e/test_reports.py`."""
     schema = (await app_client.get("/openapi.json")).json()
     paths = schema["paths"]
     assert {p for p in paths if p.startswith("/agent")} == AGENT_PATHS
@@ -171,7 +174,20 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
             assert "x-permission" not in operation, (path, "не операция панели")
 
     state = paths["/agent/v1/state"]["get"]
-    assert set(state["responses"]) == {"200", "204", "401", "403", "409", "422", "426", "429"}
+    # Без тела нет 400 и 411 (правило прокси о теле без длины не касается GET); 413 достижим —
+    # прокси сверяет Content-Length независимо от метода — и остаётся объявленным.
+    assert set(state["responses"]) == {
+        "200",
+        "204",
+        "401",
+        "403",
+        "409",
+        "413",
+        "422",
+        "426",
+        "429",
+        "503",
+    }
     query = {p["name"]: p["required"] for p in state["parameters"] if p["in"] == "query"}
     assert query == {
         "config_version": True,
@@ -185,7 +201,18 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
         ("/agent/v1/metrics", "post"),
         ("/agent/v1/commands/{command_id}/result", "post"),
     ):
-        assert set(paths[path][method]["responses"]) == {"204", "401", "403", "422", "426", "429"}
+        assert set(paths[path][method]["responses"]) == {
+            "204",
+            "400",
+            "401",
+            "403",
+            "411",
+            "413",
+            "422",
+            "426",
+            "429",
+            "503",
+        }
 
     assert fields(schema, "StateResponse") == {
         "config",
@@ -274,7 +301,7 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
     for name in BODY_SCHEMAS:
         assert schema["components"]["schemas"][name]["additionalProperties"] is False, name
     # Урок WI-6: параметр зависимости, не объявленный как зависимость, уносит схему настроек в
-    # неаутентифицированный /openapi.json. Раздел завёл четыре фабрики над `Depends(db_pool)`.
+    # неаутентифицированный /openapi.json. Раздел завёл шесть фабрик над `Depends(db_pool)`.
     assert "Settings" not in schema["components"]["schemas"], "настройки не публикуются"
     for path in AGENT_PATHS:
         for method, operation in paths[path].items():

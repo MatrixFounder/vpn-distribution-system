@@ -1,0 +1,51 @@
+{
+  "operation": "reports",
+  "summary": "Продолжение того же интервала после деления отказанной по размеру части: те же границы периода и эпоха, report_seq 2, parts_total вырос с 2 до 3, другой пользователь, нулевые счётчики интерфейса; last_accepted_seq — номер этой части",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/reports",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "node_id": "00000000-0000-7000-8000-0000000000b1",
+      "counter_epoch": "00000000-0000-7000-8000-0000000000e1",
+      "report_seq": 2,
+      "parts_total": 3,
+      "period_start": "2026-09-10T12:00:00Z",
+      "period_end": "2026-09-10T12:01:00Z",
+      "lines": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a2",
+          "uplink_bytes": 4096,
+          "downlink_bytes": 65536
+        }
+      ],
+      "online_ips": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a2",
+          "ip": "203.0.113.5",
+          "last_seen": "2026-09-10T12:00:59Z"
+        }
+      ],
+      "node_rx_bytes": 0,
+      "node_tx_bytes": 0
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "last_accepted_seq": 2,
+      "duplicate": false
+    }
+  }
+}

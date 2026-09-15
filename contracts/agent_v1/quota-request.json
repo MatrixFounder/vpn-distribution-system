@@ -1,0 +1,31 @@
+{
+  "operation": "quota",
+  "summary": "Запрос гранта квоты: пользователь и заявленный расход → грант и номер выдачи (R-26)",
+  "given": {
+    "node_status": "active"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/quota/request",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Fingerprint": "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "user_id": "00000000-0000-7000-8000-0000000000a1",
+      "consumed_bytes": 536870912
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "quota_grant_bytes": 1073741824,
+      "issued_seq": 1
+    }
+  }
+}
