@@ -1,8 +1,10 @@
 ---
 id: WI-15
 type: work-item
-status: open
+status: done
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: 'agentic-development 9e36506'
 slug: wi-15-escalated
 effort: S
 value: 'latest.yaml не вводит следующую сессию в заблуждение'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260914-135832-45c41e81
 ## Источник
 
 workflow · user-friction · skill-session-state · run vdd-03-develop-001-33 (задача 001.33)
+
+## Решено (2026-09-15)
+
+agentic-development, коммит `9e36506`: vdd-03-develop Step 4 — оба выхода цикла (приёмка и эскалация) заканчиваются вызовом `update_state.py` с терминальным статусом, завершённой задачей (`--add_completed_task`) и судьбой блокеров; skill-session-state §3 правило 4 (v1.0 → v1.1) — последняя фаза workflow есть такая же граница сессии. Не проектная запись: компонент — скилл фреймворка. Проверено: `validate_skill.py`, тесты skill-session-state, контракт замороженного дерева; запись в CHANGELOG v3.31.0.

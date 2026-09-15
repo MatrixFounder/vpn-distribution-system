@@ -77,7 +77,6 @@ resolution.
 - **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/wi-30-stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
 - **WI-20** [Ячейки таблицы control-plane/app/.AGENTS.md сверх §5.1 documentation-standards](backlog/wi-20-control-plane-app-agents-md-5-1-documentation-standards.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-17** [vm-deploy: после rsync файла под bind mount контейнер пересоздавать, не перечитывать (inode)](backlog/wi-17-vm-deploy-rsync-bind-mount-inode.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-15** [Состояние сессии после приёмки остаётся «escalated» — закрывать явно при приёмке](backlog/wi-15-escalated.md) — effort `S`, status `open`, opened 2026-09-15
 
 ## Closed
 
@@ -95,6 +94,7 @@ resolution.
 - **WI-19** [Задачи-заглушки не несут инфраструктуру и бюджеты производительности: отдельная задача укрепления прокси и 001.73](backlog/wi-19-001-73.md) — effort `M`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-18** [Фоновые команды с пределом времени не должны держать посадки в дереве: копии на диске, double-fork, проверка после сбоя](backlog/wi-18-double-fork.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-16** [Правило для стражей конфигурации: тот же набор файлов, что у соседнего стража, и ast вместо подстроки](backlog/wi-16-ast.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
+- **WI-15** [Состояние сессии после приёмки остаётся «escalated» — закрывать явно при приёмке](backlog/wi-15-escalated.md) — effort `S`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-14** [Отпечаток дерева обязан быть в задании линзе ревью](backlog/wi-14-fingerprint-in-the-review-brief.md) — effort `S`, status `done`, opened 2026-09-10, resolved 2026-09-10
 - **WI-13** [Посадка обязана снимать проверяемое поведение, а не просто менять файл](backlog/wi-13-planting-must-remove-the-behaviour.md) — effort `M`, status `done`, opened 2026-09-10, resolved 2026-09-10
 - **WI-12** [Прогон под посадкой без остановки на первом падении](backlog/wi-12-planting-run-without-exitfirst.md) — effort `S`, status `done`, opened 2026-09-10, resolved 2026-09-10
