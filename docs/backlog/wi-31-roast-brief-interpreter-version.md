@@ -1,8 +1,10 @@
 ---
 id: WI-31
 type: work-item
-status: open
+status: done
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: 'agentic-development 7f6975f'
 slug: wi-31-roast-brief-interpreter-version
 effort: S
 value: 'четыре ложных CRITICAL по PEP 758 не повторяются'
@@ -26,3 +28,7 @@ finding_ref: fnd-20260915-142323-6db26390
 ## Источник
 
 workflow · review-finding · vdd-03-develop/roast-brief · run vdd-03-develop-001-33 (задача 001.33)
+
+## Решено (2026-09-15)
+
+agentic-development, коммит `7f6975f`: vdd-03-develop Step 3 — состав брифа и правило 7 персоны; vdd-adversarial §3 (v1.9 → v1.10). Вызывающий вписывает в бриф версию интерпретатора или компилятора из собственного пина проекта; линза сверяет незнакомую форму синтаксиса с ней до того, как назвать ошибкой — «не разбирается» без такой сверки считается дефектом ревью. Проверено: `validate_skill.py` на изменённых скиллах (PASSED с прежними предупреждениями), `tests/test_frozen_tree_contract.py` — 7 passed; запись в CHANGELOG v3.31.0.

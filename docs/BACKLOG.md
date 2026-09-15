@@ -74,25 +74,25 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/wi-31-roast-brief-interpreter-version.md) — effort `S`, status `open`, opened 2026-09-15
 - **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/wi-30-stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
-- **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/wi-27-contract-rule-owner-window-model-check.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-20** [Ячейки таблицы control-plane/app/.AGENTS.md сверх §5.1 documentation-standards](backlog/wi-20-control-plane-app-agents-md-5-1-documentation-standards.md) — effort `M`, status `open`, opened 2026-09-15
-- **WI-19** [Задачи-заглушки не несут инфраструктуру и бюджеты производительности: отдельная задача укрепления прокси и 001.73](backlog/wi-19-001-73.md) — effort `M`, status `open`, opened 2026-09-15
 - **WI-17** [vm-deploy: после rsync файла под bind mount контейнер пересоздавать, не перечитывать (inode)](backlog/wi-17-vm-deploy-rsync-bind-mount-inode.md) — effort `S`, status `open`, opened 2026-09-15
 - **WI-15** [Состояние сессии после приёмки остаётся «escalated» — закрывать явно при приёмке](backlog/wi-15-escalated.md) — effort `S`, status `open`, opened 2026-09-15
 
 ## Closed
 
 - **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/wi-32-claims-after-artefacts.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
+- **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/wi-31-roast-brief-interpreter-version.md) — effort `S`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-29** [Стражи правил конфигурации — таблицей входов через само правило, а не сверкой текста](backlog/wi-29-config-rule-guards-by-input-table.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-28** [Гейт бюджета обязан перечислить всех потребителей ресурса или объявить границу](backlog/wi-28-budget-gate-lists-all-consumers.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
+- **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/wi-27-contract-rule-owner-window-model-check.md) — effort `M`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-26** [Три класса стражей в чек-лист: положительное покрытие, явные умолчания, единый набор файлов](backlog/wi-26-guard-classes-checklist.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-25** [После изменения входа теста перезапускать посадки, которые называют этот тест](backlog/wi-25-replant-after-test-input-change.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-24** [Пара правил одной операции контракта прогоняется через общий сценарий до роаста](backlog/wi-24-contract-rule-pairs-walked-through-scenario.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-23** [Диспозиции роаста пишутся из вывода развёртки по старым значениям](backlog/wi-23-dispositions-from-sweep-output.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-22** [Гейт бюджета: каждый множитель — независимый замеренный литерал с собственной посадкой](backlog/wi-22-budget-gate-independent-literals.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-21** [Харнес посадок регрессий как инструмент фреймворка, а не скрипт сессии](backlog/wi-21-plantings-harness-as-framework-tool.md) — effort `M`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
+- **WI-19** [Задачи-заглушки не несут инфраструктуру и бюджеты производительности: отдельная задача укрепления прокси и 001.73](backlog/wi-19-001-73.md) — effort `M`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-18** [Фоновые команды с пределом времени не должны держать посадки в дереве: копии на диске, double-fork, проверка после сбоя](backlog/wi-18-double-fork.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-16** [Правило для стражей конфигурации: тот же набор файлов, что у соседнего стража, и ast вместо подстроки](backlog/wi-16-ast.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-14** [Отпечаток дерева обязан быть в задании линзе ревью](backlog/wi-14-fingerprint-in-the-review-brief.md) — effort `S`, status `done`, opened 2026-09-10, resolved 2026-09-10
@@ -104,8 +104,8 @@ resolution.
 - **WI-8** [Plan review checks that task scopes are disjoint](backlog/wi-8-plan-review-checks-that-task-scopes-are-disjoint.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-7** [Set properties are asserted over the set, not over examples](backlog/wi-7-set-properties-are-asserted-over-the-set-not-over-examples.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-6** [Depends() reads the callable's signature as HTTP input — wrap factories, assert no requestBody](backlog/wi-6-depends-reads-the-callable-s-signature-as-http-input-wrap-factories-assert-no-requestbody.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
-- **WI-4** [Tolerance guards must be calibrated against measured noise and planted above the bound](backlog/wi-4-tolerance-guards-must-be-calibrated-against-measured-noise-and-planted-above-the-bound.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-5** [security.md should state the no-provider CAPTCHA state and one-verification-per-request rule](backlog/wi-5-security-md-should-state-the-no-provider-captcha-state-and-one-verification-per-request-rule.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
+- **WI-4** [Tolerance guards must be calibrated against measured noise and planted above the bound](backlog/wi-4-tolerance-guards-must-be-calibrated-against-measured-noise-and-planted-above-the-bound.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-3** [app.cli migrate: interrupted rollback leaves a migration mark without objects](backlog/wi-3-migrate-interrupted-rollback-leaves-mark-without-objects.md) — effort `S`, status `done`, opened 2026-09-09, resolved 2026-09-09
 - **WI-2** [Builder-side guards need a planted regression before trust](backlog/wi-2-builder-side-guards-need-a-planted-regression-before-trust.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08
 - **WI-1** [Test gate 'no tests → skip' must derive from runner discovery rules](backlog/wi-1-test-gate-no-tests-skip-must-derive-from-runner-discovery-rules.md) — effort `S`, status `done`, opened 2026-09-08, resolved 2026-09-08
