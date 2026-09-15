@@ -1,8 +1,10 @@
 ---
 id: WI-28
 type: work-item
-status: open
+status: dropped
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: WI-11
 slug: wi-28-budget-gate-lists-all-consumers
 effort: S
 value: 'enrollment и остальные операции не выпадают из окна'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260915-090321-94e71f6f
 ## Источник
 
 transcript · review-finding · budget-gate · run vdd-03-develop-001-33 (задача 001.33)
+
+## Снято при триаже (2026-09-15)
+
+Правило уже стоит во фреймворке и в проекте, новая запись его только пересказывает подробнее: WI-11 и решённая в задаче 001.33 форма гейта (окно по обеим зонам, доля цикла); «перечислить всех потребителей ресурса» — урок 17 в памяти. Дубликат WI-22 по механизму.

@@ -1,8 +1,10 @@
 ---
 id: WI-21
 type: work-item
-status: open
+status: dropped
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: WI-10
 slug: wi-21-plantings-harness-as-framework-tool
 effort: M
 value: 'посадки не пишутся заново на каждой задаче; копии на диске и double-fork встроены'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260914-135832-5c794adc
 ## Источник
 
 workflow · user-friction · agentic-framework · run vdd-03-develop-001-33 (задача 001.33)
+
+## Снято при триаже (2026-09-15)
+
+Превращение харнеса посадок в инструмент фреймворка — тот же вопрос, что WI-10 (уже решён правилом, а инструмент остаётся у исполнителя): без запроса от второго проекта обобщать нечего. Снято как преждевременное.

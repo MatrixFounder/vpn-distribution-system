@@ -1,8 +1,10 @@
 ---
 id: WI-23
 type: work-item
-status: open
+status: dropped
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: память исполнителя
 slug: wi-23-dispositions-from-sweep-output
 effort: S
 value: 'ложные диспозиции не доходят до следующей линзы'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260914-202020-3a035e59
 ## Источник
 
 workflow · review-finding · vdd-03-develop/dispositions · run vdd-03-develop-001-33 (задача 001.33)
+
+## Снято при триаже (2026-09-15)
+
+Дисциплина записи диспозиций — поведение исполнителя, а не правило фреймворка: урок 16 в памяти (диспозиция пишется из вывода развёртки с числом вхождений), развёртка сделана в 001.33. Текст в developer-guidelines этого поведения не изменит.

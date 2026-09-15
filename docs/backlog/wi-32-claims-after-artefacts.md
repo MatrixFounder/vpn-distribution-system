@@ -1,8 +1,10 @@
 ---
 id: WI-32
 type: work-item
-status: open
+status: dropped
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: память исполнителя
 slug: wi-32-claims-after-artefacts
 effort: S
 value: 'фантомные посадки и невыполненные обещания не попадают в отчёт'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260915-142323-7aa095e5
 ## Источник
 
 workflow · review-finding · tests/tests-001/report-001-33.md · run vdd-03-develop-001-33 (задача 001.33)
+
+## Снято при триаже (2026-09-15)
+
+То же: утверждение об артефакте после артефакта, метки посадок сверяются командой — урок 34/35 в памяти и WI-19 как корневая причина; отдельная запись не нужна.

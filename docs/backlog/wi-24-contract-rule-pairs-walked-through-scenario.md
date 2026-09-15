@@ -1,8 +1,10 @@
 ---
 id: WI-24
 type: work-item
-status: open
+status: dropped
 opened_at: 2026-09-15
+resolved_at: 2026-09-15
+resolved_by: WI-27
 slug: wi-24-contract-rule-pairs-walked-through-scenario
 effort: S
 value: 'незавершаемые интервалы ловятся до ревью'
@@ -24,3 +26,7 @@ finding_ref: fnd-20260914-202020-f66ee42a
 ## Источник
 
 workflow · review-finding · vdd-03-develop/contract-design · run vdd-03-develop-001-33 (задача 001.33)
+
+## Снято при триаже (2026-09-15)
+
+Слито в WI-27: общий сценарий пары правил (отказ, повтор, деление) — одна из проверок правила контракта до записи, вместе с владельцем входа, оконными нормативами и состоянием в модели данных.
