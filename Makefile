@@ -16,13 +16,13 @@ GOLANGCI_VERSION := 2.13.2
 GOLANGCI := $(BIN)/golangci-lint
 
 .PHONY: check lint typecheck test fmt setup migrate test-contract \
-        lint-py lint-go lint-web lint-plan typecheck-py typecheck-web test-py test-go test-web fmt-py fmt-go fmt-web tools
+        lint-py lint-go lint-web lint-plan typecheck-py typecheck-web test-py test-go test-web test-scripts fmt-py fmt-go fmt-web tools
 
 check: tools lint typecheck test
 
 lint: lint-py lint-go lint-web lint-plan
 typecheck: typecheck-py typecheck-web
-test: test-py test-go test-web
+test: test-py test-go test-web test-scripts
 fmt: fmt-py fmt-go fmt-web
 
 # --- инструменты: отсутствие или неверная версия любого — ошибка, а не тихий пропуск
@@ -72,6 +72,10 @@ migrate:
 # Маска совпадает с python_files в control-plane/pyproject.toml.
 # Пустая база даёт «function ensure_partitions(integer) does not exist» — это не дефект тестов,
 # а непримененные миграции: выполните `make migrate` (см. выше).
+# --- тесты скриптов документации (docs/scripts): развёртка устаревших чисел и т. п.
+test-scripts:
+	$(PY) -m unittest discover -s docs/scripts/tests -t docs/scripts -q
+
 test-py:
 	@cd control-plane && \
 	if [ -z "$$(find tests -name 'test_*.py' -print -quit)" ]; then \

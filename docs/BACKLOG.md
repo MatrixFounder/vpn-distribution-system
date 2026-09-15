@@ -74,12 +74,12 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/wi-30-stale-number-sweep-word-forms.md) — effort `S`, status `open`, opened 2026-09-15
 
 ## Closed
 
 - **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/wi-32-claims-after-artefacts.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/wi-31-roast-brief-interpreter-version.md) — effort `S`, status `done`, opened 2026-09-15, resolved 2026-09-15
+- **WI-30** [Развёртка старых чисел: числовая и словесная форма каждого предела, без учёта регистра](backlog/wi-30-stale-number-sweep-word-forms.md) — effort `S`, status `done`, opened 2026-09-15, resolved 2026-09-15
 - **WI-29** [Стражи правил конфигурации — таблицей входов через само правило, а не сверкой текста](backlog/wi-29-config-rule-guards-by-input-table.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-28** [Гейт бюджета обязан перечислить всех потребителей ресурса или объявить границу](backlog/wi-28-budget-gate-lists-all-consumers.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-27** [Правило контракта проверять по владельцу входа, оконным нормативам и модели данных до записи](backlog/wi-27-contract-rule-owner-window-model-check.md) — effort `M`, status `done`, opened 2026-09-15, resolved 2026-09-15
