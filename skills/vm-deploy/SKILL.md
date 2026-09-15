@@ -2,7 +2,7 @@
 name: vm-deploy
 description: DevOps on the dev/test Parallels Ubuntu VM (ssh vm) for vpn-distribution-system — sync the repo, run the Control Plane Compose stand (postgres, redis, nginx, app roles), inspect logs, run the stand's end-to-end checks. Adapted for this project from onchain-analytics vm-deploy.
 tier: 2
-version: 1.0
+version: 1.1
 ---
 
 # VM Deploy (vpn-distribution-system)
@@ -37,7 +37,12 @@ STOP if you are thinking:
   mount; rsync replaces it by rename, so the container still holds the **old inode** and reload
   re-reads the old config (proven 2026-09-08: `stat -c %i` differs on host and in container).
   After any change to a bind-mounted file (`nginx.conf`) run
-  `$C up -d --force-recreate nginx`, then `nginx -T` to confirm the new text is live.
+  `$C up -d --force-recreate nginx`, then compare the **sha256 of the mounted file** with the
+  repository file (`docker exec control-plane-nginx-1 cat /etc/nginx/nginx.conf | shasum -a 256`
+  against `shasum -a 256 deploy/nginx/nginx.conf`). `nginx -T` alone is not the check: its dump
+  adds a trailing blank line and a naive diff against the file reports a difference that is not
+  one (2026-09-15). `vm-sync.sh` names every transferred single-file bind mount and prints both
+  commands — a sync that prints them is not finished until the container is recreated.
 
 ## 2. Connection
 
@@ -74,7 +79,9 @@ The VM `.env` differs from `.env.example` only in ports that collide with the ot
 All commands run from the repo root on the Mac; `C` is the compose invocation used everywhere:
 
 ```bash
-deploy/scripts/vm-sync.sh                      # 1. push the working tree (rsync, --delete)
+deploy/scripts/vm-sync.sh                      # 1. push the working tree (rsync, --delete);
+                                               #    prints the recreate + sha256 commands for
+                                               #    every transferred single-file bind mount
 ssh vm 'cd vpn-distribution-system && C="docker compose --env-file deploy/compose/.env \
   -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.dev.yml"; \
   $C config -q && $C up -d --build'            # 2. validate, build the image, start
