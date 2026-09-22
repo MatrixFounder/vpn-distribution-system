@@ -190,3 +190,38 @@ async def auth_stand(
                 await client.delete(key)
         await pool_module.close_pool()
         await close_redis()
+
+
+@dataclass
+class Cabinet:
+    """Вошедший пользователь: стенд, клиент с cookie ``sid``, адрес, идентификатор, маркер CSRF."""
+
+    stand: AuthStand
+    client: httpx.AsyncClient
+    address: str
+    user_id: uuid.UUID
+    csrf: str
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return {"X-CSRF-Token": self.csrf}
+
+
+@asynccontextmanager
+async def logged_in(pg_dsn: str, redis_url: str) -> AsyncIterator[Cabinet]:
+    async with auth_stand(pg_dsn, redis_url) as stand:
+        address = stand.email("cabinet")
+        user_id = await stand.register_verified(address)
+        async with stand.client() as client:
+            response = await client.post(
+                "/api/v1/auth/login", json={"email": address, "password": PASSWORD}
+            )
+            assert response.status_code == 200, response.text
+            # Cookie выданы с Secure: хранилище cookie клиента httpx не вернёт их над http://,
+            # поэтому cookie сессии ставится клиенту вручную; серверу нужна только она — cookie
+            # csrf сверяется с записью сессии, а не с cookie (§7.3).
+            sid, _ = cookies_of(response)["sid"]
+            csrf, _ = cookies_of(response)["csrf"]
+            client.cookies.clear()
+            client.cookies.set("sid", sid)
+            yield Cabinet(stand, client, address, user_id, csrf)

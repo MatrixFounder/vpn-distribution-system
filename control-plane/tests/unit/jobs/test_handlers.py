@@ -1,8 +1,8 @@
-"""Реестр обработчиков очереди после задачи 001.33: тип `limits.check` и три типа обслуживания
-хранения зарегистрированы (иначе задачи копились бы в `pending` — исполнитель выбирает только
-известные типы, §5.4), заглушки отказывают без повторов и не трогают подключение — зелёный
-«успех» отзыва или удаления, которых не было, хуже красной задачи, — и ни один из них не стоит
-в расписании планировщика, пока он заглушка."""
+"""Реестр обработчиков очереди после задач 001.33 и 001.21: `limits.check`, три типа обслуживания
+хранения и два типа подписки зарегистрированы (иначе задачи копились бы в `pending` —
+исполнитель выбирает только известные типы, §5.4), заглушки отказывают без повторов и не трогают
+подключение — зелёный «успех» отзыва, удаления или истечения, которых не было, хуже красной
+задачи, — и ни один из них не стоит в расписании планировщика, пока он заглушка."""
 
 from __future__ import annotations
 
@@ -25,6 +25,13 @@ from app.jobs.handlers.maintenance import (
     purge,
 )
 from app.jobs.handlers.partitions import ensure_partitions
+from app.jobs.handlers.subscriptions import (
+    SUBSCRIPTION_EXPIRE,
+    SUBSCRIPTION_NOTIFY_EXPIRING,
+    SUBSCRIPTION_TYPES,
+    expire,
+    notify_expiring,
+)
 from app.jobs.queue import Job, NonRetryableError
 
 
@@ -57,19 +64,24 @@ def test_the_new_job_types_are_registered_with_their_own_handlers() -> None:
     assert HANDLERS[PARTITIONS_ENSURE] is ensure
     assert HANDLERS[PARTITIONS_DROP_EXPIRED] is drop_expired
     assert HANDLERS[RETENTION_PURGE] is purge
+    assert SUBSCRIPTION_TYPES == {"subscription.expire", "subscription.notify_expiring"}
+    assert HANDLERS[SUBSCRIPTION_EXPIRE] is expire
+    assert HANDLERS[SUBSCRIPTION_NOTIFY_EXPIRING] is notify_expiring
     assert HANDLERS["ensure_partitions"] is ensure_partitions, "обработчик 001.14 остаётся"
 
 
 async def test_the_stubs_refuse_without_retries_and_without_touching_the_connection() -> None:
     """Отказ без повторов — задача `failed` с причиной, в которой назван тип; не `dead`
     (повторы бессмысленны) и не «успех» (работа не сделана)."""
-    for type_, handler in (
-        (LIMITS_CHECK, check_limits),
-        (PARTITIONS_ENSURE, ensure),
-        (PARTITIONS_DROP_EXPIRED, drop_expired),
-        (RETENTION_PURGE, purge),
+    for type_, handler, task in (
+        (LIMITS_CHECK, check_limits, "001.33"),
+        (PARTITIONS_ENSURE, ensure, "001.33"),
+        (PARTITIONS_DROP_EXPIRED, drop_expired, "001.33"),
+        (RETENTION_PURGE, purge, "001.33"),
+        (SUBSCRIPTION_EXPIRE, expire, "001.21"),
+        (SUBSCRIPTION_NOTIFY_EXPIRING, notify_expiring, "001.21"),
     ):
-        with pytest.raises(NonRetryableError, match=re.escape(f"{type_}: заглушка 001.33")):
+        with pytest.raises(NonRetryableError, match=re.escape(f"{type_}: заглушка {task}")):
             await handler(NoConnection(), job(type_))
 
 
@@ -77,7 +89,9 @@ def test_the_stub_types_stay_off_the_schedule_until_they_are_real() -> None:
     """`partitions.ensure`, завершившийся «успехом» без единой партиции, оставил бы журналы без
     места для вставки: до 001.37 партиции обслуживает `ensure_partitions`, и только он стоит в
     расписании. 001.37 переводит расписание на новые типы и снимает этот страж вместе с
-    заглушками."""
+    заглушками. `subscription.expire` (раз в минуту) и `subscription.notify_expiring` (раз в час)
+    ставит в расписание 001.83 — заглушка в расписании отчитывалась бы об истечении, которого не
+    было."""
     scheduled = {periodic.type for periodic in scheduler.SCHEDULE}
-    assert not scheduled & (MAINTENANCE_TYPES | {LIMITS_CHECK}), scheduled
+    assert not scheduled & (MAINTENANCE_TYPES | SUBSCRIPTION_TYPES | {LIMITS_CHECK}), scheduled
     assert "ensure_partitions" in scheduled

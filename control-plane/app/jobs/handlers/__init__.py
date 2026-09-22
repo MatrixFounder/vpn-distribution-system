@@ -2,11 +2,13 @@
 
 Задача 001.11 регистрирует ``noop``; 001.14 — ``ensure_partitions`` (обслуживание партиций
 §4.5); 001.28 — ``composition.publish_user`` (заглушка потока состава); 001.33 — ``limits.check``
-(``limits.py``) и три типа обслуживания хранения (``maintenance.py``) — заглушки, в расписание
-не входят. LOGIC-задачи (отзыв доступа, публикация состава, уведомления — ``send_email`` в
-001.52, агрегация, сверки — §5.4) добавляют свои обработчики сюда. Задачи типов, которых здесь нет,
-исполнитель не выбирает — они ждут выпуска с обработчиком. Обработчик выполняется после выборки
-задачи, вне транзакции выборки; свои транзакции он открывает сам.
+(``limits.py``) и три типа обслуживания хранения (``maintenance.py``); 001.21 —
+``subscription.expire`` и ``subscription.notify_expiring`` (``subscriptions.py``) — заглушки, в
+расписание не входят. LOGIC-задачи (отзыв доступа, публикация состава, уведомления —
+``send_email`` в 001.52, агрегация, сверки — §5.4) добавляют свои обработчики сюда. Задачи
+типов, которых здесь нет, исполнитель не выбирает — они ждут выпуска с обработчиком.
+Обработчик выполняется после выборки задачи, вне транзакции выборки; свои транзакции он
+открывает сам.
 """
 
 from __future__ import annotations
@@ -26,6 +28,12 @@ from app.jobs.handlers.maintenance import (
     purge,
 )
 from app.jobs.handlers.partitions import ensure_partitions
+from app.jobs.handlers.subscriptions import (
+    SUBSCRIPTION_EXPIRE,
+    SUBSCRIPTION_NOTIFY_EXPIRING,
+    expire,
+    notify_expiring,
+)
 from app.jobs.queue import Job
 
 Handler = Callable[[asyncpg.Connection, Job], Awaitable[None]]
@@ -43,4 +51,6 @@ HANDLERS: dict[str, Handler] = {
     PARTITIONS_ENSURE: ensure,
     PARTITIONS_DROP_EXPIRED: drop_expired,
     RETENTION_PURGE: purge,
+    SUBSCRIPTION_EXPIRE: expire,
+    SUBSCRIPTION_NOTIFY_EXPIRING: notify_expiring,
 }

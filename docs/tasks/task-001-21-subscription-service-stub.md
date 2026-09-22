@@ -25,6 +25,16 @@
 - `control-plane/app/domain/subscriptions.py` — `class SubscriptionService`: `activate(user_id, plan_id, source) -> PeriodId`; `renew(user_id, source)`; `change_plan(user_id, plan_id, actor)`; `add_traffic(user_id, bytes, actor, reason)`; `expire(user_id)`; `set_state(user_id, state, reason)`; `remaining(user_id) -> int | None`; перечисление `SubscriptionState`
 - `control-plane/app/jobs/handlers/subscriptions.py` — обработчики `subscription.expire`, `subscription.notify_expiring` — заглушки
 - `control-plane/tests/e2e/test_subscriptions.py` — сценарии UC-06 на заглушках
+- `control-plane/tests/unit/domain/test_subscriptions.py` — стражи сигнатур, публикации состава и согласия чисел заглушки с кабинетом
+
+### Изменения в существующих файлах
+
+- `control-plane/app/jobs/handlers/__init__.py` — два типа подписки в `HANDLERS`
+- `control-plane/app/api/me.py` — `SubscriptionState` берётся из домена, вторая копия перечисления снята
+- `control-plane/tests/e2e/_auth.py`, `control-plane/tests/e2e/test_me.py` — `Cabinet` и `logged_in()` перенесены в общий помощник: их использует и `test_subscriptions.py`
+- `control-plane/tests/unit/jobs/test_handlers.py` — два новых типа в стражах реестра, отказа и расписания
+- `control-plane/.AGENTS.md`, `control-plane/app/.AGENTS.md` — карты каталогов
+- `docs/tasks/task-001-{20,22}-*.md` — разделы «Найдено при 001.21, решить здесь»; `docs/PLAN.md` — строка статуса
 
 ### Интеграция компонентов
 
@@ -55,12 +65,54 @@
 
 ## Критерии приёмки
 
-- [ ] Сигнатуры объявлены
-- [ ] Состояния `none | active | suspended_quota | suspended_admin | expired` определены
-- [ ] Тесты проходят на заглушках
+- [x] Сигнатуры объявлены — страж текстом `unit/domain/test_subscriptions.py` (семь методов), посадки P01, P02
+- [x] Состояния `none | active | suspended_quota | suspended_admin | expired` определены — сверка с `enum_range(null::subscription_state)` живой базы и с `SubscriptionOut.state` в OpenAPI, посадки P09…P12
+- [x] Тесты проходят на заглушках — 627 passed (было 612), из них 15 новых
 
 ## Примечания
 
 Ограничения и допущения — `docs/idea.md` §9; архитектура — `docs/ARCHITECTURE.md`.
+
+Уточнения при реализации:
+
+- **`SubscriptionState` — единственный источник набора.** Копия перечисления уже жила в
+  `app/api/me.py`; теперь кабинет импортирует литерал из домена, а набор сверяется с
+  `enum_range(null::subscription_state)` живой базы. Третий список (база, OpenAPI, домен) с иным
+  составом развёл бы состояние, которое едет на ноды, и состояние, которое видит пользователь;
+- **`PeriodSource`** объявлен рядом и сверяется с `period_source` — это источник *периода*
+  (`redeem | admin | order`), а не источник записи баланса `balance_source`, на котором висит
+  `CHECK` обязательной причины;
+- **переход публикует состав по-настоящему.** Раздел «Интеграция компонентов» требовал вызывать
+  `CompositionService.publish_user`; заглушка его вызывает из всех шести переходов, а не обещает
+  в докстринге — `publish_user` существует заглушкой с 001.28. Свойство закреплено стражем
+  (записывающий наследник `CompositionService`), `remaining` как чтение не публикует;
+- **`renew` возвращает `PeriodId`.** В описании тип возврата был объявлен только у `activate`;
+  продление тоже начинает новый период (§4.11), и его ключ нужен 001.20 для `balance_entries`
+  бонуса того же погашения;
+- **`change_plan(…, actor: uuid.UUID)` — обязательный администратор** (О-2: платежей в MVP нет,
+  самостоятельной смены тарифа тоже); у `add_traffic` `actor` — `uuid.UUID | None`, потому что
+  погашение кода выполняет пользователь;
+- **параметр `bytes`** оставлен с именем из описания задачи, хотя оно затеняет встроенный тип
+  внутри метода: сигнатуру ищут по описанию 001.22, 001.20 и 001.35;
+- **заглушки обработчиков отказывают без повторов** (`NonRetryableError`), как заглушки 001.33, и
+  не ставятся в `scheduler.SCHEDULE` до 001.22/001.83: «успех» истечения, которого не было,
+  оставил бы пользователя с истёкшей подпиской в inbound и отчитался бы об обратном;
+- **`Cabinet` и `logged_in()`** перенесены из `tests/e2e/test_me.py` в `tests/e2e/_auth.py`:
+  вошедший пользователь понадобился второму модулю, а помощники по конвенции живут в `_*.py`.
+  Поведение `test_me.py` не менялось: число его тестов прежнее, изменён только источник помощника.
+
+Отклонения от описания задачи:
+
+- «Модульные тесты не требуются» — добавлен `tests/unit/domain/test_subscriptions.py`: критерий
+  «сигнатуры объявлены» иначе ничем не охраняется, а свойство «переход будит поток состава»
+  задача объявляет в разделе «Интеграция компонентов». Так же поступили 001.28 и 001.33;
+- раздел «Новые файлы» описания не называл изменений в существующих файлах — они перечислены
+  выше; ни одно из них не меняет поведения соседних задач.
+
+Найдено при 001.21 (заглушки) — записано в примечания задач-получателей («Найдено при 001.21,
+решить здесь»): 001.22 (куда ложится начисление `add_traffic`; `remaining` ограничивается нулём
+из-за `ge=0` в моделях ответа; `renew` возвращает `PeriodId`; перевод переходов на outbox §5.4
+обязан сохранить страж публикации; `test_subscriptions.py` уже создан здесь), 001.20 (метод
+называется `add_traffic`, а не `bonus`).
 
 Зависимости: 001.07, 001.11. Приоритет: Critical. Оценка: 2 ч. Этап: 3 — тарифы, подписки, коды.

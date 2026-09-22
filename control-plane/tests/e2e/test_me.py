@@ -11,9 +11,6 @@ TC-E2E-01: ``GET /me/traffic`` → 200 и все поля схемы. TC-E2E-02:
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import unquote
 
@@ -25,7 +22,7 @@ from app.domain.profile import STUB_EMAIL
 from app.security.sessions import SessionStore
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from ._auth import PASSWORD, AuthStand, auth_stand, cookies_of
+from ._auth import auth_stand, logged_in
 from ._me import ME_OPERATIONS, MUTATIONS, REQUEST_BODY
 
 TRAFFIC_FIELDS = {
@@ -43,41 +40,6 @@ TRAFFIC_FIELDS = {
 }
 CLIENTS_4_2 = {"Shadowrocket", "v2rayNG", "Streisand", "Hiddify", "sing-box"}
 DOMAINS = ("sub1.example.com", "sub2.example.com")
-
-
-@dataclass
-class Cabinet:
-    """Вошедший пользователь: стенд, клиент с cookie ``sid``, адрес, идентификатор, маркер CSRF."""
-
-    stand: AuthStand
-    client: httpx.AsyncClient
-    address: str
-    user_id: uuid.UUID
-    csrf: str
-
-    @property
-    def headers(self) -> dict[str, str]:
-        return {"X-CSRF-Token": self.csrf}
-
-
-@asynccontextmanager
-async def logged_in(pg_dsn: str, redis_url: str) -> AsyncIterator[Cabinet]:
-    async with auth_stand(pg_dsn, redis_url) as stand:
-        address = stand.email("cabinet")
-        user_id = await stand.register_verified(address)
-        async with stand.client() as client:
-            response = await client.post(
-                "/api/v1/auth/login", json={"email": address, "password": PASSWORD}
-            )
-            assert response.status_code == 200, response.text
-            # Cookie выданы с Secure: хранилище cookie клиента httpx не вернёт их над http://,
-            # поэтому cookie сессии ставится клиенту вручную; серверу нужна только она — cookie
-            # csrf сверяется с записью сессии, а не с cookie (§7.3).
-            sid, _ = cookies_of(response)["sid"]
-            csrf, _ = cookies_of(response)["csrf"]
-            client.cookies.clear()
-            client.cookies.set("sid", sid)
-            yield Cabinet(stand, client, address, user_id, csrf)
 
 
 def schema_of(schema: dict[str, Any], name: str) -> dict[str, Any]:

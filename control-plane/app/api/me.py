@@ -28,6 +28,7 @@ from app.accounting.stats import STUB_STATS, PeriodRef, TrafficStats, user_traff
 from app.config import Settings
 from app.db.pool import db_pool, get_pool
 from app.domain.profile import Language, Profile, ProfileService
+from app.domain.subscriptions import SubscriptionState
 from app.errors import ApiError
 from app.security.csrf import require_csrf
 from app.security.deps import CurrentUser, current_user
@@ -38,7 +39,6 @@ router = APIRouter(prefix="/me", tags=["me"])
 # на запросе это блокировало бы цикл событий (ревью 001.15, S-1).
 IANA_TIMEZONES = frozenset(zoneinfo.available_timezones())
 
-SubscriptionState = Literal["none", "active", "suspended_quota", "suspended_admin", "expired"]
 Platform = Literal["ios", "android", "macos", "windows", "linux", "unknown"]
 
 
