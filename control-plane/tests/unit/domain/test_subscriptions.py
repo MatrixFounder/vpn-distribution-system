@@ -15,7 +15,6 @@ from typing import Any
 import pytest
 from app.accounting.stats import STUB_STATS
 from app.domain.composition import CompositionService
-from app.domain.plans import STUB_PLAN
 from app.domain.subscriptions import (
     STUB_LIMIT_BYTES,
     STUB_PERIOD_ID,
@@ -121,9 +120,10 @@ async def test_the_stub_answers_the_same_period_for_any_arguments() -> None:
 def test_the_stub_numbers_agree_with_the_cabinet_the_user_sees() -> None:
     """Ответ §4.2 кабинет собирает из этой заглушки и из ``accounting.stats`` одновременно:
     расхождение показало бы пользователю остаток, не сходящийся с его же статистикой, и период,
-    которого нет в статистике."""
+    которого нет в статистике. С заглушкой тарифа числа не сверяются: 001.19 сделала тарифы
+    настоящими, и ``plans.STUB_PLAN`` больше нет."""
     assert STUB_PERIOD_ID == STUB_STATS.period.id
-    assert STUB_LIMIT_BYTES == STUB_STATS.limit == STUB_PLAN.traffic_limit_bytes
+    assert STUB_LIMIT_BYTES == STUB_STATS.limit
     assert STUB_USED_BILLABLE_BYTES == STUB_STATS.billable
     assert STUB_REMAINING_BYTES == STUB_STATS.remaining
     # Числа литералами, а не выводом из констант кода: «остаток = лимит − израсходовано» иначе

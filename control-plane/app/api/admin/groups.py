@@ -1,7 +1,8 @@
 """``/api/v1/admin/groups`` — группы доступа и тарифицируемые группы (§4.8, §4.9; UC-09 шаги
 1–2, 6, A2; R-18). Задача 001.18: CRUD ``/access`` и ``/billing`` и новый интервал
-коэффициента ``POST /billing/{id}/multiplier`` на заглушке ``GroupService``; проверка A2
-(0.0…10.0 с шагом 0.1) — в схеме ``MultiplierIn``."""
+коэффициента ``POST /billing/{id}/multiplier``; проверка A2 (0.0…10.0 с шагом 0.1) — в схеме
+``MultiplierIn``. Задача 001.19: ``GroupService`` пишет в базу, и маршрут собирает её вместе со
+службой учёта — смена коэффициента закрывает час учёта в той же транзакции (A3)."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
+from app.accounting.service import AccountingService
 from app.api.admin._common import CSRF, Admin, db_pool, permission
 from app.domain.groups import (
     AccessGroup,
@@ -27,7 +29,10 @@ router = APIRouter(prefix="/groups")
 
 
 async def get_group_service() -> GroupService:
-    return GroupService(await db_pool())
+    """Служба групп со службой учёта: смена коэффициента закрывает час учёта (UC-09 A3), а
+    домен учёт не импортирует (правило слоёв) — собирает их маршрут."""
+    pool = await db_pool()
+    return GroupService(pool, AccountingService(pool))
 
 
 Groups = Annotated[GroupService, Depends(get_group_service)]
