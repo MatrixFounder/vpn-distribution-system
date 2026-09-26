@@ -84,3 +84,4 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 ## test-flake
 
 - **RF-1** [test_scheduler_leadership_lock флакает против стенда](issues/rf-1-scheduler-leadership-lock-flake.md) — severity `SEV-3`, status `open`, opened 2026-09-15
+- **RF-2** [test_wait_seconds_measures_backlog_and_claimed_delay смешивает часы машины тестов и базы](issues/rf-2-wait-seconds-test-mixes-clocks.md) — severity `LOW`, status `open`, opened 2026-09-27

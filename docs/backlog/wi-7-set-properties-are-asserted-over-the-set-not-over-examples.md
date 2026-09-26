@@ -55,4 +55,12 @@ guarded.
 **Acceptance.** Set-wide guards in new tasks are parametrized over a shared inventory; a planted
 removal on any member goes red.
 
+**Sharper case (001.25, 2026-09-25).** The inventory of a class comes from the tool's own
+documentation, not from the instances at hand. A guard that banned `set` into a map variable missed
+the other writers nginx has — a second `map` or `geo` of the same name (the last wins, names are
+case-insensitive), a regex named group, `auth_request_set`, `split_clients`, `perl_set`, `js_set` —
+and a guard that read `access_log` at the http level missed that a server- or location-level
+`access_log` replaces the inherited pair. A directive inherited by replacement is asserted at every
+level where it is allowed; every writer of a guarded value is listed from the reference, once.
+
 **Related.** finding_ref fnd-20260909-191554-cf029b94; WI-2, WI-4 (planting family).

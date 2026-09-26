@@ -59,4 +59,18 @@ about a record the system never stores cannot fail and is not a gate.
 **Acceptance.** Builders plant their guards before review; a guard that cannot fail no longer
 survives to round 2.
 
+**Sharper case (001.25, 2026-09-25).** One red planting does not prove a guard whose outcome depends
+on nondeterministic state — physical row order, scheduling, hash order. The numbering test of a
+migration went red on its planting only because the updated row happened to land after the live one
+on the page; a reviewer showed a layout where the same planting stays green. The test must build the
+adverse state itself (rows inserted in a permutation whose order differs from the asserted one), so
+the planting is red by construction, not by chance.
+
+**Sharper case (001.25, 2026-09-26).** A race test that orders two operations by sleeping and
+checking "not done yet" proves only that neither finished, not that the first has taken its
+lock: under a slow environment the second operation won, the code answered correctly for that
+order, and the test went red (a flaky false red, twice in ~260 runs, once explained wrongly as
+a deadlock victim). Order a race by observing the database's lock queue (who is blocked behind
+the holder, transitively), not by a pause.
+
 **Related.** finding_ref fnd-20260908-183801-3e91befb; WI-1 (same rule family).
