@@ -217,16 +217,23 @@ bootstrap_tokens
   expires_at             timestamptz              — Н-24
   used_at                timestamptz NULL
   created_by             uuid FK admin_users
+  annulled_at            timestamptz NULL         — повторная выдача или отзыв identity (131)
+  issue_seq              bigint IDENTITY          — порядок выдачи без часов: «последний токен» (131;
+                                                    строки до миграции — порядком id)
+  CHECK (used_at IS NULL OR annulled_at IS NULL)
 
 node_identities
   id                     uuid PK
   node_id                uuid FK nodes
   cert_fingerprint       text UNIQUE              — SHA-256 клиентского сертификата
+  cert_serial            text UNIQUE              — серийный номер листа, форма $ssl_client_serial
   token_hash             text
   generation             int
   issued_at              timestamptz
   expires_at             timestamptz
   revoked_at             timestamptz NULL
+  enrolled_from          inet                     — адрес источника обмена токена (UC-01 шаг 6)
+  UNIQUE (node_id, generation)                    — поколение: max + 1 под блокировкой ноды
   INDEX (node_id) WHERE revoked_at IS NULL
 
 inbounds

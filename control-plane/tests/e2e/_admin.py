@@ -76,7 +76,7 @@ ADMIN_OPERATIONS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("PATCH", f"/api/v1/admin/nodes/{NODE_ID}", {"name": "Tokyo 1a"}),
     ("DELETE", f"/api/v1/admin/nodes/{NODE_ID}", None),
     ("POST", f"/api/v1/admin/nodes/{NODE_ID}/bootstrap-token", None),
-    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/approve", None),
+    ("POST", f"/api/v1/admin/nodes/{NODE_ID}/approve", {"cert_fingerprint": "0" * 64}),
     ("POST", f"/api/v1/admin/nodes/{NODE_ID}/status", {"status": "maintenance"}),
     ("POST", f"/api/v1/admin/nodes/{NODE_ID}/revoke-identity", None),
     ("GET", f"/api/v1/admin/nodes/{NODE_ID}/state", None),

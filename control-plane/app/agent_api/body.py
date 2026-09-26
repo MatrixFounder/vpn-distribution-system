@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from starlette.requests import ClientDisconnect
 
 from app.body_shape import ShapeLimits, shape_limits
-from app.errors import BODY_PARSE_MESSAGE, ApiError, validation_failure
+from app.errors import BODY_PARSE_MESSAGE, ApiError, loggable_path, validation_failure
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,10 @@ class BoundedBodyRoute(APIRoute):
             except ClientDisconnect as exc:
                 raise ApiError("bad_request", BODY_PARSE_MESSAGE, status=400) from exc
             except Exception as exc:  # noqa: BLE001 — то же правило, что у FastAPI, но со следом
-                log.warning("сбой чтения тела %s: %s", request.url.path, exc, exc_info=exc)
+                # Путь — без токена подписки (Н-25), как в строках 500 и 503 (раунд 7).
+                log.warning(
+                    "сбой чтения тела %s: %s", loggable_path(request.url.path), exc, exc_info=exc
+                )
                 raise ApiError("bad_request", BODY_PARSE_MESSAGE, status=400) from exc
             problem = shape.problem(body, "этой операции")
             if problem is not None:

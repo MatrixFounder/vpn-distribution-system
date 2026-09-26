@@ -9,23 +9,39 @@
 Прогон герметичен: пул подменён объектом, который на любое обращение падает. Заглушки задачи
 001.28 и 001.33 в базу не ходят, и это проверяется здесь, а не декларируется, — поэтому
 `make test-contract` работает и на машине без стенда, и в CI без служебных контейнеров.
+
+С 001.25 две вещи в разделе настоящие и ходят в базу: поиск ноды по identity и обмен токена.
+Поиск подменён (`tests/_agent.py::node_as`) так, что версию агента и форму признаков из записанных
+заголовков по-прежнему разбирает боевой код; обмен отвечает записанным ответом, а подлинность
+записанной выдачи проверяется отдельно (`test_the_recorded_enrollment_is_a_real_issuance`).
+Настоящие поиск и обмен — `tests/e2e/test_nodes.py` на живой базе.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
+import ipaddress
 import json
 import re
-from dataclasses import replace
+import uuid
 from pathlib import Path
 from typing import Any, get_args
 
 import httpx
 import pytest
-from app.agent_api.deps import Agent, CurrentNode, served_node
+from app.agent_api.deps import current_node
+from app.agent_api.enroll import get_node_service
 from app.db.pool import db_pool
-from app.domain.nodes import NodeStatus, stub_node
+from app.domain.nodes import STUB_NODE_ID, Enrollment, NodeService, NodeStatus
 from app.main import create_app
+from app.security.ca import InternalCA, serial_hex
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+from tests._agent import node_as
+from tests._pki import STUB_CLIENT_CERT, STUB_CLIENT_CERT_PEM
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "agent_v1"
 
@@ -72,20 +88,49 @@ class NoDatabase:
         raise AssertionError(f"заглушка /agent/v1 обратилась к базе: {name}")
 
 
-def agent_app(node_status: str = "active") -> httpx.AsyncClient:
+class RecordedEnrollment(NodeService):
+    """Обмен токена, отвечающий записанным ответом ``enroll.json``: настоящий обмен пишет в базу, а
+    прогон герметичен. Маршрут при этом настоящий — тело запроса разбирает ``EnrollIn``, ответ
+    собирает ``EnrollOut``; подлинность записанной выдачи — отдельный тест ниже."""
+
+    def __init__(self) -> None:
+        super().__init__(NoDatabase())
+        self.recorded: dict[str, Any] = load(CONTRACTS / "enroll.json")["response"]["body"]
+
+    async def enroll(
+        self,
+        token: str,
+        csr_pem: str,
+        agent_version: str,
+        xray_version: str,
+        source: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    ) -> Enrollment:
+        cert = x509.load_pem_x509_certificate(self.recorded["client_cert_pem"].encode())
+        return Enrollment(
+            generation=1,
+            cert_fingerprint=InternalCA.fingerprint(self.recorded["client_cert_pem"]),
+            cert_serial=serial_hex(cert.serial_number),
+            issued_at=cert.not_valid_before_utc,
+            expires_at=cert.not_valid_after_utc,
+            revoked_at=None,
+            enrolled_from=source,
+            node_id=uuid.UUID(self.recorded["node_id"]),
+            client_cert_pem=self.recorded["client_cert_pem"],
+            ca_pem=self.recorded["ca_pem"],
+            identity_token=self.recorded["identity_token"],
+        )
+
+
+def agent_app(node_status: NodeStatus = "active") -> httpx.AsyncClient:
     """Приложение без базы. ``node_status`` — предусловие фикстуры: статус ноды живёт на
     сервере, а не в запросе, поэтому фикстура объявляет его отдельно — иначе запрос не
-    определял бы ответ и воспроизведение было бы невозможно."""
+    определял бы ответ и воспроизведение было бы невозможно. Подменён только поиск ноды в базе:
+    записанные заголовки разбирает боевой код, и негодный признак в фикстуре учил бы вторую
+    сторону обмена форме запроса, которую живой сервер отвергает."""
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
-
-    async def as_status(node: Agent) -> CurrentNode:
-        # Надстройка над настоящей зависимостью, а не подмена её: подменённая целиком, она не
-        # разбирала бы записанные в фикстуре заголовки, и негодный отпечаток в фикстуре учил бы
-        # вторую сторону обмена форме запроса, которую живой сервер отвергает.
-        return replace(node, node=stub_node(status=node_status))  # type: ignore[arg-type]
-
-    app.dependency_overrides[served_node] = as_status
+    app.dependency_overrides[current_node] = node_as(node_status)
+    app.dependency_overrides[get_node_service] = RecordedEnrollment
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     return httpx.AsyncClient(transport=transport, base_url="http://control-plane")
 
@@ -133,6 +178,43 @@ async def test_recorded_request_gets_the_recorded_response(path: Path) -> None:
         assert response.content == b"", "тело не предусмотрено контрактом"
     else:
         assert response.json() == expected["body"]
+
+
+def test_the_recorded_enrollment_is_a_real_issuance() -> None:
+    """Записанный обмен — настоящая выдача, а не набор строк: лист подписан записанным CA
+    напрямую, ключ листа — ключ записанного CSR, субъект — идентификатор ноды из ответа, профиль —
+    тот, что ставит CA (``CA:FALSE``, ``digitalSignature``, ``clientAuth``), срок не истекает до
+    конца века. Этот же лист стоит в ``X-Client-Cert`` каждой фикстуры, где нода представляется.
+    Сторона агента (001.53) строит по этим строкам TLS-клиент, а ответ обмена здесь — эхо
+    записанного (``RecordedEnrollment``): без этой сверки ручная правка фикстуры, ломающая выдачу,
+    прошла бы."""
+    fixture = load(CONTRACTS / "enroll.json")
+    recorded = fixture["response"]["body"]
+    ca = x509.load_pem_x509_certificate(recorded["ca_pem"].encode())
+    leaf = x509.load_pem_x509_certificate(recorded["client_cert_pem"].encode())
+    csr = x509.load_pem_x509_csr(fixture["request"]["body"]["csr_pem"].encode())
+    leaf.verify_directly_issued_by(ca)
+    der, spki = serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    assert leaf.public_key().public_bytes(der, spki) == csr.public_key().public_bytes(der, spki)
+    assert recorded["node_id"] == str(STUB_NODE_ID)
+    common_names = leaf.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    assert [name.value for name in common_names] == [recorded["node_id"]]
+    assert leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is False
+    assert leaf.extensions.get_extension_for_class(x509.KeyUsage).value.digital_signature
+    assert list(leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value) == [
+        ExtendedKeyUsageOID.CLIENT_AUTH
+    ]
+    assert leaf.not_valid_after_utc > dt.datetime(2100, 1, 1, tzinfo=dt.UTC), "не протухает"
+    assert recorded["client_cert_pem"] == STUB_CLIENT_CERT_PEM
+    presenting = [
+        path.stem
+        for path in fixture_files()
+        if "X-Node-Identity" in load(path)["request"]["headers"]
+    ]
+    for stem in presenting:
+        headers = load(CONTRACTS / f"{stem}.json")["request"]["headers"]
+        assert headers.get("X-Client-Cert") == STUB_CLIENT_CERT, stem
+    assert len(presenting) == 19, presenting
 
 
 def test_config_checksum_is_sha256_of_the_canonical_form() -> None:

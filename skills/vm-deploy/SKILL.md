@@ -72,7 +72,20 @@ STOP if you are thinking:
 
 The VM `.env` differs from `.env.example` only in ports that collide with the other projects:
 `PG_HOST_PORT=15432`, `REDIS_HOST_PORT=16379`, `AGENT_PORT=9443`, `ENROLL_PORT=9444`,
-`DEV_BIND_ADDR=0.0.0.0`, `APP_ENV=dev`. nginx keeps 80 and 443.
+`APP_ENV=dev`. nginx keeps 80 and 443. PostgreSQL and Redis are published on the VM's
+**127.0.0.1 only** (a literal in `docker-compose.dev.yml`, not a variable — task 001.25, round 6:
+with `0.0.0.0` the password-less Redis and the database were open to the Mac and to the other
+projects' containers); the Mac reaches them through `deploy/scripts/stand-tunnel.sh` (§4). The
+loopback address closes them to the Docker bridge network and to other machines, not to processes
+on the VM itself or to containers with host networking: the stand's Redis has no password — a
+residual risk of the development stand, not of production (round 8). Other machines on the same
+L2 network are kept off loopback-published ports only by Docker Engine 28.0 or newer
+(moby/moby#49325, fixing #45610; the VM runs 28.5.2 — check with `ssh vm docker version`); older
+engines route such traffic to the container address (round 9).
+The VM `.env` also sets `PG_ARCHIVE_COMMAND` with a 6-hour retention of the local WAL archive
+(customer's decision, 2026-09-25): the repository default deletes segments older than 3 days, and
+planting runs wrote 15.9 GB within that window, filled the disk and crashed PostgreSQL. Check the
+disk before any long run (`ssh vm df -h /`).
 
 ## 4. Stand operations (the important part)
 
@@ -111,12 +124,15 @@ SQL: pipe over stdin, never `-f /tmp/…` (that reads the container FS):
 | --- | --- | --- |
 | infrastructure healthy | `$C ps` | `postgres`, `redis`, `nginx` = healthy |
 | `/healthz` via nginx | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/healthz` | 200 once 001.10 is in; 502 before |
-| `/s/` not logged (Н-25) | `curl -s http://127.0.0.1/s/test >/dev/null; docker logs control-plane-nginx-1 2>/dev/null \| grep -c /s/test; docker logs control-plane-nginx-1 2>&1 >/dev/null \| grep -c /s/test` | `0` and `0` |
+| `/s/` not logged (Н-25) | `curl -s http://127.0.0.1/s/test >/dev/null; docker logs control-plane-nginx-1 2>/dev/null \| grep -c /s/test; docker logs control-plane-nginx-1 2>&1 >/dev/null \| grep -c /s/test; docker logs control-plane-api-1 2>&1 \| grep -c /s/test` | `0`, `0` and `0` (the api runs uvicorn with `--no-access-log`) |
 | WAL archiving | `$C exec -T postgres psql -U postgres -d control_plane -Atc 'show archive_mode' -c 'select archived_count, failed_count from pg_stat_archiver'` | `on`; `failed_count = 0` |
 | Redis persistence | `$C exec -T redis redis-cli config get appendonly` | `yes` |
 | agent port needs mTLS | `curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:9443/agent/v1/heartbeat` | `400` |
 | agent port with dev cert | `… --cert deploy/compose/secrets/dev/dev-node.crt --key …/dev/dev-node.key …` | `502` before 001.10, then the API answer |
 | log filter survives URL tricks | `curl --path-as-is -s http://127.0.0.1//s/t >/dev/null; curl --path-as-is -s http://127.0.0.1/x/../s/t >/dev/null;` then the two `docker logs … \| grep -c /s/t` counts | `0` and `0` |
+| a fragment does not hide a request (Н-25) | `curl -s --request-target '/healthz#/s/t25frag' http://127.0.0.1/ >/dev/null; docker logs control-plane-nginx-1 2>/dev/null \| grep -c t25frag` | `1` (round 8: the raw key hid it) |
+| an unparsed request keeps its line out (Н-25) | `printf 'GET /s/t25unp HTTP/2.0\r\nHost: x\r\n\r\n' \| curl -s telnet://127.0.0.1:80 >/dev/null; docker logs control-plane-nginx-1 2>/dev/null \| grep -c t25unp` | `0` (a 505 line in the `<unparsed>` format instead; round 9: 408, 414 and 505 wrote the token) |
+| disk | `df -h /` | below 90% (the WAL archive filled it once — §3) |
 | enrollment port, no cert | `curl -sk -o /dev/null -w '%{http_code}' -X POST https://127.0.0.1:9444/agent/v1/enroll` | proxied (`502` before 001.10); any other path `404` |
 | agent API hidden on public port | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/agent/v1/heartbeat` | `404` |
 | secrets readable by the role | `$C run --rm --no-deps -T api sh -c 'id -u; for f in /run/secrets/*; do [ -r "$f" ] && echo "$f $(wc -c < "$f") bytes"; done'` | `10001`, then every file with a non-zero size (never print the contents) |
@@ -125,14 +141,19 @@ SQL: pipe over stdin, never `-f /tmp/…` (that reads the container FS):
 
 ### Tests from the Mac against the stand's database
 
-`control-plane/tests/conftest.py` reads `PG_DSN` / `REDIS_URL`. Point them at the VM:
+`control-plane/tests/conftest.py` reads `PG_DSN` / `REDIS_URL`. The stand's PostgreSQL and Redis
+listen on the VM's 127.0.0.1 only, so open the ssh tunnel first (it maps the same port numbers to
+the Mac's 127.0.0.1; `status` and `stop` use its control socket):
 
 ```bash
-VM_IP=$(ssh -G vm | awk '/^hostname /{print $2}')
-PG_DSN="postgresql://app_rw:app@$VM_IP:15432/control_plane" \
-MIGRATE_DSN="postgresql://app_migrate:app@$VM_IP:15432/control_plane" \
-REDIS_URL="redis://$VM_IP:16379/0" make test-py
+deploy/scripts/stand-tunnel.sh start
+PG_DSN="postgresql://app_rw:app@127.0.0.1:15432/control_plane" \
+MIGRATE_DSN="postgresql://app_migrate:app@127.0.0.1:15432/control_plane" \
+REDIS_URL="redis://127.0.0.1:16379/0" make test-py
 ```
+
+The stand scripts in `control-plane/tests/stand/` also talk to the stand's nginx (443, 9443,
+9444), which stays on the VM's address: they take it from `STAND_HOST` or `ssh -G vm`.
 
 (dev passwords are `app`; the roles are created by `initdb.d/10-roles.sh` on a fresh volume —
 an old volume needs `down -v` (confirm first) or the manual SQL from `secrets/README.md`.)
@@ -150,7 +171,7 @@ an old volume needs `down -v` (confirm first) or the manual SQL from `secrets/RE
 - Secrets stay on the VM; never `cat` a key into a transcript, report, or commit.
 - `psql` run inside the postgres container against `127.0.0.1` uses `trust` (`pg_hba` of the
   image) and never checks a role's password; to prove a password works, connect through the
-  published port from the Mac (`psycopg`/`psql` to `$VM_IP:15432`).
+  published port from the Mac (`psycopg`/`psql` to `127.0.0.1:15432` through the tunnel).
 
 ## 6. Rationalization Table
 

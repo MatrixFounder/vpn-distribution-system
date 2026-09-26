@@ -78,6 +78,8 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("expires_at", "timestamptz", False, None),
         ("used_at", "timestamptz", True, None),
         ("created_by", "uuid", False, None),
+        ("annulled_at", "timestamptz", True, None),  # миграция 131 (001.25): отметка, не срок
+        ("issue_seq", "int8", False, None),  # миграция 131 (001.25, раунд 4): порядок без часов
     ],
     "node_identities": [
         ("id", "uuid", False, "uuidv7()"),
@@ -88,6 +90,8 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("issued_at", "timestamptz", False, "now()"),
         ("expires_at", "timestamptz", False, None),
         ("revoked_at", "timestamptz", True, None),
+        ("enrolled_from", "inet", False, None),  # миграция 130 (001.25): UC-01 шаг 6
+        ("cert_serial", "text", False, None),  # миграция 130: форма $ssl_client_serial (001.66)
     ],
     "inbounds": [
         ("id", "uuid", False, "uuidv7()"),
@@ -201,11 +205,15 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
         ("f", "FOREIGN KEY (node_id) REFERENCES nodes(id)"),
         ("p", "PRIMARY KEY (id)"),
         ("u", "UNIQUE (token_hash)"),
+        # миграция 131 (001.25): погашенный токен не аннулируется и наоборот
+        ("c", "CHECK (((used_at IS NULL) OR (annulled_at IS NULL)))"),
     },
     "node_identities": {
         ("f", "FOREIGN KEY (node_id) REFERENCES nodes(id)"),
         ("p", "PRIMARY KEY (id)"),
         ("u", "UNIQUE (cert_fingerprint)"),
+        ("u", "UNIQUE (node_id, generation)"),  # миграция 130 (001.25)
+        ("u", "UNIQUE (cert_serial)"),  # миграция 130 (001.25)
     },
     "inbounds": {
         ("c", "CHECK (((port >= 1) AND (port <= 65535)))"),
@@ -279,6 +287,12 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
         "(node_id) WHERE (revoked_at IS NULL)",
         "CREATE UNIQUE INDEX node_identities_cert_fingerprint_key ON "
         "control_plane.node_identities USING btree (cert_fingerprint)",
+        # миграция 130 (001.25): индекс ограничения UNIQUE (node_id, generation)
+        "CREATE UNIQUE INDEX node_identities_node_id_generation_key ON "
+        "control_plane.node_identities USING btree (node_id, generation)",
+        # миграция 130 (001.25): индекс ограничения UNIQUE (cert_serial)
+        "CREATE UNIQUE INDEX node_identities_cert_serial_key ON "
+        "control_plane.node_identities USING btree (cert_serial)",
         "CREATE UNIQUE INDEX node_identities_pkey ON control_plane.node_identities USING btree "
         "(id)",
     },
@@ -342,6 +356,15 @@ async def test_catalog_matches_data_model(pg_dsn: str) -> None:
                 EXPECTED_CONSTRAINTS[table],
                 EXPECTED_INDEXES[table],
             )
+        # Номер выдачи токена — последовательность базы (identity ALWAYS), а не значение из
+        # приложения: «последний токен» ноды не зависит от часов (миграция 131, 001.25).
+        identity = await conn.fetchrow(
+            "select is_identity, identity_generation from information_schema.columns "
+            "where table_schema = $1 and table_name = 'bootstrap_tokens' "
+            "and column_name = 'issue_seq'",
+            SCHEMA,
+        )
+        assert identity is not None and tuple(identity) == ("YES", "ALWAYS"), identity
         partition_key = await conn.fetchval(
             "select pg_get_partkeydef($1::regclass)", f"{SCHEMA}.node_metrics"
         )
@@ -380,22 +403,33 @@ async def test_app_rw_privileges(pg_dsn: str, table: str) -> None:
 
 
 async def test_sequence_privileges(pg_dsn: str) -> None:
-    """node_ip_history_id_seq (identity): app_rw — USAGE и SELECT, app_backup — ничего."""
+    """Последовательности identity — ``node_ip_history_id_seq`` и ``bootstrap_tokens_issue_seq_seq``
+    (номер выдачи токена, миграция 131): app_rw — USAGE и SELECT, app_backup — ничего. UPDATE
+    дал бы ``setval`` назад — номер выдачи перестал бы расти с выдачей, и «последним токеном» на
+    шаге 6 оказался бы прежний (роаст 001.25, раунд 5); кэш — одно значение, иначе номера двух
+    сеансов шли бы не по порядку выдачи."""
     conn = await asyncpg.connect(pg_dsn)
     try:
-        actual = {
-            role: {
-                priv
-                for priv in ("USAGE", "SELECT", "UPDATE")
-                if await conn.fetchval(
-                    "select has_sequence_privilege($1, $2, $3)",
-                    role,
-                    f"{SCHEMA}.node_ip_history_id_seq",
-                    priv,
-                )
+        for sequence in ("node_ip_history_id_seq", "bootstrap_tokens_issue_seq_seq"):
+            actual = {
+                role: {
+                    priv
+                    for priv in ("USAGE", "SELECT", "UPDATE")
+                    if await conn.fetchval(
+                        "select has_sequence_privilege($1, $2, $3)",
+                        role,
+                        f"{SCHEMA}.{sequence}",
+                        priv,
+                    )
+                }
+                for role in EXPECTED_SEQUENCE_GRANTS
             }
-            for role in EXPECTED_SEQUENCE_GRANTS
-        }
-        assert actual == EXPECTED_SEQUENCE_GRANTS
+            assert actual == EXPECTED_SEQUENCE_GRANTS, sequence
+        cache = await conn.fetchval(
+            "select cache_size from pg_sequences where schemaname = $1 and sequencename = $2",
+            SCHEMA,
+            "bootstrap_tokens_issue_seq_seq",
+        )
+        assert cache == 1, cache
     finally:
         await conn.close()

@@ -3,9 +3,12 @@ UC-01 шаг 8, UC-07, UC-11): контракт в OpenAPI, состояние �
 статусу ноды §4.6 в обеих формах запроса, подтверждение курсоров, heartbeat, телеметрия и
 результат команды.
 
-Раздел не знает ни сессий, ни CSRF: нода предъявляет отпечаток клиентского сертификата и токен
-identity (§7.1), а версию агента — заголовком. Байтовая форма ответов закреплена отдельно —
-`tests/contract/test_agent_v1.py` по фикстурам `contracts/agent_v1/`.
+Раздел не знает ни сессий, ни CSRF: нода предъявляет клиентский сертификат (его передаёт прокси)
+и токен identity (§7.1), а версию агента — заголовком. Поиск ноды по identity здесь подменён
+(`tests/_agent.py::node_as`: версия и форма признаков — настоящие, нода — фиксированная карточка);
+настоящий поиск, отзыв и сверка токена — `tests/e2e/test_nodes.py` на живой базе (001.25). Байтовая
+форма ответов закреплена отдельно — `tests/contract/test_agent_v1.py` по фикстурам
+`contracts/agent_v1/`.
 """
 
 from __future__ import annotations
@@ -42,6 +45,9 @@ from app.jobs.handlers import HANDLERS
 from app.jobs.handlers.composition import PUBLISH_USER
 from app.main import create_app
 
+from tests._agent import FINGERPRINT, HEADERS, IDENTITY, node_as
+from tests._pki import STUB_CLIENT_CERT, STUB_CLIENT_CERT_PEM, STUB_CLIENT_FINGERPRINT, escaped
+
 AGENT_PATHS = {
     "/agent/v1/enroll",
     "/agent/v1/state",
@@ -53,13 +59,6 @@ AGENT_PATHS = {
     "/agent/v1/quota/request",  # 001.33
 }
 BODY_SCHEMAS = ("AckIn", "HeartbeatIn", "NodeMetrics", "CommandResultIn")
-FINGERPRINT = "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e"
-IDENTITY = "stub-identity-token-000000000000000000000000000"
-HEADERS = {
-    "X-Agent-Version": "0.1.0",
-    "X-Client-Fingerprint": FINGERPRINT,
-    "X-Node-Identity": IDENTITY,
-}
 BEHIND = {"config_version": 0, "users_seq": 0, "generation": 1}
 CURRENT = {
     "config_version": composition.STUB_CONFIG_VERSION,
@@ -117,22 +116,13 @@ class NoDatabase:
 
 
 @asynccontextmanager
-async def agent(status: NodeStatus | None = None) -> AsyncIterator[httpx.AsyncClient]:
-    """Клиент раздела `/agent/v1` без базы. `status` подменяет ноду запроса: заглушка
-    `current_node` отдаёт `active`, а вентиль §4.6 надо проверить на всех восьми статусах."""
+async def agent(status: NodeStatus = "active") -> AsyncIterator[httpx.AsyncClient]:
+    """Клиент раздела `/agent/v1` без базы. Нода запроса — фиксированная карточка в статусе
+    `status` (вентиль §4.6 надо проверить на всех восьми), признаки и версия разбираются настоящим
+    кодом (`node_as`)."""
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
-    if status is not None:
-
-        async def as_status() -> CurrentNode:
-            return CurrentNode(
-                node=stub_node(status=status),
-                fingerprint=FINGERPRINT,
-                identity_token=IDENTITY,
-                agent_version="0.1.0",
-            )
-
-        app.dependency_overrides[current_node] = as_status
+    app.dependency_overrides[current_node] = node_as(status)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
         yield client
@@ -362,26 +352,46 @@ async def test_heartbeat_and_telemetry_answer_without_body() -> None:
     "headers",
     [
         {"X-Agent-Version": "0.1.0"},
-        {"X-Agent-Version": "0.1.0", "X-Client-Fingerprint": FINGERPRINT},
+        {"X-Agent-Version": "0.1.0", "X-Client-Cert": STUB_CLIENT_CERT},
         {"X-Agent-Version": "0.1.0", "X-Node-Identity": IDENTITY},
-        {**HEADERS, "X-Client-Fingerprint": ""},
+        {**HEADERS, "X-Client-Cert": ""},
         {**HEADERS, "X-Node-Identity": ""},
-        {**HEADERS, "X-Client-Fingerprint": "zz" * 20},
-        {**HEADERS, "X-Client-Fingerprint": FINGERPRINT[:39]},
-        {**HEADERS, "X-Client-Fingerprint": FINGERPRINT.upper()},
-        {**HEADERS, "X-Client-Fingerprint": "a" * 41},
-        {**HEADERS, "X-Client-Fingerprint": "a" * 63},
-        {**HEADERS, "X-Client-Fingerprint": "a" * 65},
+        # Прежняя форма признака (hex отпечатка) больше не сертификат — и не пропуск.
+        {**HEADERS, "X-Client-Cert": FINGERPRINT},
+        {**HEADERS, "X-Client-Cert": "zz"},
+        {
+            **HEADERS,
+            "X-Client-Cert": STUB_CLIENT_CERT.replace("CERTIFICATE", "CERTIFICATE REQUEST"),
+        },
+        {**HEADERS, "X-Client-Cert": STUB_CLIENT_CERT.replace("MIIB", "MII*", 1)},
+        {**HEADERS, "X-Client-Cert": STUB_CLIENT_CERT + escaped(STUB_CLIENT_CERT_PEM)},
         {**HEADERS, "X-Node-Identity": "short"},
         {**HEADERS, "X-Node-Identity": "x" * 31},
         {**HEADERS, "X-Node-Identity": "x" * 129},
         {**HEADERS, "X-Node-Identity": "x" * 40 + "!"},
     ],
+    ids=[
+        "без признаков",
+        "без токена",
+        "без сертификата",
+        "сертификат очищен прокси",
+        "токен пуст",
+        "hex вместо сертификата",
+        "не PEM",
+        "метка CSR",
+        "тело не base64",
+        "два блока",
+        "токен короткий",
+        "токен 31",
+        "токен 129",
+        "токен вне алфавита",
+    ],
 )
 async def test_operations_need_both_identity_marks(headers: dict[str, str]) -> None:
-    """Оба признака identity обязательны на каждой операции раздела и проверяются по форме:
-    отпечаток — hex SHA-1 или SHA-256, токен — от 32 до 128 символов. Пустой отпечаток ставит
-    сам прокси на публичном и enrollment `server` (§7.1)."""
+    """Оба признака identity обязательны на каждой операции раздела и проверяются по форме до
+    базы: сертификат — ровно один PEM-блок `CERTIFICATE` в процентной кодировке прокси, токен —
+    base64url от 32 до 128 символов. Пустой сертификат ставит сам прокси на публичном и
+    enrollment `server` (§7.1)."""
     async with agent() as client:
         for method, path, body in OPERATIONS:
             response = await client.request(
@@ -394,18 +404,14 @@ async def test_operations_need_both_identity_marks(headers: dict[str, str]) -> N
 @pytest.mark.parametrize(
     "headers",
     [
-        {**HEADERS, "X-Client-Fingerprint": "b" * 64},
         {**HEADERS, "X-Node-Identity": "x" * 32},
         {**HEADERS, "X-Node-Identity": "x" * 128},
     ],
+    ids=["токен 32", "токен 128"],
 )
-async def test_both_fingerprint_widths_and_both_token_bounds_are_accepted(
-    headers: dict[str, str],
-) -> None:
-    """Границы принимаются, а не только отвергаются. Отпечаток SHA-256 (64 символа) — та ветка,
-    которая пойдёт в работу: `node_identities.cert_fingerprint` объявлен как 64 hex, а SHA-1 от
-    `$ssl_client_fingerprint` — временное состояние до решения 001.25. Без этого случая ветка
-    не исполняется ничем, и её потеря обнаружилась бы отказом всему парку."""
+async def test_both_token_bounds_are_accepted(headers: dict[str, str]) -> None:
+    """Границы принимаются, а не только отвергаются: без этих случаев сдвиг границы внутрь
+    отказал бы всему парку, а тесты отказов остались бы зелёными."""
     assert deps.IDENTITY_MIN_CHARS == 32
     assert deps.IDENTITY_MAX_CHARS == 128
     async with agent() as client:
@@ -422,26 +428,17 @@ async def test_the_pauses_the_server_asks_for_are_the_declared_ones() -> None:
     assert composition.RETRY_AFTER_RESYNC == 1, "снапшот нода берёт сама, немедленно"
 
 
-async def test_the_node_marks_reach_the_dependency_unswapped() -> None:
-    """Отпечаток и токен попадают в свои поля: по ним 001.25 ищет ноду и сверяет identity, а
-    перепутанные местами они дадут поиск по токену и сверку по отпечатку."""
-    seen: list[CurrentNode] = []
-
-    async def capture(node: deps.Agent) -> CurrentNode:
-        seen.append(node)
-        return node
-
-    app = create_app()
-    app.dependency_overrides[db_pool] = NoDatabase
-    app.dependency_overrides[deps.served_node] = capture
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
-        assert (
-            await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)
-        ).status_code == 200
-    assert len(seen) == 1
-    assert (seen[0].fingerprint, seen[0].identity_token) == (FINGERPRINT, IDENTITY)
-    assert seen[0].agent_version == "0.1.0"
+async def test_the_presented_marks_are_the_certificate_hash_and_the_token() -> None:
+    """Признаки из заголовков попадают в свои поля: отпечаток — SHA-256 от DER сертификата
+    (литерал, а не то же вычисление), токен — как пришёл. Перепутанные, они дали бы поиск по
+    токену и сверку по отпечатку. Кодировка прокси разбирается `unquote`, а не `unquote_plus`:
+    сертификат с неэкранированными `+`, `/`, `=` даёт тот же отпечаток, а `+` не становится
+    пробелом."""
+    presented = await deps.presented_identity(STUB_CLIENT_CERT, IDENTITY)
+    assert presented == deps.Presented(STUB_CLIENT_FINGERPRINT, IDENTITY)
+    loose = escaped(STUB_CLIENT_CERT_PEM).replace("%2B", "+").replace("%2F", "/")
+    assert "+" in loose and "/" in loose, "в сертификате есть что не экранировать"
+    assert (await deps.presented_identity(loose, IDENTITY)).fingerprint == STUB_CLIENT_FINGERPRINT
 
 
 async def test_unsupported_agent_versions_are_refused() -> None:

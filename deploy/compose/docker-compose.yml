@@ -53,6 +53,12 @@ x-app: &app
       target: /run/host-secrets/pg_app_rw_password
     - source: app_encryption_key
       target: /run/host-secrets/app_encryption_key
+  # Копии секретов (docker-entrypoint.sh) — в tmpfs, а не в записываемом слое контейнера: ключ
+  # CA и ключ шифрования полей не лежат в слое образа и не попадают в docker commit/export
+  # (001.25; страж — test_the_app_roles_keep_copied_secrets_in_memory). Страницы tmpfs не уходят в
+  # swap хоста только у ролей с memswap_limit = mem_limit (api); потолки памяти воркеров — 001.66.
+  tmpfs:
+    - /run/secrets
   depends_on:
     postgres:
       condition: service_healthy
@@ -198,7 +204,10 @@ services:
       # Миграции при старте (001.03, §10.2) — отдельное подключение под app_migrate.
       MIGRATE_DSN: postgresql://app_migrate@postgres:5432/control_plane
       MIGRATE_PASSWORD_FILE: /run/secrets/pg_app_migrate_password
+      # Внутренний CA нод (§7.1, 001.25): ключ и сертификат — пара, которой nginx агентского
+      # server проверяет клиентов (tls/ca.crt); обе — секретами, чтобы entrypoint отдал их app.
       CA_KEY_FILE: /run/secrets/ca_key
+      CA_CERT_FILE: /run/secrets/ca_cert
       APP_ROLE: api
     secrets:
       - source: pg_app_rw_password
@@ -209,6 +218,8 @@ services:
         target: /run/host-secrets/app_encryption_key
       - source: ca_key
         target: /run/host-secrets/ca_key
+      - source: ca_cert
+        target: /run/host-secrets/ca_cert
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"]
       interval: 5s
@@ -255,6 +266,10 @@ secrets:
     file: ./secrets/app_encryption_key
   ca_key:
     file: ./secrets/ca_key
+  # Сертификат CA не секретен, но api читает его рядом с ключом тем же путём (/run/secrets):
+  # файл — тот же tls/ca.crt, что смонтирован nginx, поэтому пара у прокси и у CA одна.
+  ca_cert:
+    file: ./secrets/tls/ca.crt
   smtp_password:
     file: ./secrets/smtp_password
 

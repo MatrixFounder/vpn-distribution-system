@@ -8,7 +8,7 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -149,6 +149,93 @@ class HistoryAndCli(unittest.TestCase):
         data = json.loads(out)
         self.assertEqual(data["files"], ["docs/report.md", "docs/task.md"])
         self.assertEqual(len(data["hits"]), 4)
+
+    def test_an_explicit_file_that_does_not_exist_is_refused(self) -> None:
+        """Явно названного файла нет — код 2 и его имя, а не «совпадений 0»: список файлов,
+        переданный оболочкой одним словом, иначе давал ложную чистоту (001.25)."""
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, out = self.run_cli("docs/no-such-file.md")
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("docs/no-such-file.md", err.getvalue())
+
+    def test_an_explicit_file_of_any_extension_is_swept(self) -> None:
+        """Явно названный файл без расширения из списка (Dockerfile, .env.example) развёртывается,
+        а не выпадает молча с «совпадений 0» (роаст 001.25, раунд 9)."""
+        (self.root / "Dockerfile").write_text("ENV RATE=8r/s\n", encoding="utf-8")
+        code, out = self.run_cli("Dockerfile", "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertIn("Dockerfile", data["files"])
+        self.assertIn("Dockerfile", {hit["path"] for hit in data["hits"]})
+
+    def test_an_explicit_file_that_is_not_text_is_refused(self) -> None:
+        """Явно названный файл, который не читается как UTF-8, — код 2 и его имя (раунд 9)."""
+        (self.root / "logo.bin").write_bytes(b"\xff\xfe\x00\x81")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code, out = self.run_cli("logo.bin")
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("logo.bin", err.getvalue())
+
+
+class WrappedPhrases(unittest.TestCase):
+    def test_a_phrase_wrapped_across_lines_is_found_once(self) -> None:
+        """Устаревшая формулировка, перенесённая через строку в комментарии или абзаце, видна
+        развёртке (роаст 001.25, раунд 3: «момент / транзакции» в комментарии теста не нашлась);
+        фраза в одной строке не дублируется совпадением пары."""
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "code.py").write_text(
+                "# лист от now (момент\n"
+                "# транзакции enrollment) — прежняя формулировка\n"
+                "x = 1  # момент транзакции в одной строке\n"
+                "y = 2\n",
+                encoding="utf-8",
+            )
+            patterns = root / "sweep.json"
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "task": "t",
+                        "patterns": [
+                            {"name": "момент", "regex": "момент\\w* транзакции", "current": "x"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            hits = sweep.run(sweep.load_sweep(patterns), root, ["code.py"])
+            self.assertEqual([(h.line, h.history) for h in hits], [(1, False), (3, False)])
+            self.assertIn("момент транзакции", hits[0].text)
+
+    def test_a_phrase_split_across_python_string_literals_is_found(self) -> None:
+        """Неявная конкатенация литералов Python рвёт фразу кавычками (``"… момент "`` /
+        ``"транзакции"``) — склейка пары строк снимает их (роаст 001.25, раунд 4)."""
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "code.py").write_text(
+                'message = (\n    "лист от now (момент "\n    f"транзакции {name})",\n)\n',
+                encoding="utf-8",
+            )
+            patterns = root / "sweep.json"
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "task": "t",
+                        "patterns": [
+                            {"name": "момент", "regex": "момент\\w* транзакции", "current": "x"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            hits = sweep.run(sweep.load_sweep(patterns), root, ["code.py"])
+            self.assertEqual([(h.line, h.history) for h in hits], [(2, False)])
 
 
 if __name__ == "__main__":

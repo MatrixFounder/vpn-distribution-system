@@ -11,6 +11,7 @@ R-19, R-21…R-24, R-26, R-27, R-29, R-48; UC-04): контракт обеих �
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,8 +31,8 @@ from app.accounting.service import (
     AccountingService,
     ReportIn,
 )
+from app.agent_api.body import BoundedBodyRoute
 from app.agent_api.deps import (
-    CurrentNode,
     current_node,
     get_accounting_service,
     get_device_limit_service,
@@ -48,16 +49,11 @@ from fastapi import APIRouter
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import get_dependant
 from fastapi.routing import APIRoute
+from pydantic import BaseModel, Field
 
+from tests._agent import HEADERS, node_as
 from tests._reports import USER_A, USER_B, VALID_REPORT, report_with, widest_report
 
-FINGERPRINT = "9f8a3c17d4e05b2619c7a8f403d2e15b6c7a8d9e"
-IDENTITY = "stub-identity-token-000000000000000000000000000"
-HEADERS = {
-    "X-Agent-Version": "0.1.0",
-    "X-Client-Fingerprint": FINGERPRINT,
-    "X-Node-Identity": IDENTITY,
-}
 REPORTS = "/agent/v1/reports"
 QUOTA = "/agent/v1/quota/request"
 OTHER_NODE_ID = uuid.UUID("00000000-0000-7000-8000-0000000000bb")
@@ -71,28 +67,16 @@ class NoDatabase:
         raise AssertionError(f"обращение к базе: {name}")
 
 
-def as_node(status: NodeStatus = "active", node_id: uuid.UUID = STUB_NODE_ID) -> Any:
-    async def override() -> CurrentNode:
-        return CurrentNode(
-            node=stub_node(status=status, node_id=node_id),
-            fingerprint=FINGERPRINT,
-            identity_token=IDENTITY,
-            agent_version="0.1.0",
-        )
-
-    return override
-
-
 @asynccontextmanager
 async def agent(
-    status: NodeStatus | None = None, overrides: dict[Any, Any] | None = None
+    status: NodeStatus = "active", overrides: dict[Any, Any] | None = None
 ) -> AsyncIterator[httpx.AsyncClient]:
-    """Клиент раздела без базы; `status` подменяет ноду запроса (заглушка `current_node` отдаёт
-    `active`), `overrides` — прочие зависимости."""
+    """Клиент раздела без базы: нода запроса — фиксированная карточка в статусе `status`, признаки
+    и версия разбираются настоящим кодом (`tests/_agent.py::node_as`); `overrides` — прочие
+    зависимости (в том числе другая нода)."""
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
-    if status is not None:
-        app.dependency_overrides[current_node] = as_node(status)
+    app.dependency_overrides[current_node] = node_as(status)
     for dependency, replacement in (overrides or {}).items():
         app.dependency_overrides[dependency] = replacement
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
@@ -832,7 +816,7 @@ async def test_a_broken_upload_is_a_unified_400_on_every_operation(
     assert len(posts) == 7, "все операции раздела с телом"
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
-    app.dependency_overrides[current_node] = as_node()
+    app.dependency_overrides[current_node] = node_as()
     unified = {
         "error": {"code": "bad_request", "message": "тело запроса не разобрано", "details": {}}
     }
@@ -844,6 +828,36 @@ async def test_a_broken_upload_is_a_unified_400_on_every_operation(
     for path in (REPORTS, QUOTA):
         status, body = await _post_with_broken_upload(app, path, failure="raise")
         assert (status, body) == (400, unified), (path, "сбой чтения — тот же 400")
+
+
+class _SubscriptionProbe(BaseModel):
+    """Тело пробного маршрута под /s/: одно поле с верхней границей — пределы формы выводятся из
+    модели (``BoundedBodyRoute``), а класс на уровне модуля, чтобы FastAPI разрешил аннотацию."""
+
+    value: int = Field(ge=0, le=9)
+
+
+async def test_a_broken_upload_logs_the_path_without_a_subscription_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Н-25: сбой чтения тела пишет в журнал путь запроса — через ``loggable_path``, как
+    обработчики 500 и 503. Маршрутов с телом под /s/ сегодня нет, но строка журнала не должна
+    зависеть от того, где маршрут (роаст 001.25, раунд 7): пробный маршрут раздела с телом — под
+    ``/s/{value}/``, чтение тела обрывается исключением."""
+    app = create_app()
+    router = APIRouter(route_class=BoundedBodyRoute)
+
+    @router.post("/s/{value}/body")
+    async def probe(value: str, body: _SubscriptionProbe) -> None:
+        return None
+
+    app.include_router(router)
+    token = f"probe-{uuid.uuid4().hex}"
+    with caplog.at_level(logging.WARNING, logger="app.agent_api.body"):
+        status, _ = await _post_with_broken_upload(app, f"/s/{token}/body", failure="raise")
+    assert status == 400
+    logged = "\n".join(r.getMessage() for r in caplog.records if r.name == "app.agent_api.body")
+    assert "/s/…/body" in logged and token not in logged, logged
 
 
 async def test_the_width_check_precedes_identity_and_its_limits_are_public() -> None:
@@ -908,7 +922,7 @@ async def test_a_report_for_another_node_is_refused() -> None:
     без вмешательства оператора бессмысленен). Нода запроса намеренно не фиксированная: страж
     сверяет запрошенную ноду, а не константу."""
     assert service.RETRY_AFTER_NODE_MISMATCH == 3600
-    async with agent(overrides={current_node: as_node(node_id=OTHER_NODE_ID)}) as client:
+    async with agent(overrides={current_node: node_as(node_id=OTHER_NODE_ID)}) as client:
         foreign = await client.post(
             REPORTS, json={**VALID_REPORT, "node_id": str(STUB_NODE_ID)}, headers=HEADERS
         )
@@ -952,7 +966,7 @@ async def test_routes_hand_the_parsed_bodies_to_the_domain_and_return_its_answer
     вернула служба, а не константа заглушки."""
     accounting, quotas = RecordingAccounting(), RecordingQuota()
     overrides = {
-        current_node: as_node(node_id=OTHER_NODE_ID),
+        current_node: node_as(node_id=OTHER_NODE_ID),
         get_accounting_service: lambda: accounting,
         get_quota_service: lambda: quotas,
     }

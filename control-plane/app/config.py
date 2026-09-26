@@ -1,10 +1,12 @@
 """Настройки приложения C-01…C-03 из окружения (deployment.md §10.3, ``.env.example``).
 
 Секреты — только файлами: ``PG_PASSWORD_FILE`` дополняет ``PG_DSN`` паролем,
-``APP_ENCRYPTION_KEY_FILE`` указывает на ключ AES-256-GCM (§7.2). ``Settings.load()`` читает
-окружение и проверяет файлы секретов: отсутствующий или пустой файл — ошибка старта, а не пустая
-строка в рантайме. Импорт модуля и ``create_app()`` к базе не обращаются: пул и Redis создаются
-лениво (001.10).
+``APP_ENCRYPTION_KEY_FILE`` указывает на ключ AES-256-GCM (§7.2), ``CA_KEY_FILE`` и
+``CA_CERT_FILE`` — на ключ и сертификат внутреннего CA нод (§7.1, только роль ``api``; пару
+загружает и сверяет ``security.ca.get_ca`` в lifespan при старте). ``Settings.load()`` читает
+окружение и проверяет файлы секретов пула и Redis: отсутствующий или пустой файл — ошибка, а не
+пустая строка в рантайме. Импорт модуля и ``create_app()`` к базе не
+обращаются: пул и Redis создаются лениво (001.10).
 """
 
 from __future__ import annotations
@@ -65,6 +67,9 @@ class Settings(BaseSettings):
         default_factory=list, alias="SUBSCRIPTION_DOMAINS"
     )
     encryption_key_path: str = Field(alias="APP_ENCRYPTION_KEY_FILE")
+    # Внутренний CA нод (§7.1): выпуск сертификатов при enrollment — только у роли api.
+    ca_key_path: str | None = Field(default=None, alias="CA_KEY_FILE")
+    ca_cert_path: str | None = Field(default=None, alias="CA_CERT_FILE")
 
     @field_validator("subscription_domains", mode="before")
     @classmethod
@@ -93,7 +98,9 @@ class Settings(BaseSettings):
     @classmethod
     def load(cls) -> Settings:
         """Прочитать окружение и проверить секреты: файл ключа и файл пароля (если задан) должны
-        существовать и быть непустыми — иначе ``SecretError`` при старте."""
+        существовать и быть непустыми — иначе ``SecretError``. Файлы CA здесь не проверяются:
+        ``load()`` зовут пул и Redis, и негодный CA валил бы каждый маршрут с базой; CA
+        проверяется один раз при старте роли ``api`` (``security.ca.get_ca`` в lifespan)."""
         settings = cls.read()
         read_secret(settings.encryption_key_path)
         if settings.pg_password_file:

@@ -1,26 +1,29 @@
 """``POST /agent/v1/enroll`` — обмен одноразового bootstrap-токена на identity ноды (interfaces.md
-§5.2; security.md §7.1; UC-01 шаг 5, A1; Н-24). Задача 001.24: схемы и заглушка ``NodeService``.
+§5.2; security.md §7.1; UC-01 шаг 5, A1; Н-24). Схемы — 001.24, логика — 001.25
+(``NodeService.enroll``: хеш, срок и одноразовость токена, лист ноды от внутреннего CA, запись
+identity с адресом источника, нода в ``pending``).
 
 Единственный маршрут ``/agent/v1`` без клиентского сертификата: nginx обслуживает его отдельным
-``server`` (порт enrollment, 001.02), поэтому здесь нет ``X-Client-Fingerprint``. Логика проверки
-токена (хеш, срок, одноразовость, привязка к ноде), подпись CSR ключом CA, запись identity и
-переход ноды в ``pending`` — 001.25; ограничение частоты по адресу источника и хешу токена
-(§5.12, fail-closed) — 001.72.
+``server`` (порт enrollment, 001.02), поэтому здесь нет ``X-Client-Cert``. Адрес источника —
+``request.client``: uvicorn берёт его из ``X-Forwarded-For``, который прокси перезаписывает адресом
+соединения (``docker-entrypoint.sh``, ``deploy/nginx/nginx.conf``). Ограничение частоты по адресу
+источника и хешу токена (§5.12, fail-closed) — 001.72.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.agent_api.body import BoundedBodyRoute
 from app.db.pool import db_pool
 from app.domain.nodes import NodeService, Version
 from app.errors import ApiError
-from app.security.ca import pem_der
+from app.security.ca import CsrRejectedError, InternalCA, get_ca, pem_der
 
 router = APIRouter(route_class=BoundedBodyRoute, strict_content_type=True)
 
@@ -36,7 +39,7 @@ class EnrollIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     # Алфавит — base64url выданного токена (``generate_bootstrap_token``, 256 бит §7.2):
-    # вход сужается до отказа, а не после него — значение уедет в поиск по хешу (001.25).
+    # вход сужается до отказа, а не после него — значение уходит в поиск по хешу.
     bootstrap_token: Annotated[
         str, StringConstraints(min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     ]
@@ -66,10 +69,15 @@ class EnrollOut(BaseModel):
     node_id: uuid.UUID
 
 
-async def get_node_service(pool: Annotated[object, Depends(db_pool)]) -> NodeService:
-    """Пул — зависимостью, а не вызовом внутри фабрики: так его подмена в тесте видна всему графу
-    зависимостей раздела (контрактные тесты 001.28 подставляют объект-часовой вместо базы)."""
-    return NodeService(pool)
+async def get_node_service(
+    pool: Annotated[object, Depends(db_pool)],
+    ca: Annotated[InternalCA, Depends(get_ca)],
+) -> NodeService:
+    """Пул и CA — зависимостями, а не вызовами внутри фабрики: так их подмена в тесте видна всему
+    графу зависимостей раздела (контрактные тесты 001.28 подставляют объект-часовой вместо
+    базы). Ключ CA нужен только здесь — он подписывает лист; панели при выдаче токена нужен лишь
+    сертификат CA (``get_ca_pem``)."""
+    return NodeService(pool, ca)
 
 
 Nodes = Annotated[NodeService, Depends(get_node_service)]
@@ -84,7 +92,13 @@ Nodes = Annotated[NodeService, Depends(get_node_service)]
             "description": "тело не разобрано (негодный UTF-8, число длиннее 4 300 цифр) — "
             "«тело запроса не разобрано»; тот же ответ у оборванной заливки"
         },
-        401: {"description": "токен неизвестен, использован или просрочен (UC-01 A1)"},
+        401: {
+            "description": "отказ по токену (UC-01 A1): `token_invalid` — неизвестен или нода "
+            "выведена из эксплуатации; `token_used` — уже обменян: самим агентом (ответ потерян) "
+            "или кем-то другим — сверить адрес источника в состоянии ноды (UC-01 шаг 6, A2); "
+            "`token_expired` — истёк или аннулирован (новым токеном или отзывом). Во всех трёх "
+            "повтор тем же токеном бессмыслен — нужен новый"
+        },
         413: {
             "description": "тело больше предела enrollment-server (64 КиБ); страница nginx без "
             "тела единого формата"
@@ -93,7 +107,10 @@ Nodes = Annotated[NodeService, Depends(get_node_service)]
             "description": "тело без известной длины (chunked, поток HTTP/2 без content-length) "
             "прокси не принимает — `length_required` единого формата: не повторять"
         },
-        422: {"description": "тело не прошло проверку или CSR отвергнут CA (`invalid_csr`)"},
+        422: {
+            "description": "тело не прошло проверку или CSR отвергнут CA (`invalid_csr`: не "
+            "разбирается, подпись не сходится, ключ не EC P-256); токен при этом не погашается"
+        },
         429: {
             "description": "предел прокси enrollment-server: не чаще одного запроса в секунду и "
             "не больше четырёх соединений с адреса, не чаще двух в секунду от всех клиентов "
@@ -105,15 +122,21 @@ Nodes = Annotated[NodeService, Depends(get_node_service)]
         },
     },
 )
-async def enroll(body: EnrollIn, nodes: Nodes) -> EnrollOut:
+async def enroll(body: EnrollIn, request: Request, response: Response, nodes: Nodes) -> EnrollOut:
+    """Ответ несёт токен identity, который больше не показывается, — без кэширования."""
+    response.headers["Cache-Control"] = "no-store"
+    if request.client is None:
+        # За uvicorn адрес есть всегда; без него администратору нечего сверять на шаге 6.
+        raise RuntimeError("адрес источника enrollment неизвестен")
+    source = ipaddress.ip_address(request.client.host)
     try:
         identity = await nodes.enroll(
-            body.bootstrap_token, body.csr_pem, body.agent_version, body.xray_version
+            body.bootstrap_token, body.csr_pem, body.agent_version, body.xray_version, source
         )
-    except ValueError as exc:
-        # Тело уже прошло проверку рамки PEM, поэтому сюда доходит только CSR, отвергнутый
-        # самим CA (разбор и подпись — 001.25): это ошибка запроса, а не сбой сервера, и
-        # текст исключения наружу не выносится. Страж ветки — тест с подменой службы.
+    except CsrRejectedError as exc:
+        # Тело уже прошло проверку рамки PEM, поэтому сюда доходит CSR, отвергнутый самим CA:
+        # это ошибка запроса, а не сбой сервера, и текст исключения наружу не выносится.
+        # Перехватывается только отказ CA: иная ``ValueError`` из обмена — ошибка программы.
         raise ApiError("invalid_csr", "CSR отвергнут удостоверяющим центром", status=422) from exc
     return EnrollOut(
         client_cert_pem=identity.client_cert_pem,

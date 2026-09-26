@@ -88,6 +88,25 @@ def test_api_role_requires_subscription_domains(
     assert Settings.load().subscription_domains == []
 
 
+def test_load_reads_the_ca_paths_and_leaves_the_pair_to_the_api_start(
+    stand_env: dict[str, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``CA_KEY_FILE``/``CA_CERT_FILE`` (§7.1, 001.25) ``load()`` только читает: пару загружает
+    и сверяет ``get_ca`` при старте роли ``api`` (``tests/e2e/test_skeleton.py``). Проверка файлов
+    CA в ``load()`` валила бы пул и Redis — каждый маршрут с базой — из-за негодного CA, и у
+    воркеров, которым CA не нужен (роаст 001.25, раунд 1)."""
+    files = {"CA_KEY_FILE": tmp_path / "absent_key", "CA_CERT_FILE": tmp_path / "absent_cert"}
+    for name, path in files.items():
+        monkeypatch.setenv(name, str(path))
+    loaded = Settings.load()
+    assert (loaded.ca_key_path, loaded.ca_cert_path) == tuple(str(p) for p in files.values())
+    for name in files:
+        monkeypatch.delenv(name)
+    for role in ("api", "worker-critical"):
+        monkeypatch.setenv("APP_ROLE", role)
+        assert (Settings.load().ca_key_path, Settings.load().ca_cert_path) == (None, None)
+
+
 def test_dsn_with_password_keeps_ipv6_and_explicit_password(tmp_path: Path) -> None:
     secret = tmp_path / "s"
     secret.write_text("x")

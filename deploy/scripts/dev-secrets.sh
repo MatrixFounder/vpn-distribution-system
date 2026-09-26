@@ -48,7 +48,8 @@ if need app_encryption_key; then openssl rand -base64 32 | tr -d '\n' > "$dir/ap
 if need smtp_password; then : > "$dir/smtp_password"; fi
 if need pgbackrest_key; then openssl rand -hex 32 | tr -d '\n' > "$dir/pgbackrest_key"; fi
 
-# Внутренний CA: ключ — Docker secret ca_key, сертификат — tls/ca.crt для nginx.
+# Внутренний CA: ключ — Docker secret ca_key, сертификат — tls/ca.crt для nginx и api (секрет
+# ca_cert объявлен этим же файлом в docker-compose.yml).
 if need ca_key || [ ! -e "$dir/tls/ca.crt" ]; then
     openssl ecparam -genkey -name prime256v1 -noout -out "$dir/ca_key"
     openssl req -x509 -new -key "$dir/ca_key" -days 3650 -sha256 \

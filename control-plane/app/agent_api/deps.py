@@ -1,19 +1,26 @@
 """Зависимости раздела ``/agent/v1``: поддерживаемая версия агента и текущая нода (security.md
 §7.1; interfaces.md §5.2).
 
-Нода предъявляет два признака: клиентский сертификат внутреннего CA, чей отпечаток передаёт
-прокси заголовком ``X-Client-Fingerprint`` (агентский ``server`` nginx переписывает его
-безусловно, публичный и enrollment — очищают), и токен identity в ``X-Node-Identity``. Версия
-агента — ``X-Agent-Version`` в каждом запросе; неподдерживаемая — 426.
+Нода предъявляет два признака: клиентский сертификат внутреннего CA, который nginx проверил по
+CA и передаёт целиком заголовком ``X-Client-Cert`` (``$ssl_client_escaped_cert``: агентский
+``server`` переписывает его безусловно, публичный и enrollment — очищают), и токен identity в
+``X-Node-Identity``. Версия агента — ``X-Agent-Version`` в каждом запросе; неподдерживаемая — 426.
 
-Задача 001.28: обе зависимости объявлены, версия проверяется по-настоящему, нода — фиксированная
-карточка заглушки. Поиск ноды по отпечатку в ``node_identities``, сверка токена, отказ отозванной
-identity (401, Н-31) и ограничение частоты по identity (§5.12) — 001.25 и 001.72; закреплённые
-версии агента и команда ``update_agent`` — 001.31.
+Отпечаток считает приложение — SHA-256 от DER, как хранит ``node_identities.cert_fingerprint``
+(задача 001.25): у nginx есть только ``$ssl_client_fingerprint``, а это SHA-1, сломанный на
+коллизиях. Нода ищется по отпечатку, токен identity сверяется ``secrets.compare_digest`` по
+хешам, отозванная или истёкшая identity и выведенная нода — 401 (Н-31: отзыв действует со
+следующего запроса, операция синхронная). ``node_id`` берётся только из найденной identity.
+Ограничение частоты по identity (§5.12) — 001.72; закреплённые версии агента и команда
+``update_agent`` — 001.31.
 
 Для 001.72: ключ лимита «identity ноды» требует поиска в базе, то есть ограничитель оплатил бы
-то, что ограничивает. Дешёвый предфильтр — ``X-Client-Fingerprint``: его ставит прокси, подделать
-его нельзя, и он доступен из заголовка за ноль обращений.
+то, что ограничивает. Дешёвый предфильтр — серийный номер сертификата из ``X-Client-Cert``
+(разбор — микросекунды, без базы), но не хеш самого заголовка: у каждого листа есть близнец с
+подписью ``(r, n − s)`` — другие байты, тот же серийный номер (податливость ECDSA,
+``tests/_pki.py::signature_twin``), поэтому по серийному номеру ключуются и зоны прокси.
+Заголовку можно верить потому, что его ставит агентский server после проверки по CA, а ``api``
+не публикуется (правила границы 1 и 2 C-09); сосед по сети Compose задать его может.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Annotated
+from urllib.parse import unquote
 
 from fastapi import Depends, Header
 
@@ -30,26 +38,21 @@ from app.accounting.service import AccountingService
 from app.db.pool import db_pool
 from app.domain.commands import CommandService
 from app.domain.composition import CompositionService, node_not_approved
-from app.domain.nodes import Node, stub_node
+from app.domain.nodes import Node, NodeService
 from app.domain.statuses import STREAM_GATE, StatusService
 from app.errors import ApiError
+from app.security.ca import fingerprint_der, pem_der
 
 AGENT_VERSION_HEADER = "X-Agent-Version"
-FINGERPRINT_HEADER = "X-Client-Fingerprint"
+CLIENT_CERT_HEADER = "X-Client-Cert"
 IDENTITY_HEADER = "X-Node-Identity"
 
-# Отпечаток: hex без разделителей. SHA-1 (40) — то, что сегодня даёт ``$ssl_client_fingerprint``
-# nginx, SHA-256 (64) — то, что хранит ``node_identities.cert_fingerprint``; выбор между ними
-# делает 001.25 (записано в её примечаниях), а до тех пор принимаются обе длины и только они.
-# Классы заданы явно (``[0-9a-f]``, ``[0-9]``), а не через ``\d``: последний в Python матчит
-# любые юникодные цифры, и «١.١.٠» разобралось бы как версия 1.1.0. ``\Z``, а не ``$``:
-# ``$`` совпадает и перед завершающим переводом строки.
-FINGERPRINT_HEX = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 # Токен identity: длина как у токена подписки и bootstrap-токена — 256 бит в base64url и запас.
 IDENTITY_MIN_CHARS = 32
 IDENTITY_MAX_CHARS = 128
 # Алфавит — base64url выданного токена (§7.2, 256 бит): сужаем вход до отказа, а не после
-# него. Сравнение самого значения — только ``secrets.compare_digest`` в 001.25.
+# него. Сравнение самого значения — только ``secrets.compare_digest`` (``NodeService.by_identity``).
+# ``\Z``, а не ``$``: ``$`` совпадает и перед завершающим переводом строки.
 IDENTITY_TOKEN = re.compile(rf"^[A-Za-z0-9_-]{{{IDENTITY_MIN_CHARS},{IDENTITY_MAX_CHARS}}}\Z")
 
 # Наименьшая версия агента, с которой Control Plane обменивается состоянием. Версии ниже
@@ -60,6 +63,8 @@ MIN_AGENT_VERSION = (0, 1, 0)
 RETRY_AFTER_UPGRADE = 3600
 # Длина заголовка версии в символах — как у ``domain.nodes.Version``; длиннее — не версия.
 AGENT_VERSION_MAX_CHARS = 64
+# Классы заданы явно (``[0-9]``), а не через ``\d``: последний в Python матчит любые юникодные
+# цифры, и «١.١.٠» разобралось бы как версия 1.1.0.
 _VERSION = re.compile(r"^([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+][0-9A-Za-z.-]+)?\Z")
 
 
@@ -105,6 +110,37 @@ async def supported_agent_version(
 
 
 @dataclass(frozen=True, slots=True)
+class Presented:
+    """Признаки, которыми запрос представился: отпечаток SHA-256 сертификата, переданного прокси,
+    и токен identity. Форма проверена, подлинность — ещё нет (её проверяет ``current_node``)."""
+
+    fingerprint: str
+    identity_token: str
+
+
+async def presented_identity(
+    x_client_cert: Annotated[str | None, Header()] = None,
+    x_node_identity: Annotated[str | None, Header()] = None,
+) -> Presented:
+    """Форма обоих признаков — до базы: ``X-Client-Cert`` — PEM-блок ``CERTIFICATE`` в процентной
+    кодировке nginx (длину ограничивает ``pem_der``), ``X-Node-Identity`` — base64url от 32 до
+    128 символов. Отказ — 401 ``unauthenticated``.
+
+    Пустой ``X-Client-Cert`` ставит сам прокси на публичном и enrollment ``server`` (§7.1).
+    Через нынешний nginx такой запрос до приложения и не доходит — раздел там отдаёт 404;
+    проверка здесь на случай, когда дойдёт: значению заголовка от клиента верить нельзя ни при
+    какой конфигурации прокси."""
+    if not x_client_cert or not x_node_identity or not IDENTITY_TOKEN.match(x_node_identity):
+        raise unknown_identity()
+    try:
+        # ``unquote``, а не ``unquote_plus``: «+» — символ base64, а не пробел.
+        der = pem_der(unquote(x_client_cert), "CERTIFICATE")
+    except ValueError:
+        raise unknown_identity() from None
+    return Presented(fingerprint_der(der), x_node_identity)
+
+
+@dataclass(frozen=True, slots=True)
 class CurrentNode:
     """Нода, от имени которой пришёл запрос: её карточка и признаки, которыми она представилась."""
 
@@ -116,25 +152,19 @@ class CurrentNode:
 
 async def current_node(
     agent_version: Annotated[str, Depends(supported_agent_version)],
-    x_client_fingerprint: Annotated[str | None, Header()] = None,
-    x_node_identity: Annotated[str | None, Header()] = None,
+    presented: Annotated[Presented, Depends(presented_identity)],
+    pool: Annotated[object, Depends(db_pool)],
 ) -> CurrentNode:
-    """Нода по отпечатку клиентского сертификата и токену identity. Заглушка 001.28 проверяет
-    форму обоих признаков и не ищет ноду: сверка отпечатка с ``node_identities``, сравнение
-    токена и отказ отозванной identity (Н-31) — 001.25.
-
-    Пустой ``X-Client-Fingerprint`` ставит сам прокси на публичном и enrollment ``server``
-    (§7.1). Через нынешний nginx такой запрос до приложения и не доходит — раздел там отдаёт
-    404; проверка здесь на случай, когда дойдёт: значению заголовка от клиента верить нельзя ни
-    при какой конфигурации прокси."""
-    if not x_client_fingerprint or not FINGERPRINT_HEX.match(x_client_fingerprint):
-        raise unknown_identity()
-    if not x_node_identity or not IDENTITY_TOKEN.match(x_node_identity):
+    """Нода по сертификату, который прокси проверил по CA, и токену identity: после проверки
+    версии (426) и формы признаков (401) — ``NodeService.by_identity``: отпечаток SHA-256 →
+    ``node_identities`` → токен, отзыв, срок, вывод ноды. Любой отказ — один 401 (§5.2)."""
+    node = await NodeService(pool).by_identity(presented.fingerprint, presented.identity_token)
+    if node is None:
         raise unknown_identity()
     return CurrentNode(
-        node=stub_node(),
-        fingerprint=x_client_fingerprint,
-        identity_token=x_node_identity,
+        node=node,
+        fingerprint=presented.fingerprint,
+        identity_token=presented.identity_token,
         agent_version=agent_version,
     )
 

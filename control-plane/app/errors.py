@@ -2,12 +2,16 @@
 
 ``ApiError`` поднимают обработчики и доменный слой; обработчики FastAPI переводят в тот же формат
 ошибки маршрутизации (404, 405), валидации (422, ``details.errors`` — pydantic) и необработанные
-исключения (500 без подробностей — они уходят в журнал, не клиенту).
+исключения (500 без подробностей — они уходят в журнал, не клиенту; путь в журнале — без токена
+подписки, ``loggable_path``). Промежуточный слой ``RejectControlCharacters`` отвечает 404 того же
+формата на путь с управляющими символами до маршрутизации.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from http import HTTPStatus
 from typing import Any
 
 import asyncpg
@@ -17,6 +21,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.db.pool import DatabaseUnavailable
 from app.security.ratelimit import RETRY_AFTER_SECONDS, RateLimitUnavailable
@@ -166,22 +171,60 @@ async def _validation_handler(_: Request, exc: Exception) -> JSONResponse:
     return error_response(422, "validation_error", "запрос не прошёл проверку", details)
 
 
+# Н-25: токен подписки — в пути (``/s/{token}``); строки журнала приложения с путём (500 и 503 —
+# любой маршрут, и /s/ тоже) пишут его без токена. Журнал запросов ведёт nginx, где путь /s/
+# исключён; access-log uvicorn выключен (docker-entrypoint.sh) — с ним строка ``GET /s/<токен>``
+# ложилась в журнал контейнера api (стенд, роаст 001.25, раунд 6).
+_SUBSCRIPTION_SEGMENT = re.compile(r"(^|/)s/[^/]*")
+
+
+def loggable_path(path: str) -> str:
+    """Путь запроса для журнала: сегмент после ``/s/`` (токен подписки) заменён на «…» (Н-25)."""
+    return _SUBSCRIPTION_SEGMENT.sub(r"\1s/…", path)
+
+
 async def _unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
     """Fail-closed (§9.1): Redis или PostgreSQL недоступны → 503 с Retry-After, без подробностей
     клиенту."""
-    log.error("503 %s %s: %s", request.method, request.url.path, exc)
+    log.error("503 %s %s: %s", request.method, loggable_path(request.url.path), exc)
     response = error_response(503, "service_unavailable", "сервис временно недоступен")
     response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
     return response
 
 
 async def _unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
-    log.exception("необработанная ошибка: %s %s", request.method, request.url.path)
+    log.exception("необработанная ошибка: %s %s", request.method, loggable_path(request.url.path))
     return error_response(500, "internal_error", "внутренняя ошибка сервера")
 
 
+# Управляющие символы (C0 и DEL) в декодированном пути. Путей с ними в API нет, а маршруты
+# Starlette сверяются регулярным выражением с ``$``, который совпадает и перед завершающим ``\n``:
+# ``/agent/v1/enroll%0A`` нашёл бы обработчик обмена, ``/metrics%0A`` — экспозицию метрик, а nginx,
+# сравнивающий точные location строкой, пропустил бы такой путь мимо своих правил (роаст 001.25,
+# раунд 5: стенд — 200 на ``/metrics%0A`` публичного server).
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+class RejectControlCharacters:
+    """404 единого формата — тот же, что у неизвестного маршрута, — на путь с управляющими
+    символами, до маршрутизации: такой путь не находит ни одного маршрута, чем бы он ни
+    заканчивался."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and _CONTROL_CHARACTERS.search(scope["path"]):
+            not_found = error_response(404, STATUS_CODES[404], HTTPStatus.NOT_FOUND.phrase)
+            await not_found(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def install_error_handlers(app: FastAPI) -> None:
-    """Подключить обработчики единого формата ко всем классам ошибок."""
+    """Подключить обработчики единого формата ко всем классам ошибок и отказ путям с
+    управляющими символами до маршрутизации."""
+    app.add_middleware(RejectControlCharacters)
     app.add_exception_handler(ApiError, _api_error_handler)
     app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)

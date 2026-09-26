@@ -17,19 +17,30 @@ import httpx
 import pytest
 from app.main import create_app
 
+from tests._pki import make_ca
+
 
 @pytest.fixture(scope="session", autouse=True)
 def app_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Полное окружение `Settings` для ленивых пула и Redis в тестах: адреса стенда (как в
     фикстурах ниже), роль `api`, ключ шифрования — временный файл с 32 случайными байтами в
-    base64. Уже заданные переменные не трогаются; отдельные тесты переопределяют их monkeypatch."""
-    key_file = tmp_path_factory.mktemp("secrets") / "app_encryption_key"
+    base64, внутренний CA нод — одноразовая пара ключ/сертификат (`tests/_pki.py`), которую
+    приложение читает тем же путём, что на стенде (`CA_KEY_FILE`/`CA_CERT_FILE`). Уже заданные
+    переменные не трогаются; отдельные тесты переопределяют их monkeypatch."""
+    secrets_dir = tmp_path_factory.mktemp("secrets")
+    key_file = secrets_dir / "app_encryption_key"
     key_file.write_text(base64.b64encode(secrets.token_bytes(32)).decode())
+    ca_key_pem, ca_cert_pem = make_ca()
+    ca_key_file, ca_cert_file = secrets_dir / "ca_key", secrets_dir / "ca_cert"
+    ca_key_file.write_bytes(ca_key_pem)
+    ca_cert_file.write_bytes(ca_cert_pem)
     defaults = {
         "PG_DSN": "postgresql://app_rw:app@127.0.0.1:5432/control_plane",
         "REDIS_URL": "redis://127.0.0.1:6379/0",
         "APP_ROLE": "api",
         "APP_ENCRYPTION_KEY_FILE": str(key_file),
+        "CA_KEY_FILE": str(ca_key_file),
+        "CA_CERT_FILE": str(ca_cert_file),
         "SUBSCRIPTION_DOMAINS": "sub1.example.com,sub2.example.com",  # два домена §4.2
     }
     added = [name for name in defaults if name not in os.environ]
@@ -40,7 +51,8 @@ def app_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     finally:
         for name in added:
             os.environ.pop(name, None)
-        Path(key_file).unlink(missing_ok=True)
+        for path in (key_file, ca_key_file, ca_cert_file):
+            Path(path).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope="session")

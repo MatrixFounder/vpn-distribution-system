@@ -26,11 +26,18 @@ async def cleanup(conn: asyncpg.Connection, owner: asyncpg.Connection | None = N
     """Удалить всё, что тесты каталога завели под префиксом, в порядке внешних ключей.
     ``owner`` — подключение владельца для журнала баланса (см. ниже)."""
     like = f"{PREFIX}%"
-    await conn.execute(
-        "delete from node_billing_assignments where node_id in "
-        "(select id from nodes where code like $1)",
-        like,
-    )
+    # Всё, что ссылается на ноду без каскада (001.25: токены, identity, история адресов;
+    # группы доступа ноды уходят каскадом), — до самой ноды.
+    for table in (
+        "bootstrap_tokens",
+        "node_identities",
+        "node_ip_history",
+        "node_billing_assignments",
+    ):
+        await conn.execute(
+            f"delete from {table} where node_id in (select id from nodes where code like $1)",  # noqa: S608 — имя из списка
+            like,
+        )
     await conn.execute("delete from nodes where code like $1", like)
     await conn.execute(
         "delete from plan_access_groups where plan_id in (select id from plans where name like $1)",

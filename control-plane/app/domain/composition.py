@@ -155,7 +155,7 @@ class AckIn(BaseModel):
 # --- фиксированные значения заглушки ------------------------------------------------------------
 
 STUB_CONFIG_VERSION = 1
-STUB_GENERATION = 1  # совпадает с поколением identity заглушки (``domain.nodes.stub_identity``)
+STUB_GENERATION = 1  # первое поколение identity: ``node_identities.generation`` начинается с 1
 STUB_USERS_SEQ = 4  # текущий номер изменения состава (``current_users_seq`` по строкам ниже)
 STUB_USER_ACTIVE = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
 STUB_USER_SUSPENDED = uuid.UUID("00000000-0000-7000-8000-0000000000a2")

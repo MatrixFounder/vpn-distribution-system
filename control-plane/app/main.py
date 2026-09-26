@@ -17,10 +17,12 @@ from fastapi.responses import PlainTextResponse
 from app import __version__
 from app.agent_api.router import router as agent_router
 from app.api.router import router as api_router
+from app.config import Settings
 from app.db.pool import close_pool
 from app.errors import install_error_handlers
 from app.metrics import render as render_metrics
 from app.redis import close_redis
+from app.security.ca import get_ca
 from app.subscription.router import router as subscription_router
 
 API_VERSION = "v1"
@@ -28,7 +30,13 @@ API_VERSION = "v1"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Старт без обращений наружу; при остановке — закрыть пул и клиент Redis."""
+    """Старт без обращений наружу; при остановке — закрыть пул и клиент Redis. У роли ``api``
+    старт загружает и сверяет пару внутреннего CA нод (``get_ca``: файлы и ключ к сертификату) —
+    негодный CA валит процесс сразу, а не первый enrollment после зелёной проверки живости.
+    Секреты пула и Redis старт не читает (их проверяет ``Settings.load()`` при первом
+    подключении): ``api`` поднимается и при недоступной базе."""
+    if Settings.read().app_role == "api":
+        get_ca()
     try:
         yield
     finally:

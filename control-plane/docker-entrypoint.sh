@@ -34,8 +34,12 @@ fi
 case "${APP_ROLE:-}" in
     api)
         python -m app.cli migrate
-        # Переменные названы APP_*: имена UVICORN_* uvicorn читает сам (auto_envvar_prefix)
-        # и они перебивали бы явные флаги ниже.
+        # Конфигурация uvicorn — только строка запуска ниже. Опции, которых в ней нет, uvicorn
+        # берёт из окружения UVICORN_* (auto_envvar_prefix; флаг командной строки перебивает
+        # окружение, окружение — умолчание), а .env оператора роли приложения получают целиком:
+        # UVICORN_LOG_LEVEL=trace включил бы журнал сообщений ASGI с путём /s/<токен> (роаст
+        # 001.25, раунд 8). Поэтому все UVICORN_* снимаются здесь, а переменные роли названы APP_*.
+        for name in $(env | sed -n 's/^\(UVICORN_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
         # За nginx: схема и адрес клиента — из X-Forwarded-Proto / X-Forwarded-For (§5.1, Н-25,
         # лимиты частоты). Контракт с deploy/nginx/nginx.conf: nginx ПЕРЕЗАПИСЫВАЕТ оба заголовка
         # ($remote_addr, $scheme), поэтому в них ровно одно значение и оно не от клиента;
@@ -43,15 +47,25 @@ case "${APP_ROLE:-}" in
         # не публикуется). При цепочке в X-Forwarded-For uvicorn с '*' взял бы крайний левый,
         # клиентский элемент — поэтому дополнение ($proxy_add_x_forwarded_for) в nginx запрещено;
         # страж — tests/unit/test_proxy_contract.py.
+        # --no-access-log: журнал запросов ведёт nginx (путь /s/ там исключён, Н-25); access-log
+        # uvicorn писал строку запроса целиком — токен подписки в журнале контейнера api (стенд,
+        # роаст 001.25, раунд 6). --ws none: маршрутов WebSocket в API нет, а строки рукопожатия
+        # uvicorn пишет с путём мимо --no-access-log (раунд 7). --log-level info: уровень trace
+        # включает журнал сообщений ASGI (Started scope=… с путём); после --log-config uvicorn
+        # выставляет свои журналы по этому уровню (раунд 8). --lifespan on: CA узлов загружается
+        # и проверяется при старте, в lifespan приложения (негодный CA — отказ старта); с off
+        # api стартовал бы здоровым и отказывал бы обмену в бою (роаст 001.25, раунд 9).
         case "${APP_RELOAD:-}" in
             1|true|yes)
                 # Разработка: перезапуск при изменении смонтированных исходников (один процесс).
                 exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 \
-                    --proxy-headers --forwarded-allow-ips '*' --reload
+                    --proxy-headers --forwarded-allow-ips '*' --no-access-log --ws none \
+                    --log-level info --lifespan on --reload
                 ;;
         esac
         exec python -m uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 \
-            --proxy-headers --forwarded-allow-ips '*' --workers "${APP_WORKERS:-2}"
+            --proxy-headers --forwarded-allow-ips '*' --no-access-log --ws none \
+            --log-level info --lifespan on --workers "${APP_WORKERS:-2}"
         ;;
     worker-critical)
         exec python -m app.jobs.worker --queue critical

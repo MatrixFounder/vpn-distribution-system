@@ -7,11 +7,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import get_args
 
 import pytest
 from app.domain.nodes import NodeStatus
-from app.domain.statuses import AUTOMATIC, MANUAL, STREAM_GATE, TRANSITIONS, StatusService
+from app.domain.statuses import (
+    AUTOMATIC,
+    MANUAL,
+    ON_REENROLLMENT,
+    ON_REVOCATION,
+    STREAM_GATE,
+    TRANSITIONS,
+    StatusService,
+)
 
 ALL_STATUSES: list[NodeStatus] = [
     "pending",
@@ -129,3 +138,24 @@ def test_the_answer_is_filtered_exactly_where_the_gate_hides_rows() -> None:
     filtered = {status for status, gate in STREAM_GATE.items() if gate.filters_composition}
     assert filtered == {"disabled", "suspended"}
     assert not any(gate.filters_composition for gate in STREAM_GATE.values() if gate.refused)
+
+
+def test_identity_events_are_rows_of_the_spec() -> None:
+    """Переходы по событиям identity — строки матрицы §4.6 постановки (решение заказчика
+    2026-09-24, 001.25), а не вольность службы нод: «Любой → Disabled: отзыв identity» и «Любой,
+    кроме выведенной → Pending: обмен нового bootstrap-токена». Строки читаются из
+    ``docs/idea.md`` — литерал здесь расходился бы с постановкой молча."""
+    idea = (Path(__file__).resolve().parents[4] / "docs" / "idea.md").read_text(encoding="utf-8")
+    matrix = idea[idea.index("#### Матрица переходов") : idea.index("#### Матрица влияния")]
+    rows = [
+        [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for line in matrix.splitlines()
+        if line.startswith("| ") and not line.startswith("| Из") and not line.startswith("| :")
+    ]
+    revocation = [row for row in rows if row[2].startswith("Отзыв identity")]
+    reenrollment = [row for row in rows if row[2].startswith("Обмен нового bootstrap-токена")]
+    assert [row[:2] for row in revocation] == [["Любой", f"`{ON_REVOCATION.capitalize()}`"]]
+    assert [row[:2] for row in reenrollment] == [
+        ["Любой, кроме выведенной из эксплуатации", f"`{ON_REENROLLMENT.capitalize()}`"]
+    ]
+    assert ON_REVOCATION in MANUAL, "отзыв ставит ручной статус — автоматика его не снимет"

@@ -8,9 +8,12 @@ nginx обязан перезаписывать заголовок адресо�
 (``POST /agent/v1/enroll``) — единственный маршрут ``/agent/v1`` без клиентского сертификата
 (security.md §7.1), поэтому он обслуживается отдельным ``server`` и обязан быть недоступен на
 агентском (mTLS) и публичном. Файлы сверяются статически (сеть в тесте не поднимается);
-поведение на стенде — в отчётах задач. Разбор конфигурации: комментарии снимаются вне кавычек,
-содержимое строк в кавычках не образует блоков и не обрывает их, матчеры ``location`` уникальны,
-``include`` кроме таблицы MIME запрещён — иначе страж читал бы не тот файл или не тот блок.
+поведение на стенде — в отчётах задач. Разбор конфигурации — словами, как их читает nginx
+(``_nginx_tokens``): стражи видят каноническую запись файла, где кавычки сняты везде, где они не
+нужны nginx, — ``set "$x" 0`` для стража то же, что ``set $x 0`` (роаст 001.25, раунд 8), —
+комментарии сняты по правилам nginx, содержимое строк в кавычках не образует блоков и не
+обрывает их, матчеры ``location`` уникальны, ``include`` кроме таблицы MIME запрещён — иначе
+страж читал бы не тот файл или не тот блок.
 Стражи здесь положительные: каждая проксирующая операция Node API обязана нести свои зоны, тела
 без известной длины — получать 411, буферы — равняться пределам, а потолки Compose — читаться из
 файлов, которые стенд действительно накладывает (команда запуска в шапке базового файла и в
@@ -22,50 +25,191 @@ from __future__ import annotations
 import json
 import math
 import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
+import click
+import pytest
+import uvicorn.main  # noqa: F401 - команда click uvicorn для разбора строк запуска
 import yaml  # type: ignore[import-untyped]
 
 REPO = Path(__file__).resolve().parents[3]
 NGINX_CONF = REPO / "deploy" / "nginx" / "nginx.conf"
 ENTRYPOINT = REPO / "control-plane" / "docker-entrypoint.sh"
+DOCKERFILE = REPO / "control-plane" / "Dockerfile"
 COMPOSE_DIR = REPO / "deploy" / "compose"
 
 
-def _strip_comments(text: str) -> str:
-    """Конфигурация без комментариев: ``#`` вне кавычек начинает комментарий до конца строки,
-    ``#`` внутри строки (``add_header X "#fff"``) — часть значения. Регулярное выражение по
-    ``#[^\\n]*`` срезало бы закрывающую кавычку и сдвинуло бы границы блоков."""
-    out: list[str] = []
-    i, quote = 0, None
-    while i < len(text):
-        char = text[i]
-        if quote:
-            out.append(char)
-            if char == "\\" and i + 1 < len(text):
-                out.append(text[i + 1])
-                i += 1
-            elif char == quote:
-                quote = None
-        elif char in ("'", '"'):
-            quote = char
-            out.append(char)
-        elif char == "#":
-            end = text.find("\n", i)
-            i = len(text) if end < 0 else end
+_ESCAPES = {'"': '"', "'": "'", "\\": "\\", "t": "\t", "r": "\r", "n": "\n"}
+# Слово, которому кавычки не нужны: ни пробела, ни знаков, которые разбор nginx читает иначе.
+_SIMPLE_WORD = re.compile(r"[^\s;{}#'\"\\]+")
+
+
+def _unescape(body: str) -> str:
+    """Значение слова по правилу nginx: ``\\"``, ``\\'``, ``\\\\``, ``\\t``, ``\\r``, ``\\n``
+    разбираются, прочая обратная косая черта остаётся как есть."""
+    out, i = [], 0
+    while i < len(body):
+        if body[i] == "\\" and i + 1 < len(body) and body[i + 1] in _ESCAPES:
+            out.append(_ESCAPES[body[i + 1]])
+            i += 2
             continue
-        else:
-            out.append(char)
+        out.append(body[i])
         i += 1
     return "".join(out)
+
+
+def _nginx_tokens(text: str) -> list[tuple[str, str, str]]:
+    """Токены файла так, как их читает nginx (``ngx_conf_read_token``): тройки (вид, значение,
+    запись в файле); вид — ``word``, ``;``, ``{`` или ``}``. ``#`` начинает комментарий только в
+    начале слова (в середине слова — часть значения), кавычка открывает строку тоже только в
+    начале слова, ``{`` сразу после ``$`` блока не открывает и признак переменной не сбрасывает
+    (``${{a}`` — одно слово), ``}`` внутри слова его не обрывает, обратная косая черта делает
+    следующий знак частью слова; за закрывающей кавычкой — пробел, ``;``, ``{`` или ``)``, иначе
+    nginx файл не примет, и страж его не читает (роаст 001.25, раунд 9). Регулярное выражение
+    по тексту видело бы другое: ``set "$x" 0`` — не ``set $x``, а ``a#b`` — комментарий."""
+    tokens: list[tuple[str, str, str]] = []
+    i, size = 0, len(text)
+    while i < size:
+        char = text[i]
+        if char in " \t\r\n":
+            i += 1
+            continue
+        if char == "#":
+            end = text.find("\n", i)
+            i = size if end < 0 else end
+            continue
+        if char in ";{}":
+            tokens.append((char, char, char))
+            i += 1
+            continue
+        start = i
+        if char in ("'", '"'):
+            i += 1
+            while i < size and text[i] != char:
+                i += 2 if text[i] == "\\" else 1
+            assert i < size, "строка в кавычках не закрыта"
+            i += 1
+            assert i >= size or text[i] in " \t\r\n;{)", "за кавычкой — не пробел, nginx откажет"
+            raw = text[start:i]
+            tokens.append(("word", _unescape(raw[1:-1]), raw))
+            continue
+        variable = False
+        while i < size:
+            current = text[i]
+            if current == "\\":
+                i += 2
+                variable = False
+                continue
+            if current == "{" and variable:
+                i += 1  # как у nginx: признак переменной остаётся
+                continue
+            if current in " \t\r\n;{":
+                break
+            variable = current == "$"
+            i += 1
+        raw = text[start:i]
+        tokens.append(("word", _unescape(raw), raw))
+    return tokens
+
+
+def _canonical(text: str) -> str:
+    """Каноническая запись конфигурации: директива на строке, отступ по глубине, слова через
+    пробел; слово, которому кавычки не нужны, — без них, остальные — как в файле. Комментарии
+    сняты. Стражи сверяют этот текст, а не исходный."""
+    lines: list[str] = []
+    words: list[str] = []
+    depth = 0
+    for kind, value, raw in _nginx_tokens(text):
+        if kind == "word":
+            words.append(value if _SIMPLE_WORD.fullmatch(value) else raw)
+        elif kind == ";":
+            lines.append("    " * depth + " ".join(words) + ";")
+            words = []
+        elif kind == "{":
+            lines.append("    " * depth + " ".join(words) + " {")
+            words = []
+            depth += 1
+        else:
+            assert not words and depth > 0, "} посреди директивы или лишняя"
+            depth -= 1
+            lines.append("    " * depth + "}")
+    assert not words and depth == 0, "директива или блок не закрыты"
+    return "\n".join(lines) + "\n"
+
+
+class Directive(NamedTuple):
+    """Директива дерева конфигурации: значения слов (имя и аргументы) и вложенный блок."""
+
+    words: tuple[str, ...]
+    block: tuple[Directive, ...] | None
+
+
+def _tree(text: str) -> tuple[Directive, ...]:
+    """Дерево директив файла по токенам nginx."""
+    stack: list[list[Directive]] = [[]]
+    heads: list[tuple[str, ...]] = []
+    words: list[str] = []
+    for kind, value, _raw in _nginx_tokens(text):
+        if kind == "word":
+            words.append(value)
+        elif kind == ";":
+            stack[-1].append(Directive(tuple(words), None))
+            words = []
+        elif kind == "{":
+            heads.append(tuple(words))
+            stack.append([])
+            words = []
+        else:
+            body = stack.pop()
+            stack[-1].append(Directive(heads.pop(), tuple(body)))
+    assert len(stack) == 1 and not words, "директива или блок не закрыты"
+    return tuple(stack[0])
+
+
+def _walk(
+    tree: tuple[Directive, ...], context: tuple[tuple[str, ...], ...] = ()
+) -> list[tuple[tuple[tuple[str, ...], ...], Directive]]:
+    """Все директивы дерева с цепочкой заголовков блоков, внутри которых они стоят."""
+    found: list[tuple[tuple[tuple[str, ...], ...], Directive]] = []
+    for directive in tree:
+        found.append((context, directive))
+        if directive.block is not None:
+            found += _walk(directive.block, (*context, directive.words))
+    return found
+
+
+def _nginx_tree() -> tuple[Directive, ...]:
+    return _tree(NGINX_CONF.read_text(encoding="utf-8"))
+
+
+def _server_tree(tree: tuple[Directive, ...], port: str) -> tuple[Directive, ...]:
+    """Блок единственного server, слушающего порт (в любой записи адреса)."""
+    (http,) = [d for d in tree if d.words == ("http",)]
+    assert http.block is not None
+    listen = re.compile(rf"(?:[\w.:\[\]*]*:)?{port}")
+    found = [
+        d.block
+        for d in http.block
+        if d.words == ("server",)
+        and d.block is not None
+        and any(e.words[:1] == ("listen",) and listen.fullmatch(e.words[1]) for e in d.block)
+    ]
+    assert len(found) == 1, f"ровно один server слушает {port}"
+    return found[0]
 
 
 def _mask_strings(text: str) -> str:
     """Тот же текст той же длины, где содержимое строк в кавычках заменено пробелами: слово
     ``server`` и скобки внутри значения (``add_header X "server {"``, регулярный матчер
-    ``location ~ "^/x\\{2\\}$"``) не образуют блоков и не обрывают их. Позиции, найденные по
-    маске, применяются к исходному тексту."""
+    ``location ~ "^/x\\{2\\}$"``) не образуют блоков и не обрывают их. Строку открывает кавычка
+    только в начале слова, как у nginx: кавычка в середине слова (``a"``) — буква значения, и
+    маска по ней спрятала бы от стражей всё до следующей кавычки — например, location со своим
+    ``proxy_set_header`` (роаст 001.25, раунд 9). Позиции, найденные по маске, применяются к
+    исходному тексту."""
     out: list[str] = []
     i, quote = 0, None
     while i < len(text):
@@ -79,7 +223,7 @@ def _mask_strings(text: str) -> str:
             if char == quote:
                 quote = None
         else:
-            if char in ("'", '"'):
+            if char in ("'", '"') and (i == 0 or text[i - 1] in " \t\r\n;{}"):
                 quote = char
             out.append(char)
         i += 1
@@ -87,7 +231,7 @@ def _mask_strings(text: str) -> str:
 
 
 def _config() -> str:
-    return _strip_comments(NGINX_CONF.read_text(encoding="utf-8"))
+    return _canonical(NGINX_CONF.read_text(encoding="utf-8"))
 
 
 def _block_end(masked: str, start: int) -> int:
@@ -165,7 +309,8 @@ ENROLL_PATH = "/agent/v1/enroll"
 
 def _map_rules(http_level: str, source: str, variable: str) -> tuple[str, list[tuple[str, str]]]:
     """Правила ``map <source> <variable> { … }``: значение по умолчанию и пары (шаблон, значение)
-    в порядке объявления. Источник и переменная — литералами, как в файле."""
+    в порядке объявления. Источник и переменная — литералами, как в канонической записи
+    (``_canonical``: без кавычек, если они не нужны)."""
     header = re.compile(rf"map\s+{re.escape(source)}\s+{re.escape(variable)}\s*\{{")
     found = header.search(http_level)
     assert found is not None, (source, variable)
@@ -230,6 +375,28 @@ def test_the_proxy_configuration_is_one_file_and_its_parser_survives_quoted_brac
     assert _server_by_listen("server { listen *:9 ssl; } server { listen 8; }", "9").strip() == (
         "listen *:9 ssl;"
     )
+    # Разбор словами, как nginx: кавычки, которые не нужны, снимаются (`set "$x" 0` — тот же
+    # `set $x 0`), нужные остаются; `#` в середине слова — не комментарий; `${x}` блока не
+    # открывает; `}` внутри слова его не обрывает; экранирования — по правилу nginx.
+    assert _canonical("set \"$Uri_Has_Control\" '0'; # c\nset $a b#c;") == (
+        "set $Uri_Has_Control 0;\nset $a b#c;\n"
+    )
+    assert _canonical('add_header X "a b"; return 200 "ok\\n"; set $b ${a}x}; set $c "";') == (
+        'add_header X "a b";\nreturn 200 "ok\\n";\nset $b ${a}x};\nset $c "";\n'
+    )
+    assert _tree('if ($x ~ "^a b$") { return 404; }') == (
+        Directive(("if", "($x", "~", "^a b$", ")"), (Directive(("return", "404"), None),)),
+    )
+    assert _tree('map "$a" "$B" { "x\\"y" 1; }')[0].words == ("map", "$a", "$B")
+    # `${` признак переменной не сбрасывает — `${{a}` одно слово, как у nginx; за закрывающей
+    # кавычкой nginx требует пробел, `;`, `{` или `)`; кавычка в середине слова — буква, и маска
+    # строк по ней location не прячет (роаст 001.25, раунд 9).
+    assert [value for _, value, _ in _nginx_tokens("set $x ${{a};")] == ["set", "$x", "${{a}", ";"]
+    with pytest.raises(AssertionError, match="за кавычкой"):
+        _nginx_tokens('add_header X "a"b;')
+    assert [value for _, value, _ in _nginx_tokens('if ($x = "a") {')][-3:] == ["a", ")", "{"]
+    hidden = 'add_header X-A a"; location = /x { proxy_pass $api; } add_header X-B b";'
+    assert [matcher for matcher, _ in _locations(hidden)] == ["= /x"], "кавычка в слове — буква"
 
 
 def test_nginx_overwrites_forwarded_headers() -> None:
@@ -237,7 +404,7 @@ def test_nginx_overwrites_forwarded_headers() -> None:
     X-Forwarded-Proto — $scheme или https, дополнения $proxy_add_x_forwarded_for нет; в каждом
     из трёх server, проксирующих на api, полный набор задан на уровне server, а внутри location
     нет ни одного proxy_set_header — одна такая директива в location отменяет весь набор уровня
-    server (наследование nginx), включая обнуление X-Client-Fingerprint."""
+    server (наследование nginx), включая обнуление X-Client-Cert."""
     text = _config()  # без комментариев
     assert "$proxy_add_x_forwarded_for" not in text, "дополнение цепочки XFF — подделка адреса"
     forwarded_for = re.findall(r"proxy_set_header\s+X-Forwarded-For\s+([^;]+);", text)
@@ -257,42 +424,188 @@ def test_nginx_overwrites_forwarded_headers() -> None:
             )
 
 
+# Директивы, которые подменяют адрес клиента ($remote_addr) значением заголовка или PROXY.
+REAL_IP_DIRECTIVES = {"set_real_ip_from", "real_ip_header", "real_ip_recursive", "proxy_protocol"}
+
+
+def test_the_client_address_is_the_connection_peer() -> None:
+    """``$remote_addr`` — адрес TCP-соединения: на нём стоят ``X-Forwarded-For`` и ``X-Real-IP``
+    для апстрима (``enrolled_from`` identity, который администратор сверяет перед подтверждением
+    ноды, — UC-01 шаг 6; адрес в пределах приложения) и зоны enrollment по
+    ``$binary_remote_addr``. Модуль realip (``set_real_ip_from``, ``real_ip_header``,
+    ``real_ip_recursive``) и ``proxy_protocol`` в ``listen`` подменили бы его значением
+    заголовка клиента или заголовка PROXY: держатель утёкшего bootstrap-токена обменял бы его
+    откуда угодно с адресом VPS ноды в заголовке, а пределы по адресу стали бы пределами по
+    значению заголовка (роаст 001.25, раунд 8). Переменных адреса из заголовков в файле нет.
+    Балансировщик перед прокси (001.66) — со своим списком доверенных адресов и своим стражем."""
+    for context, directive in _walk(_nginx_tree()):
+        assert directive.words[0] not in REAL_IP_DIRECTIVES, (context, directive.words)
+        if directive.words[0] == "listen":
+            assert "proxy_protocol" not in directive.words[1:], (context, directive.words)
+    text = _config()
+    for variable in (
+        "$proxy_protocol_addr",
+        "$realip_remote_addr",
+        "$http_x_forwarded_for",
+        "$http_x_real_ip",
+        "$http_forwarded",
+    ):
+        assert variable not in text, variable
+
+
+# Другие серверы приложения: запуск ими прошёл бы мимо разбора строк uvicorn ниже.
+OTHER_APP_SERVERS = re.compile(r"\b(?:gunicorn|hypercorn|granian|daphne|waitress)\b")
+
+
+def _uvicorn_launch_lines() -> tuple[str, list[str]]:
+    """Точка входа с продолжениями строк (обратная косая черта), склеенными в одну, и каждая её
+    строка, где стоит слово ``uvicorn`` (кроме комментариев): новая ветка запуска с другим
+    порядком аргументов из разбора не выпадает (роаст 001.25, раунд 9)."""
+    text = ENTRYPOINT.read_text(encoding="utf-8").replace("\\\n", " ")
+    code = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    assert not [line for line in code if OTHER_APP_SERVERS.search(line)], "другой сервер"
+    lines = [line for line in code if re.search(r"\buvicorn\b", line)]
+    assert len(lines) == 2, ("ветки --reload и --workers", lines)
+    return text, lines
+
+
+def _uvicorn_launches() -> list[dict[str, Any]]:
+    """Опции каждой строки запуска api так, как их прочтёт uvicorn: разбор его собственной
+    командой click (последнее вхождение опции побеждает, записи ``--opt value`` и ``--opt=value``,
+    пары флагов ``--x``/``--no-x``), без переменных окружения и без приведения типов."""
+    command = sys.modules["uvicorn.main"].main
+    launches = []
+    for line in _uvicorn_launch_lines()[1]:
+        words = shlex.split(line)
+        argv = words[words.index("uvicorn") + 1 :]
+        opts, rest, _order = command.make_parser(click.Context(command)).parse_args(args=argv)
+        assert rest == [], (line, rest)
+        assert opts.get("app") == "app.main:create_app" and opts.get("factory") is True, opts
+        launches.append(opts)
+    return launches
+
+
 def test_uvicorn_trusts_only_overwritten_headers() -> None:
     """Обе ветки запуска api передают --proxy-headers --forwarded-allow-ips '*' (заголовки
     принимаются только потому, что nginx их перезаписывает — см. тест выше)."""
-    # Команда со строками-продолжениями (обратный слэш) склеивается в один оператор.
-    text = ENTRYPOINT.read_text(encoding="utf-8").replace("\\\n", " ")
-    launches = [line for line in text.splitlines() if "uvicorn app.main:create_app" in line]
-    assert len(launches) == 2, "ветки --reload и --workers"
-    for line in launches:
-        assert "--proxy-headers" in line and "--forwarded-allow-ips '*'" in line, line
+    for opts in _uvicorn_launches():
+        assert opts.get("proxy_headers") is True, opts
+        assert opts.get("forwarded_allow_ips") == "*", opts
 
 
-def test_the_fingerprint_header_is_set_by_the_proxy_and_never_by_the_client() -> None:
-    """Единственное, что делает ``X-Client-Fingerprint`` пригодным как признак identity, — три
-    директивы в этом файле: агентский ``server`` перезаписывает его сертификатом клиента,
-    публичный и enrollment обнуляют. Снять или подменить любую — и заголовок становится
-    клиентским, то есть любая нода с валидным сертификатом объявляет себя любой другой
-    (§7.1, `app/agent_api/deps.py::current_node`). Правило держалось на обещании в докстринге
-    соседнего теста, а не на ассерте."""
-    text = _config()
-    assert "$http_x_client_fingerprint" not in text, (
-        "значение заголовка от клиента не попадает в апстрим ни на одном server"
+# Ключи окружения образа (ENV Dockerfile): ни одного UVICORN_*.
+IMAGE_ENV = {
+    "PYTHONUNBUFFERED",
+    "PYTHONDONTWRITEBYTECODE",
+    "PIP_DISABLE_PIP_VERSION_CHECK",
+    "PIP_NO_CACHE_DIR",
+}
+
+
+def test_uvicorn_writes_no_access_log() -> None:
+    """Н-25: access-log uvicorn пишет строку запроса целиком — ``GET /s/<токен>`` ложился в журнал
+    контейнера api (стенд, роаст 001.25, раунд 6). Журнал запросов ведёт nginx, где путь /s/
+    исключён. Строка запуска — единственный источник конфигурации uvicorn: в обеих ветках
+    последнее слово за ``--no-access-log``, ``--ws none`` (строки рукопожатия WebSocket
+    uvicorn пишет с путём мимо access-log — раунд 7) и ``--log-level info`` (уровень ``trace``
+    включает журнал сообщений ASGI, ``Started scope=…`` с путём); своей конфигурации журналов
+    (``--log-config``) и файла окружения (``--env-file``) нет. Строка разбирается командой
+    click самого uvicorn — ``--ws none --ws=websockets`` и ``--log-config=…`` видны так, как
+    их прочтёт он. Опции, которых в строке нет, uvicorn взял бы из ``UVICORN_*`` окружения
+    (``auto_envvar_prefix``), а ``.env`` оператора роли приложения получают целиком: точка
+    входа снимает все ``UVICORN_*`` до запуска, в Compose, ``.env.example`` и образе их нет, а
+    ``CMD`` образа (точка входа исполнила бы его вместо роли) не задан (роаст 001.25, раунд 8).
+    ``--lifespan on``: пару CA проверяет lifespan приложения, и с ``off`` api стартовал бы
+    здоровым с негодным CA; инструкции ``Dockerfile`` — без учёта регистра, как их читает
+    Docker (``cmd`` — тот же ``CMD``; раунд 9)."""
+    for opts in _uvicorn_launches():
+        assert opts.get("access_log") is False, opts
+        assert opts.get("ws") == "none", opts
+        assert opts.get("log_level") == "info", opts
+        assert opts.get("lifespan") == "on", opts
+        assert opts.get("log_config") is None and opts.get("env_file") is None, opts
+    joined, launch_lines = _uvicorn_launch_lines()
+    strip = [line for line in joined.splitlines() if "unset" in line and "UVICORN_" in line]
+    assert len(strip) == 1, strip
+    assert all(joined.index(strip[0]) < joined.index(line) for line in launch_lines), (
+        "снять до запуска"
     )
-    expected = {"8443": "$ssl_client_fingerprint", "443": '""', "8444": '""'}
+    shown = subprocess.run(  # noqa: S603 - строка самой точки входа
+        ["/bin/sh", "-c", f"{strip[0].strip()}\nenv"],
+        env={"PATH": "/usr/bin:/bin", "UVICORN_LOG_LEVEL": "trace", "UVICORN_WS": "auto"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "UVICORN_" not in shown and "PATH=" in shown, shown
+    compose, overlays = _compose_files()
+    for path in (compose, *overlays):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for name, service in (document.get("services") or {}).items():
+            environment = service.get("environment") or {}
+            keys = (
+                list(environment)
+                if isinstance(environment, dict)
+                else [entry.split("=", 1)[0] for entry in environment]
+            )
+            assert not [key for key in keys if key.upper().startswith("UVICORN_")], (path, name)
+    example = (COMPOSE_DIR / ".env.example").read_text(encoding="utf-8")
+    active = [line for line in example.splitlines() if line.strip() and not line.startswith("#")]
+    assert not [line for line in active if line.upper().startswith("UVICORN_")], active
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8").replace("\\\n", " ")
+    instructions = [line.split(None, 1) for line in dockerfile.splitlines() if line.strip()]
+    instructions = [
+        [words[0].upper(), *words[1:]] for words in instructions if not words[0].startswith("#")
+    ]
+    assert [w[1].strip() for w in instructions if w[0] == "ENTRYPOINT"] == [
+        '["docker-entrypoint.sh"]'
+    ]
+    assert not [w for w in instructions if w[0] == "CMD"], "CMD исполнился бы вместо роли"
+    env_keys = {
+        pair.split("=", 1)[0]
+        for words in instructions
+        if words[0] == "ENV"
+        for pair in words[1].split()
+    }
+    assert env_keys == IMAGE_ENV, env_keys
+
+
+def test_the_certificate_header_is_set_by_the_proxy_and_never_by_the_client() -> None:
+    """Единственное, что делает ``X-Client-Cert`` пригодным как признак identity, — три
+    директивы в этом файле: агентский ``server`` перезаписывает его сертификатом, который сам
+    проверил по CA (``$ssl_client_escaped_cert``), публичный и enrollment обнуляют. Снять или
+    подменить любую — и заголовок становится клиентским, то есть держатель любого сертификата
+    CA (или вовсе без него — через публичный server) объявляет себя любой нодой (§7.1,
+    `app/agent_api/deps.py::presented_identity`). Прежний заголовок ``X-Client-Fingerprint``
+    (SHA-1) приложением не читается с 001.25 и не передаётся ни на одном server: оставшийся, он
+    выглядел бы признаком identity, которым не является."""
+    text = _config()
+    for header in ("$http_x_client_cert", "$http_x_client_fingerprint"):
+        assert header not in text, (header, "значение от клиента не уходит в апстрим")
+    expected = {"8443": "$ssl_client_escaped_cert", "443": '""', "8444": '""'}
     for port, value in expected.items():
         block = _server_by_listen(text, port)
-        found = re.findall(r"proxy_set_header\s+X-Client-Fingerprint\s+(\S+);", block)
+        found = re.findall(r"proxy_set_header\s+X-Client-Cert\s+(\S+);", block)
         assert found == [value], (port, found)
+        assert "X-Client-Fingerprint" not in block, port
     # Отпечаток осмыслен ровно настолько, насколько доверен якорь, по которому прокси проверяет
     # сертификат: подменённый ``ssl_client_certificate`` оставил бы всю схему на месте, только
-    # доверять она стала бы другому CA. Глубина 1 — только листовые сертификаты, подписанные
-    # этим CA напрямую: при глубине 2 нода с листом без CA:FALSE подписывала бы себе «сиблингов»
-    # и множила отпечатки — ключи всех зон по сертификату.
+    # доверять она стала бы другому CA. Глубина 0 — только лист, подписанный этим CA напрямую: в
+    # OpenSSL глубина считает промежуточных CA, и уже 1 пропускала бы одного — нода с листом,
+    # способным подписывать, выпускала бы себе «сиблингов» и множила серийные номера, ключи всех
+    # зон по сертификату (роаст 001.25, раунд 3: в раундах 1–2 здесь стояла 1).
     agent = _server_by_listen(text, "8443")
     assert re.findall(r"ssl_client_certificate\s+(\S+);", agent) == ["/etc/nginx/certs/ca.crt"]
     assert re.findall(r"ssl_verify_client\s+(\S+);", agent) == ["on"], "не optional"
-    assert re.findall(r"ssl_verify_depth\s+(\d+);", agent) == ["1"]
+    assert re.findall(r"ssl_verify_depth\s+(\d+);", agent) == ["0"]
+    # Якорь проверки клиента задают не только ``ssl_client_certificate``: nginx проверяет
+    # клиентский сертификат и по ``ssl_trusted_certificate`` (уровень http наследуется), OpenSSL —
+    # и по ``ssl_conf_command VerifyCAFile``. Типовой фрагмент OCSP stapling публичного server
+    # (001.66) на уровне http молча добавил бы якорю агентского порта чужую пачку CA (роаст 001.25,
+    # раунд 4) — поэтому ни того, ни другого нет ни на уровне http, ни на агентском server.
+    for scope, block in (("http", _without_blocks(text, "server")), ("8443", agent)):
+        assert "ssl_trusted_certificate" not in block, (scope, "второй якорь клиента")
+        assert "ssl_conf_command" not in block, (scope, "VerifyCAFile — второй якорь клиента")
 
 
 def test_agent_server_holds_long_poll_longer_than_the_application_does() -> None:
@@ -338,19 +651,20 @@ def test_enrollment_is_served_only_by_its_own_server() -> None:
     )
     for matcher, body in _locations(enrollment):
         if matcher != f"= {ENROLL_PATH}":
-            # Всё прочее закрыто: 404, а именованные location отказов прокси — 429, 411 и 503
-            # без апстрима.
+            # Всё прочее закрыто: 404, служебные location и именованные location отказов прокси
+            # — 411, 413, 429 и 503 без апстрима.
             assert "proxy_pass" not in body and re.search(
-                r"return\s+(404|411|429|503)\b|try_files\s+\S+\s+=404;", body
+                r"return\s+(404|411|413|429|503)\b|try_files\s+\S+\s+=(404|411|413);", body
             ), (
                 matcher,
                 body,
             )
 
     agent_enroll = [b for m, b in _locations(agent) if m == f"= {ENROLL_PATH}"]
-    assert len(agent_enroll) == 1 and "return 404" in agent_enroll[0], (
-        "агентский server обязан отдавать 404 на enrollment, а не проксировать его"
+    assert len(agent_enroll) == 1 and "try_files /nonexistent =404;" in agent_enroll[0], (
+        "агентский server обязан отдавать 404 на enrollment — через try_files, после пределов"
     )
+    assert "return" not in agent_enroll[0], "return исполняется до пределов (роаст 001.25, раунд 3)"
     assert "proxy_pass" not in agent_enroll[0]
 
     # Публичный server закрывает Node API положительно: точный `/agent` и префикс `^~ /agent/`
@@ -369,6 +683,16 @@ def test_enrollment_is_served_only_by_its_own_server() -> None:
 
 
 REPORTS_PATH = "/agent/v1/reports"
+# Служебные пути отказов после пределов (роаст 001.25, раунды 3–4): тело без длины и тело длиннее
+# предела location переводятся сюда `rewrite` в фазе SERVER_REWRITE, решение даёт try_files.
+LENGTH_REQUIRED_PATH = "/__length_required"
+TOO_LARGE_PATH = "/__too_large"
+# Путь с управляющими символами уходит сюда первым правилом server Node API — в служебный
+# location 404 без предела тела (404 через try_files, после пределов): с пределом тело длиннее
+# 64k отвергла бы FIND_CONFIG до пределов (стенд, раунд 6: 40 × 413 без 429).
+NOT_FOUND_PATH = "/__not_found"
+# Управляющие символы (C0 и DEL) в декодированном пути — входы для карты $uri_has_control.
+CONTROL_CHARACTERS = [chr(code) for code in (*range(0x20), 0x7F)]
 BODY_LIMIT = re.compile(r"client_max_body_size\s+(\S+);")
 BODY_BUFFER = re.compile(r"client_body_buffer_size\s+(\S+);")
 # Полоса между самым большим допустимым телом и пределом прокси: тела в ней приложение читает —
@@ -448,7 +772,9 @@ def test_agent_server_does_not_accept_report_sized_bodies_everywhere() -> None:
     assert "proxy_pass $api;" in reports, "location отчётов проксирует на api, не на чужой апстрим"
     assert BODY_LIMIT.findall(reports) == ["1m"], "предел отчётов — литерал 001.33"
     for matcher, body in _locations(agent):
-        if matcher != f"= {REPORTS_PATH}":
+        # Служебные location 413 и 404 снимают предел ради своего назначения — их тела сверены
+        # равенством стражами 413 и отказов после пределов.
+        if matcher not in (f"= {REPORTS_PATH}", f"= {TOO_LARGE_PATH}", f"= {NOT_FOUND_PATH}"):
             assert not BODY_LIMIT.search(body), (matcher, "предел поднят только для отчётов")
     for port in ("443", "8444"):
         for matcher, _ in _locations(_server_by_listen(text, port)):
@@ -478,8 +804,10 @@ def test_agent_server_does_not_accept_report_sized_bodies_everywhere() -> None:
 def test_the_reports_location_bounds_concurrency_and_rate_per_certificate() -> None:
     """Предел тела без предела одновременности — умножение: тело читается до identity, и
     держатель любого сертификата CA (в том числе с отозванной identity — nginx до 001.25 её не
-    знает) оплачивался бы приложением без ограничений. Зоны — по отпечатку клиентского
-    сертификата (единственный признак, который прокси знает без базы) и общие на парк с
+    знает) оплачивался бы приложением без ограничений. Зоны — по серийному номеру клиентского
+    сертификата (признак, который прокси знает без базы; не отпечаток — у податливой подписи
+    ECDSA держатель листа получает близнеца с другим отпечатком и тем же серийным номером,
+    роаст 001.25, ``test_every_leaf_has_a_twin_that_differs_only_in_its_bytes``) и общие на парк с
     постоянным ключом (``$server_name`` у всех трёх server — ``_``, и та же зона на другом
     server делила бы ведро с парком); значения — литералами. `limit_conn` не наследуется
     location, объявившим свой, поэтому предел соединений ноды обязан быть повторён в location
@@ -494,17 +822,17 @@ def test_the_reports_location_bounds_concurrency_and_rate_per_certificate() -> N
     http_level = _without_blocks(text, "server")
     zones = re.findall(r"limit_conn_zone\s+(\S+)\s+zone=(\w+):(\w+);", http_level)
     assert zones == [
-        ("$ssl_client_fingerprint", "agent_conn", "1m"),
-        ("$ssl_client_fingerprint", "agent_report_conn", "1m"),
-        ('"agent"', "agent_report_total", "1m"),
+        ("$ssl_client_serial", "agent_conn", "1m"),
+        ("$ssl_client_serial", "agent_report_conn", "1m"),
+        ("agent", "agent_report_total", "1m"),
         ("$binary_remote_addr", "enroll_conn_addr", "1m"),
     ], zones
     assert re.findall(r"limit_req_zone\s+(\S+)\s+zone=(\w+):\w+\s+rate=(\S+);", http_level) == [
-        ("$ssl_client_fingerprint", "agent_report_rate", "2r/s"),
-        ("$ssl_client_fingerprint", "agent_rate", "5r/s"),
-        ('"agent"', "agent_fleet_rate", "15r/s"),
+        ("$ssl_client_serial", "agent_report_rate", "2r/s"),
+        ("$ssl_client_serial", "agent_rate", "5r/s"),
+        ("agent", "agent_fleet_rate", "15r/s"),
         ("$binary_remote_addr", "enroll_addr_rate", "1r/s"),
-        ('"enroll"', "enroll_fleet_rate", "2r/s"),
+        ("enroll", "enroll_fleet_rate", "2r/s"),
     ]
     agent = _server_by_listen(text, "8443")
     server_level = _without_blocks(agent, "location")
@@ -565,8 +893,8 @@ def test_the_reports_location_bounds_concurrency_and_rate_per_certificate() -> N
         }
     )
     expected_keys = {
-        "8443": {"$ssl_client_fingerprint", '"agent"'},
-        "8444": {"$binary_remote_addr", '"enroll"'},
+        "8443": {"$ssl_client_serial", "agent"},
+        "8444": {"$binary_remote_addr", "enroll"},
     }
 
     def effective(server: str, body: str) -> set[str]:
@@ -585,7 +913,7 @@ def test_the_reports_location_bounds_concurrency_and_rate_per_certificate() -> N
         assert any("proxy_pass" in b for _, b in located), port
         for matcher, body in located:
             assert effective(server, body) == keys, (port, matcher, effective(server, body))
-    # Зоны — только на своём server: по отпечатку сертификата на server без mTLS они пусты и
+    # Зоны — только на своём server: по серийному номеру сертификата на server без mTLS они пусты и
     # молча ничего не ограничат, зоны enrollment на агентском делили бы ведро с анонимами. Все
     # server файла, включая служебный (8081), — по объявленным на http именам зон.
     agent_zones = {name for name in key_of if name.startswith("agent_")}
@@ -617,9 +945,24 @@ def test_the_reports_location_bounds_concurrency_and_rate_per_certificate() -> N
 # ключей) стоит `MEASURED_HEARTBEAT_JUNK_P95_MS` (200 замеров), результат команды с бюджетом
 # свободного текста `error` (2 000 лишних ключей доходят до pydantic) —
 # `MEASURED_COMMAND_RESULT_JUNK_P95_MS` (закрытие, 200 замеров) — самая дорогая из остальных
-# операций, то же на enrollment-server — `MEASURED_ENROLL_JUNK_P95_MS` (60 замеров; заглушка без
-# подписи CSR — перемер в 001.25; в раундах 6–7 без проверки формы те же тела стоили 13…24 мс, и
-# частоту парка резали до 8 r/s).
+# операций, то же на enrollment-server — `MEASURED_ENROLL_JUNK_P95_MS` (60 замеров, путь отказа по
+# форме; в раундах 6–7 без проверки формы те же тела стоили 13…24 мс, и частоту парка резали до
+# 8 r/s). Enrollment с 001.25 настоящий — отказ по токену (запрос в базу), приём (транзакция и
+# подпись листа), приём CSR на пределе `CSR_MAX_CHARS` и отказ CA с годным токеном (CSR на пределе
+# с ключом RSA-16384). Консервативная оценка занятости цикла событий одной такой операцией —
+# стенка запроса в процессе api стенда (`MEASURED_ENROLL_WALL_P95_MS`, вызов ASGI без сети,
+# `tests/stand/enrollment_cpu.py`: работа приложения вместе с ожиданием базы, которое цикл не
+# занимает) плюс накладные HTTP и прокси, которых вызов в процессе не несёт, — их оценивает `urt`
+# контрольного пути на тихом стенде (`MEASURED_ENROLL_JUNK_P95_MS`: отказ по форме, код не менялся
+# с 001.33, тело 64 КиБ — шире любого тела обмена). Это сумма p95 двух разных прогонов — оценка, а
+# не граница (p95 суммы она не ограничивает; роаст 001.25, раунд 3). `urt` самих путей через nginx
+# на VM сегодня меряет среду (контроль той же серии — 10…35 мс против 2): p95 каждого пути,
+# приведённый контролем своей серии (`p95 × MEASURED_ENROLL_JUNK_P95_MS / p95 контроля`,
+# `MEASURED_ENROLL_URT_P95_MS`, `tests/stand/enrollment_timing.py` — он повторяет режимы порядка и
+# выдачи токенов раунда 1), — сверка: при аддитивном фоне приведение занижает дорогой путь (роаст
+# 001.25, раунд 2), поэтому она может только поднять константу. Константа — наибольшее из оценки и
+# приведённых значений с округлением вверх; процессорное время (`MEASURED_ENROLL_CPU_P95_MS`) не
+# больше стенки ни на одном пути.
 # Операции остальных видов входят в бюджет отчёта не одной штукой, а всеми, что прокси
 # пропускает за окно разбора двух частей, по обеим зонам — парка (`agent_fleet_rate`) и
 # enrollment (`enroll_fleet_rate`, тот же цикл событий): очередь выдаёт их равномерно, цикл
@@ -642,8 +985,37 @@ MEASURED_REPORT_WORST_FAILURE_P95_MS = 37
 MEASURED_HEARTBEAT_JUNK_P95_MS = 2
 MEASURED_COMMAND_RESULT_JUNK_P95_MS = 4
 MEASURED_ENROLL_JUNK_P95_MS = 2
+# p95 `urt` через nginx стенда, мс (001.25): контроль `junk` и пути той же серии.
+MEASURED_ENROLL_URT_P95_MS: dict[str, dict[str, float]] = {
+    "раунд 1, подряд": {"junk": 35, "token": 47, "accept": 24},
+    "раунд 1, по кругу": {"junk": 35, "token": 67, "accept": 25},
+    "раунд 1, по кругу, токены заранее": {"junk": 33, "token": 53, "accept": 98},
+    "раунд 2, по кругу, пять путей": {
+        "junk": 10,
+        "token": 21,
+        "accept": 57,
+        "accept_wide": 36,
+        "refusal_wide": 19,
+    },
+}
+# Запрос в процессе api стенда, p95, мс: процессорное время и стенка — замер на коде раунда 3
+# 001.25 (отметка аннулирования, условное погашение, серийный номер листа).
+MEASURED_ENROLL_CPU_P95_MS = {
+    "junk": 0.39,
+    "token": 1.13,
+    "accept": 1.96,
+    "accept_wide": 1.90,
+    "refusal_wide": 1.52,
+}
+MEASURED_ENROLL_WALL_P95_MS = {
+    "junk": 0.39,
+    "token": 1.41,
+    "accept": 3.56,
+    "accept_wide": 2.65,
+    "refusal_wide": 1.91,
+}
 H4_OTHER_OPERATION_MS = 4
-H4_ENROLL_OPERATION_MS = 2
+H4_ENROLL_OPERATION_MS = 12
 H4_TRANSACTION_ALLOWANCE_MS = 50
 H4_TRANSACTION_ALLOWANCE_FLOOR_MS = 50
 H4_OTHER_LOAD_SHARE = 0.25
@@ -693,7 +1065,27 @@ def test_the_fleet_ceiling_keeps_the_parse_budget_of_h4() -> None:
     assert H4_OTHER_OPERATION_MS == max(
         MEASURED_HEARTBEAT_JUNK_P95_MS, MEASURED_COMMAND_RESULT_JUNK_P95_MS
     ), "самая дорогая из остальных операций — результат команды с бюджетом свободного текста"
-    assert H4_ENROLL_OPERATION_MS == MEASURED_ENROLL_JUNK_P95_MS
+    # Enrollment: консервативная оценка — стенка в процессе самого дорогого пути плюс накладные
+    # HTTP и прокси (тихий `urt` контроля); приведённый `urt` серий — сверка, которая может только
+    # поднять константу (001.33 требовала: дорогой путь — в гейт).
+    measured_paths = {path for paths in MEASURED_ENROLL_URT_P95_MS.values() for path in paths}
+    assert measured_paths == set(MEASURED_ENROLL_WALL_P95_MS) == set(MEASURED_ENROLL_CPU_P95_MS), (
+        "каждый путь мерен и через nginx, и в процессе"
+    )
+    assert all(
+        MEASURED_ENROLL_CPU_P95_MS[path] <= MEASURED_ENROLL_WALL_P95_MS[path]
+        for path in measured_paths
+    ), "процессорное время не больше стенки того же замера"
+    estimate_ms = max(MEASURED_ENROLL_WALL_P95_MS.values()) + MEASURED_ENROLL_JUNK_P95_MS
+    normalized = {
+        (series, path): p95 * MEASURED_ENROLL_JUNK_P95_MS / paths["junk"]
+        for series, paths in MEASURED_ENROLL_URT_P95_MS.items()
+        for path, p95 in paths.items()
+    }
+    enroll_ms = max(estimate_ms, *normalized.values())
+    assert enroll_ms <= H4_ENROLL_OPERATION_MS < enroll_ms + 1, (
+        "стоимость enrollment в гейте — вывод из замеров с округлением вверх, не число из головы"
+    )
     assert MEASURED_REPORT_WORST_FAILURE_P95_MS <= MEASURED_P95_MS, (
         "путь отказа отчёта дороже пути приёма — стоимость части считать по отказу"
     )
@@ -735,7 +1127,8 @@ def test_the_upstream_time_reading_of_h4_rests_on_request_buffering() -> None:
     гейта мерили бы сеть. Оба умолчания nginx объявлены явно на уровне http и нигде не
     переопределены; ответ сверх буферов уходит во временный файл на tmpfs не больше
     `proxy_max_temp_file_size` (литерал; запрет файлов раунда 7 держал апстрим на скорости
-    клиента — снят решением заказчика); ошибки апстрима не перехватываются
+    клиента — снят решением заказчика; на server Node API он не переопределён, запрет — только
+    в location подписки публичного server, Н-25); ошибки апстрима не перехватываются
     (`proxy_intercept_errors` — 429 приложения дойдут со своим телом); заикание DNS Docker
     ограничено `resolver_timeout`; отказы пределов не пишутся в error.log уровня warn;
     заголовки запроса ждутся не дольше 5 с (`limit_conn` считает запросы в полёте, а
@@ -746,8 +1139,14 @@ def test_the_upstream_time_reading_of_h4_rests_on_request_buffering() -> None:
     for directive in ("proxy_request_buffering", "proxy_buffering"):
         assert re.findall(rf"{directive}\s+(\w+);", text) == ["on"], (directive, "один раз, on")
         assert re.findall(rf"{directive}\s+(\w+);", http_level) == ["on"], (directive, "http")
-    assert re.findall(r"proxy_max_temp_file_size\s+(\S+);", text) == ["8m"]
     assert re.findall(r"proxy_max_temp_file_size\s+(\S+);", http_level) == ["8m"]
+    for port in ("8443", "8444"):
+        server = _server_by_listen(text, port)
+        assert "proxy_max_temp_file_size" not in server, (port, "Н-4: не переопределён")
+    public = _server_by_listen(text, "443")
+    assert re.findall(r"proxy_max_temp_file_size\s+(\S+);", public) == ["0"], "только /s/"
+    subscription = dict(_locations(public))["^~ /s/"]
+    assert "proxy_max_temp_file_size 0;" in subscription
     assert "proxy_intercept_errors" not in text, "429 и 4xx приложения проходят со своим телом"
     assert re.findall(r"resolver_timeout\s+(\S+);", http_level) == ["5s"]
     assert re.findall(r"limit_req_log_level\s+(\w+);", http_level) == ["notice"]
@@ -761,14 +1160,19 @@ def test_bodies_without_known_length_are_refused_with_411_on_both_node_api_serve
     """Контракт Node API обещает `Content-Length`; тело без известной длины (chunked, поток
     HTTP/2 без content-length) нужно только враждебному клиенту — с ним прокси держал бы сырой
     поток с обрамлением без верхней границы и писал бы временные файлы. Правило — одна map на
-    уровне http и `if … return 411` на уровне каждого из двух server Node API (не в location:
-    иначе новый location его бы не унаследовал), ответ — единый формат без `Retry-After`
-    (не повторять), через `error_page` уровня server."""
+    уровне http и `if` на уровне каждого из двух server Node API (не в location: иначе новый
+    location его бы не унаследовал); ответ — единый формат без `Retry-After` (не повторять).
+    Сам отказ — не `return 411` в `if` (фаза SERVER_REWRITE, раньше limit_req/limit_conn: на
+    стенде 30 параллельных chunked-запросов получали 30 × 411 без единого 429 — роаст 001.25,
+    раунд 3), а переход в служебный location, где 411 даёт try_files после пределов. Служебный
+    location не `internal`: внешнему запросу к internal location nginx отвечает 404 в фазе
+    FIND_CONFIG — тоже до пределов (стенд: 30 × 404 без 429, раунд 4); внешний запрос проходит
+    пределы и получает 404 единого формата веткой в @length_required."""
     text = _config()
     http_level = _without_blocks(text, "server")
     default, rules = _map_rules(
         http_level,
-        '"$request_method:$content_length:$http_transfer_encoding"',
+        "$request_method:$content_length:$http_transfer_encoding",
         "$body_without_length",
     )
     # Страж подаёт на правила входы, а не сверяет их текст с самим собой: любой метод с
@@ -780,23 +1184,396 @@ def test_bodies_without_known_length_are_refused_with_411_on_both_node_api_serve
     for port in ("8443", "8444"):
         server = _server_by_listen(text, port)
         level = _without_blocks(server, "location")
-        guards = [b for b in _blocks(level, "if") if "return 411" in b]
-        assert len(guards) == 1, (
+        conditions = re.findall(r"if\s*\(\$body_without_length\)\s*\{([^}]*)\}", level)
+        assert [c.strip() for c in conditions] == ["rewrite ^ /__length_required last;"], (
             port,
-            "if ($body_without_length) { return 411; } на уровне server",
+            "if ($body_without_length) { rewrite ^ /__length_required last; } на уровне server",
         )
-        assert re.search(r"if\s*\(\$body_without_length\)\s*\{", level), port
         assert re.findall(r"error_page\s+411\s+=\s+(\S+);", level) == ["@length_required"], port
+        service = dict(_locations(server))["= /__length_required"]
+        assert service.split() == ["try_files", "/nonexistent", "=411;"], (port, service)
         named = [body for matcher, body in _locations(server) if matcher == "@length_required"]
         assert len(named) == 1, port
         assert "default_type application/json;" in named[0]
-        assert f"return 411 '{LENGTH_REQUIRED_BODY}';" in named[0]
+        branches = [
+            (named[0][start + len("if") : open_].strip(), named[0][open_ + 1 : close].strip())
+            for start, open_, close in _spans(named[0], "if")
+        ]
+        assert branches == [("($body_without_length = 0)", f"return 404 '{NOT_FOUND_BODY}';")], (
+            port,
+            branches,
+        )
+        assert f"return 411 '{LENGTH_REQUIRED_BODY}';" in _without_blocks(named[0], "if"), port
         assert "Retry-After" not in named[0], "411 не повторяется"
         for matcher, body in _locations(server):
+            if matcher == "@length_required":
+                continue  # ветка формата ответа — не правило; сверена равенством выше
             assert "$body_without_length" not in body, (port, matcher, "правило — уровня server")
     assert json.loads(LENGTH_REQUIRED_BODY)["error"]["code"] == "length_required"
     public = _server_by_listen(text, "443")
     assert "$body_without_length" not in public, "публичный server: браузеры и chunked — 001.66"
+
+
+def _select_location(server: str, uri: str) -> str:
+    """Матчер location, который nginx выберет для нормализованного пути: точное совпадение, иначе
+    самый длинный префикс (``^~`` и обычный). Регулярных location на server Node API нет — иначе
+    выбор зависел бы от их порядка, и страж длины не знал бы, чей предел действует."""
+    exact, prefixes = None, []
+    for matcher, _ in _locations(server):
+        if matcher.startswith("@"):
+            continue
+        assert not matcher.startswith("~"), (matcher, "регулярный location на Node API")
+        if matcher.startswith("= "):
+            if matcher[2:] == uri:
+                exact = matcher
+        elif uri.startswith(matcher.removeprefix("^~ ")):
+            prefixes.append((len(matcher.removeprefix("^~ ")), matcher))
+    assert exact or prefixes, uri
+    return exact or max(prefixes)[1]
+
+
+def _lengths_around(limits: list[int]) -> list[str]:
+    """Длины для карт по Content-Length: без заголовка, ноль, по обе стороны каждого предела,
+    с ведущими нулями (nginx их принимает) и длиннее любого предела."""
+    lengths = ["", "0", "1", "123456789012345"]
+    for limit in limits:
+        lengths += [str(limit - 1), str(limit), str(limit + 1), f"000{limit}", f"000{limit + 1}"]
+        lengths += [str(limit * 10), "9" * len(str(limit)), "1" + "0" * len(str(limit))]
+    return lengths
+
+
+def test_bodies_over_the_limit_are_refused_with_413_after_the_rate_limits() -> None:
+    """Тело длиннее ``client_max_body_size`` своего location nginx отвергает 413 в фазе FIND_CONFIG
+    — раньше PREACCESS, где стоят limit_req и limit_conn (стенд: 30 параллельных 413 без единого
+    429 и по строке error.log на каждый — роаст 001.25, раунд 4). Поэтому на обоих server Node API
+    длину сверяет карта по Content-Length ещё в фазе SERVER_REWRITE и переводит тело длиннее
+    предела в служебный location без предела тела, где 413 даёт try_files после пределов. Страж
+    выводит пороги из ``client_max_body_size`` каждого location (своего или server) и подаёт на
+    карты таблицу длин по путям, которые nginx отдал бы этому location: решение карты обязано
+    совпасть с тем, отвергла бы тело проверка предела. 413 — страница nginx, как до 001.25
+    (контракт README); прямой запрос к служебному пути (карта длины тело длинным не считает) —
+    404 единого формата, а 413 чтения тела в другом location остаётся 413."""
+    text = _config()
+    http_level = _without_blocks(text, "server")
+    sources = {
+        "$content_length_over_64k": "$content_length",
+        "$content_length_over_1m": "$content_length",
+        "$agent_body_too_large": "$content_length_over_64k:$content_length_over_1m:$uri",
+    }
+    maps = {var: (src, *_map_rules(http_level, src, var)) for var, src in sources.items()}
+    # Прямой запрос на служебный путь 413 (путь /__too_large, а карта длины тело длинным не
+    # считает): 404; переведённому сюда и отказу при чтении тела в других location — 413.
+    direct_default, direct_rules = _map_rules(
+        http_level, "$agent_body_too_large:$uri", "$too_large_requested_directly"
+    )
+    for key, expected in (
+        (f"0:{TOO_LARGE_PATH}", "1"),
+        (f"1:{TOO_LARGE_PATH}", "0"),
+        (f"0:{TOO_LARGE_PATH}/x", "0"),
+        ("0:/agent/v1/heartbeat", "0"),
+        (f"0:{REPORTS_PATH}", "0"),
+    ):
+        assert _map_lookup(direct_default, direct_rules, key) == expected, key
+
+    def evaluate(variable: str, env: dict[str, str]) -> str:
+        source, default, rules = maps[variable]
+        key = re.sub(
+            r"\$\w+",
+            lambda ref: env[ref.group()] if ref.group() in env else evaluate(ref.group(), env),
+            source,
+        )
+        return _map_lookup(default, rules, key)
+
+    # Пути для сверки — от location обоих server и из самих карт: карта, которая на одном server
+    # считает путь особым (отчёты — 1m), на другом отдала бы его location с пределом 64k, и тело
+    # между пределами ушло бы в FIND_CONFIG мимо пределов (путь не обязан существовать на server).
+    servers = {port: _server_by_listen(text, port) for port in ("8443", "8444")}
+    # Путь с управляющим символом сюда не доходит (его перехватывает первое правило server), но
+    # карты сверяются и на нём: конец строки у них — \z, и путь отчётов с \n в конце — не
+    # отчётный location (роаст 001.25, раунд 5: с $ карта считала его отчётным, и 413 решался в
+    # FIND_CONFIG до пределов).
+    uris = {REPORTS_PATH, f"{REPORTS_PATH}/", f"{REPORTS_PATH}\n", f"{REPORTS_PATH}\r"}
+    for server in servers.values():
+        for matcher, _ in _locations(server):
+            if matcher.startswith("= "):
+                uris.add(matcher[2:])
+            elif not matcher.startswith("@"):
+                prefix = matcher.removeprefix("^~ ")
+                uris |= {f"{prefix}state", f"{prefix}x/y"}
+    for port, server in servers.items():
+        level = _without_blocks(server, "location")
+        rules = [
+            (condition, body.strip())
+            for condition, body in re.findall(r"if\s*\((\$\w+)\)\s*\{([^}]*)\}", level)
+        ]
+        too_large = [c for c, body in rules if body == f"rewrite ^ {TOO_LARGE_PATH} last;"]
+        assert len(too_large) == 1 and too_large[0] in maps, (port, rules)
+        variable = too_large[0]
+        assert re.findall(r"error_page\s+413\s+=\s+(\S+);", level) == ["@too_large"], port
+        server_limit = _bytes(BODY_LIMIT.findall(level)[0])
+        limits: dict[str, int] = {}
+        for matcher, body in _locations(server):
+            if matcher.startswith("@") or matcher in (f"= {TOO_LARGE_PATH}", f"= {NOT_FOUND_PATH}"):
+                continue
+            own = BODY_LIMIT.findall(body)
+            limits[matcher] = _bytes(own[0]) if own else server_limit
+        lengths = _lengths_around(sorted({*limits.values(), _bytes("1m")}))
+        for uri in sorted(uris):
+            matcher = _select_location(server, uri)
+            if matcher in (f"= {TOO_LARGE_PATH}", f"= {NOT_FOUND_PATH}"):
+                continue
+            limit = limits[matcher]
+            for length in lengths:
+                expected = "1" if length and int(length) > limit else "0"
+                decided = evaluate(variable, {"$content_length": length, "$uri": uri})
+                assert decided == expected, (port, matcher, uri, length, decided)
+        service = dict(_locations(server))[f"= {TOO_LARGE_PATH}"]
+        assert service.split() == [
+            "client_max_body_size",
+            "0;",
+            "try_files",
+            "/nonexistent",
+            "=413;",
+        ], (port, service)
+        named = [body for matcher, body in _locations(server) if matcher == "@too_large"]
+        assert len(named) == 1, port
+        assert "default_type application/json;" in named[0]
+        branches = [
+            (named[0][start + len("if") : open_].strip(), named[0][open_ + 1 : close].strip())
+            for start, open_, close in _spans(named[0], "if")
+        ]
+        assert branches == [
+            ("($too_large_requested_directly)", f"return 404 '{NOT_FOUND_BODY}';")
+        ], (port, branches)
+        rest = _without_blocks(named[0], "if")
+        assert re.findall(r"\breturn\b[^;]*;", rest) == ["return 413;"], (port, "страница nginx")
+        assert "Retry-After" not in named[0], "413 не повторяется"
+
+
+def test_node_api_refusals_are_decided_after_the_rate_limits() -> None:
+    """На агентском и enrollment-server ни один отказ не решается `return` вне именованных
+    location: `return` исполняется в фазе (SERVER_)REWRITE — раньше PREACCESS, где стоят
+    limit_req и limit_conn, — и `error_page` после него пределов уже не даёт (стенд: 30 × 411 на
+    9444 и 30 × 404 на несуществующий путь без единого 429 — 001.33, роаст 001.25, раунд 3).
+    Отказы решает try_files (фаза PRECONTENT); `return` остаётся только в именованных location,
+    куда error_page приводит уже после решения — там он лишь формирует тело ответа. `internal`
+    тоже нет: внешнему запросу к такому location nginx отвечает 404 в фазе FIND_CONFIG, до
+    пределов (стенд: 30 × 404 без единого 429 — роаст 001.25, раунд 4). В той же фазе nginx
+    отвечает 301 на путь без косой черты, если prefix-location с ``*_pass`` оканчивается на «/»
+    (auto_redirect; стенд: 40 × 301 на `/agent/v1` без единого 429 — роаст 001.25, раунд 4):
+    у каждого такого location есть точный сосед без косой черты с try_files — и у точного
+    location на «/» тоже: auto_redirect ставит `*_pass` любому location, имя которого кончается
+    косой (роаст 001.25, раунд 6). `rewrite` — только переходы в служебные location
+    (`redirect`/`permanent` и абсолютный адрес — ответ в фазе REWRITE)."""
+    text = _config()
+    for port in ("8443", "8444"):
+        server = _server_by_listen(text, port)
+        unnamed = server
+        for matcher, _body in _locations(server):
+            if matcher.startswith("@"):
+                span = next(
+                    (start, close)
+                    for start, open_, close in _spans(unnamed, "location")
+                    if unnamed[start + len("location") : open_].strip() == matcher
+                )
+                unnamed = unnamed[: span[0]] + unnamed[span[1] + 1 :]
+        assert not re.search(r"\breturn\b", unnamed), (port, "return вне именованных location")
+        assert not re.search(r"\binternal\s*;", server), (port, "internal — 404 до пределов")
+        rewrites = sorted(" ".join(r.split()) for r in re.findall(r"\brewrite\b[^;]*;", server))
+        allowed = sorted(
+            f"rewrite ^ {path} last;"
+            for path in (NOT_FOUND_PATH, LENGTH_REQUIRED_PATH, TOO_LARGE_PATH)
+        )
+        assert rewrites == allowed, (port, rewrites)
+        assert _select_location(server, NOT_FOUND_PATH) == f"= {NOT_FOUND_PATH}", port
+        assert dict(_locations(server))[f"= {NOT_FOUND_PATH}"].split() == [
+            "client_max_body_size",
+            "0;",
+            "try_files",
+            "/nonexistent",
+            "=404;",
+        ], (port, "служебный 404 — без предела тела, иначе FIND_CONFIG отвергнет тело до пределов")
+        exact = dict(_locations(server))
+        for matcher, body in _locations(server):
+            if matcher.startswith(("@", "~")):
+                continue
+            prefix = matcher.removeprefix("= ").removeprefix("^~ ")
+            if len(prefix) > 1 and prefix.endswith("/") and re.search(r"\b\w+_pass\b", body):
+                sibling = exact.get(f"= {prefix[:-1]}")
+                assert sibling is not None and sibling.split() == [
+                    "try_files",
+                    "/nonexistent",
+                    "=404;",
+                ], (port, matcher, "auto_redirect: 301 в FIND_CONFIG, до пределов")
+
+
+def test_paths_with_control_characters_are_refused_before_any_location() -> None:
+    """Путь с управляющими символами (%0A, %0D, %09, коды до 0x20 и 0x7F) nginx декодирует в $uri:
+    он не совпадает ни с одним точным location, а маршруты приложения и карты PCRE с $ совпадают
+    и перед завершающим \\n (стенд: /metrics%0A на публичном — 200 с метриками, enroll%0A на
+    агентском порту — обработчик обмена; роаст 001.25, раунд 5). Поэтому на каждом server такой
+    путь отвергается первым правилом уровня server, раньше карт длины и выбора location: на server
+    Node API — переходом в служебный location ``= /__not_found`` без предела тела (404 даёт
+    try_files, после пределов), на публичном — 404 сразу (пределов там нет). Страж подаёт на карту
+    каждый управляющий символ в конце и в середине пути, а не сверяет её текст."""
+    text = _config()
+    http_level = _without_blocks(text, "server")
+    default, rules = _map_rules(http_level, "$uri", "$uri_has_control")
+    for char in CONTROL_CHARACTERS:
+        for uri in (f"/metrics{char}", f"/agent/v1/enroll{char}", f"/s/abc{char}def"):
+            assert _map_lookup(default, rules, uri) == "1", (repr(char), uri)
+    for uri in ("/metrics", "/agent/v1/enroll", "/s/abc-DEF_09~", "/agent/v1/reports"):
+        assert _map_lookup(default, rules, uri) == "0", uri
+    # Первое правило server — первая директива модуля rewrite уровня server (фаза
+    # SERVER_REWRITE исполняет их по порядку): любая форма `if`, а не только `if ($var)` (роаст
+    # раунда 7), и `return`, `rewrite`, `break` вне `if` — голый `break;` выше правила снял бы все
+    # правила server разом (роаст раунда 8). `set $api` перед ним — адрес апстрима, не решение.
+    tree = _nginx_tree()
+    for port, first in (
+        ("8443", ("rewrite", "^", NOT_FOUND_PATH, "last")),
+        ("8444", ("rewrite", "^", NOT_FOUND_PATH, "last")),
+        ("443", ("return", "404")),
+    ):
+        rewrite_rules = [
+            d
+            for d in _server_tree(tree, port)
+            if d.words[:1] in (("if",), ("return",), ("rewrite",), ("break",), ("set",))
+            and d.words[:2] != ("set", "$api")
+        ]
+        assert rewrite_rules, port
+        first_rule = rewrite_rules[0]
+        assert first_rule.words == ("if", "($uri_has_control)"), (port, first_rule)
+        assert first_rule.block is not None, port
+        assert [d.words for d in first_rule.block] == [first], port
+    assert not [d for _, d in _walk(tree) if d.words[:1] == ("break",)], "break снял бы правила"
+
+
+# Директивы, которые пишут переменную nginx, и место записываемой переменной среди их слов
+# (отрицательное — от конца заголовка блока). Переменные map изменяемы: второй писатель —
+# ``set``, второй ``map`` той же переменной (побеждает последний, имена без учёта регистра),
+# ``geo``, ``split_clients``, ``auth_request_set``, ``perl_set``, ``js_set``, ``js_var`` — выключил
+# бы правило, не тронув сам map (роаст 001.25, раунды 6–8). Слова — значения из разбора nginx:
+# имя в кавычках (``set "$x" 0``) — то же имя (роаст раунда 8).
+VARIABLE_WRITERS = {
+    "map": 2,
+    "geo": -1,
+    "split_clients": 2,
+    "set": 1,
+    "auth_request_set": 1,
+    "perl_set": 1,
+    "js_set": 1,
+    "js_var": 1,
+}
+# Именованная группа регулярного выражения — тоже переменная nginx того же имени, и совпадение
+# пишет в неё захват.
+NAMED_GROUP = re.compile(r"\(\?(?:P?<|')([A-Za-z_]\w*)[>']")
+
+
+def _variable(word: str) -> str:
+    """Имя переменной nginx из слова: ``$Name`` и ``${Name}`` — ``$name`` (без учёта регистра)."""
+    assert word.startswith("$"), word
+    return "$" + word[1:].strip("{}").lower()
+
+
+def test_map_results_have_a_single_writer() -> None:
+    """``set $uri_has_control 0;`` в server выключил бы первое правило незаметно для стража порядка
+    ``if``, ``set $agent_body_too_large 0;`` вернул бы 413 в FIND_CONFIG до пределов, второй
+    ``map … $loggable`` — токен подписки в журнал; то же делают ``geo``, ``split_clients``,
+    ``auth_request_set``, ``perl_set``, ``js_set``, ``js_var`` и именованная группа регулярного
+    выражения. Поэтому у каждой переменной map писатель один — сама map, именованных групп в
+    файле нет, а ``set`` пишет только ``$api``. Писатели ищутся по дереву директив со значениями
+    слов, как их читает nginx: имя в кавычках — то же имя (роаст 001.25, раунды 6–8)."""
+    writers: list[tuple[str, str]] = []
+    for _context, directive in _walk(_nginx_tree()):
+        name = directive.words[0]
+        if name in VARIABLE_WRITERS:
+            writers.append((name, _variable(directive.words[VARIABLE_WRITERS[name]])))
+    mapped = [variable for name, variable in writers if name == "map"]
+    assert {
+        "$uri_has_control",
+        "$body_without_length",
+        "$agent_body_too_large",
+        "$too_large_requested_directly",
+        "$loggable",
+        "$uri_is_service",
+        "$raw_path_has_s",
+    } <= set(mapped), mapped
+    for variable in set(mapped):
+        count = sum(1 for _, written in writers if written == variable)
+        assert count == 1, (variable, "писатель переменной map — только она сама")
+    assert {variable for _, variable in writers if variable not in mapped} == {"$api"}, writers
+    assert NAMED_GROUP.findall(_config()) == [], "именованная группа — переменная nginx"
+
+
+ERROR_LOG_LEVELS = ("warn", "error", "crit", "alert", "emerg")
+
+
+def test_the_request_log_is_declared_only_at_the_http_level() -> None:
+    """Н-25: ``access_log`` уровня server или location заменяет унаследованную пару уровня http
+    целиком — строка без фильтра писала бы токен подписки (на 8443/8444 путь /s/ не
+    маршрутизируется, но прислать его клиент может); ниже уровня http — только ``off``.
+    ``error_log`` — не мягче ``warn``: отказы и задержки пределов (``limit_*_log_level notice``)
+    пишут в error.log строку запроса, и при ``notice`` токен из пути лёг бы туда (роаст 001.25,
+    раунд 7). Путь /s/ там, куда его отдаёт nginx: на публичном server — location подписки без
+    журналов вовсе (любая строка error.log в контексте запроса несёт request-строку: ALERT
+    «worker_connections are not enough», CRIT записи временного файла — порог уровня их не
+    держит, роаст раунда 8) и без временных файлов ответа и тела; на server Node API — location
+    без апстрима (ошибок апстрима с этим путём не бывает)."""
+    tree = _nginx_tree()
+    found = _walk(tree)
+    at_http = [
+        d.words[1:]
+        for context, d in found
+        if context == (("http",),) and d.words[0] == "access_log"
+    ]
+    assert at_http == [
+        ("/var/log/nginx/access.log", "main", "if=$loggable"),
+        ("/var/log/nginx/access.log", "unparsed", "if=$unparsed"),
+    ], at_http
+    below = [
+        (context, d.words[1:])
+        for context, d in found
+        if d.words[0] == "access_log" and context != (("http",),)
+    ]
+    assert below and all(words == ("off",) for _, words in below), below
+    for context, d in found:
+        if d.words[0] != "error_log":
+            continue
+        target, *level = d.words[1:]
+        assert target and len(level) == 1 and level[0] in ERROR_LOG_LEVELS, (context, d.words)
+    assert [d.words for context, d in found if not context and d.words[0] == "error_log"] == [
+        ("error_log", "/var/log/nginx/error.log", "warn")
+    ]
+    for limit in ("limit_req_log_level", "limit_conn_log_level"):
+        assert {d.words[1:] for _, d in found if d.words[0] == limit} == {("notice",)}, limit
+    text = _config()
+    public = _server_by_listen(text, "443")
+    matcher = _select_location(public, "/s/T")
+    assert matcher == "^~ /s/", matcher
+    subscription = [d.words for d in _location_tree(tree, "443", matcher)]
+    assert ("access_log", "off") in subscription, subscription
+    assert ("error_log", "/dev/null", "emerg") in subscription, subscription
+    assert ("proxy_max_temp_file_size", "0") in subscription, subscription
+    body_limit = [words[1] for words in subscription if words[0] == "client_max_body_size"]
+    buffer = [words[1] for words in subscription if words[0] == "client_body_buffer_size"]
+    assert len(body_limit) == 1 and len(buffer) == 1, subscription
+    assert 0 < _bytes(body_limit[0]) <= _bytes(buffer[0]), (body_limit, buffer, "тело — в буфере")
+    for port in ("8443", "8444"):
+        server = _server_by_listen(text, port)
+        for uri in ("/s/T", "/S/T", "/sub/s/T"):
+            body = dict(_locations(server))[_select_location(server, uri)]
+            assert not re.search(r"\b\w+_pass\b", body), (port, uri, "путь /s/ — без апстрима")
+
+
+def _location_tree(tree: tuple[Directive, ...], port: str, matcher: str) -> tuple[Directive, ...]:
+    """Директивы location с матчером (как в канонической записи) единственного server порта."""
+    found = [
+        d.block
+        for d in _server_tree(tree, port)
+        if d.words[:1] == ("location",) and " ".join(d.words[1:]) == matcher and d.block is not None
+    ]
+    assert len(found) == 1, (port, matcher)
+    return found[0]
 
 
 def test_proxy_rate_limit_answers_in_the_unified_error_format_with_retry_after() -> None:
@@ -861,14 +1638,33 @@ def test_nginx_logs_request_and_upstream_times() -> None:
     assert "urt=$upstream_response_time" in log_format.group(1)
 
 
+def _map_source(http_level: str, variable: str) -> str:
+    """Источник map переменной — как в канонической записи (``"$server_port:$uri"``)."""
+    found = re.findall(rf"map\s+(\S+)\s+{re.escape(variable)}\s*\{{", http_level)
+    assert len(found) == 1, (variable, found)
+    return str(found[0])
+
+
+def _map_key(source: str, values: dict[str, str]) -> str:
+    """Ключ map для запроса: переменные источника заменены значениями запроса."""
+    return re.sub(r"\$(\w+)", lambda match: values[match.group(1)], source)
+
+
 def test_the_subscription_token_never_reaches_the_access_log() -> None:
-    """Н-25: журнал пишется только по `$loggable`, а он требует согласия трёх ключей — по
-    нормализованному `$uri` (формы `//s/`, `/%73/`, `/x/../s/` маршрутизируются в `/s/`), по
-    сырой строке `$request` (`/s/` или `/%73/` в любом месте строки: метод с дефисом, второй
-    пробел, absolute-form и сырые `//s/` обходили якорь «^[A-Z]+ /s/» — раунд 7, стенд) и по
-    признаку «отвергнут до разбора URI» (400 с пустым `$uri` — такая строка пишется форматом
-    без строки запроса). Страж подаёт на правила таблицу сырых строк и ключей, а не сверяет их
-    текст; четвёртая линия — `access_log off` в самом location `/s/`."""
+    """Н-25: журнал пишется только по `$loggable` — согласию четырёх ключей: нормализованного
+    `$uri` (формы `//s/`, `/%73/`, `/x/../s/`, `/s%2F` маршрутизируются в `/s/`), признака
+    «`$uri` — служебный путь своего server» (запрос, переведённый `rewrite` на 8443/8444, несёт к
+    журналу служебный путь — роаст 001.25, раунд 6: строка `/s%2F<токен>%0A` в журнале 9444; у
+    публичного server служебных путей нет — раунд 9), сырого ключа «в пути строки запроса есть
+    /s/» (до «?» и «#», с косой и в виде `%2F`, без учёта регистра) — он читается только у
+    служебного `$uri` — и признака «отвергнут до разбора URI» (пустой `$uri` при любом статусе:
+    400, 408, 414, 505 — такая строка пишется форматом без строки запроса; раунд 9 знал только
+    400, и 408, 414, 505 писали токен — стенд, роаст раунда 9). Раунды 7–8 читали сырой ключ у
+    всех запросов, и суффикс `#/s/` у любого пути прятал запрос из журнала целиком. Страж
+    подаёт на правила таблицу (сырая строка, `$uri` к журналу, статус, порт) — ключи карт
+    собираются из их источников в файле, а не из списка здесь — и сверяет служебные пути карты
+    с целями `rewrite` каждого server; четвёртая линия — `access_log off` в самом location
+    `/s/`, и Referer со страницы подписки пишется «-»."""
     text = _config()
     http_level = _without_blocks(text, "server")
     # Самопроверка эмулятора map: точный ключ побеждает покрывающее его регулярное правило,
@@ -876,38 +1672,145 @@ def test_the_subscription_token_never_reaches_the_access_log() -> None:
     assert _map_lookup("d", [("~^a", "r"), ("A", "x")], "a") == "x"
     assert _map_lookup("d", [("~^a", "r"), ("~^ab", "s")], "ab") == "r"
     assert _map_lookup("d", [("~^A", "r")], "ab") == "d"
-    default, rules = _map_rules(http_level, "$request", "$loggable_raw")
+    parts = ("$loggable_uri", "$uri_is_service", "$raw_path_has_s", "$unparsed")
+    sources = {var: _map_source(http_level, var) for var in (*parts, "$loggable")}
+    maps = {var: (source, _map_rules(http_level, source, var)) for var, source in sources.items()}
+
+    def value(variable: str, **values: str) -> str:
+        source, rules = maps[variable]
+        return _map_lookup(*rules, _map_key(source, values))
+
+    # Сырой ключ: путь строки запроса — до «?» и «#»; /s/ в любом написании и месте пути.
     for line, expected in (
-        ("GET /s/T HTTP/1.1", "0"),
-        ("GET /s/T?x=1 HTTP/1.1", "0"),
-        ("GET /healthz?/s/ HTTP/1.1", "1"),
-        ("GET /healthz?x=/%73/y HTTP/1.1", "1"),
-        ("POST /agent/v1/reports?x=/s/ HTTP/2.0", "1"),
-        ("GET /s/T%zz HTTP/1.1", "0"),
-        ("GET  /s/T%zz HTTP/1.1", "0"),
-        ("M-SEARCH /s/T%zz HTTP/1.1", "0"),
-        ("GET //s/T%zz HTTP/1.1", "0"),
-        ("GET /x/../s/T HTTP/1.1", "0"),
-        ("GET /%73/T%zz HTTP/1.1", "0"),
-        ("GET /%53/T HTTP/1.1", "0"),
-        ("GET http://host/s/T HTTP/1.1", "0"),
-        ("GET /S/T HTTP/2.0", "0"),
-        ("GET //s/T", "0"),
-        ("GET /healthz HTTP/1.1", "1"),
-        ("POST /agent/v1/reports HTTP/2.0", "1"),
-        ("GET /assets/logo.svg HTTP/1.1", "1"),
-        ("GET /sub/s2/x HTTP/1.1", "1"),
+        ("GET /s/T HTTP/1.1", "1"),
+        ("GET /s/T?x=1 HTTP/1.1", "1"),
+        ("GET /s/T#x HTTP/1.1", "1"),
+        ("GET /healthz?/s/ HTTP/1.1", "0"),
+        ("GET /healthz#/s/ HTTP/1.1", "0"),
+        ("GET /healthz#x/%73/y HTTP/1.1", "0"),
+        ("GET /healthz?x=/%73/y HTTP/1.1", "0"),
+        ("GET /s/T%zz HTTP/1.1", "1"),
+        ("GET  /s/T%zz HTTP/1.1", "1"),
+        ("M-SEARCH /s/T%zz HTTP/1.1", "1"),
+        ("GET //s/T%zz HTTP/1.1", "1"),
+        ("GET /x/../s/T HTTP/1.1", "1"),
+        ("GET /%73/T%zz HTTP/1.1", "1"),
+        ("GET /%53/T HTTP/1.1", "1"),
+        ("GET http://host/s/T HTTP/1.1", "1"),
+        ("GET /S/T HTTP/2.0", "1"),
+        ("GET //s/T", "1"),
+        ("GET /s%2FT%0A HTTP/1.1", "1"),
+        ("GET /s%2fT HTTP/2.0", "1"),
+        ("GET /%73%2FT HTTP/1.1", "1"),
+        ("GET /%2Fs/T HTTP/1.1", "1"),
+        ("POST /x%2F..%2Fs%2FT HTTP/1.1", "1"),
+        ("GET /agent/v1/state%2Fs HTTP/1.1", "0"),
+        ("GET /sub%2Fs2/x HTTP/1.1", "0"),
+        ("GET /healthz HTTP/1.1", "0"),
+        ("GET /sub/s2/x HTTP/1.1", "0"),
     ):
-        assert _map_lookup(default, rules, line) == expected, (line, rules)
-    default, rules = _map_rules(http_level, "$uri", "$loggable_uri")
-    for uri, expected in (("/s/T", "0"), ("/S/T", "0"), ("/healthz", "1"), ("", "1")):
-        assert _map_lookup(default, rules, uri) == expected, (uri, rules)
-    default, rules = _map_rules(http_level, '"$status:$uri"', "$unparsed")
-    for key, expected in (("400:", "1"), ("400:/s/T", "0"), ("404:", "0"), ("200:/healthz", "0")):
-        assert _map_lookup(default, rules, key) == expected, (key, rules)
-    default, rules = _map_rules(http_level, '"$loggable_uri$loggable_raw$unparsed"', "$loggable")
-    for key, expected in (("110", "1"), ("010", "0"), ("100", "0"), ("111", "0"), ("000", "0")):
-        assert _map_lookup(default, rules, key) == expected, (key, rules)
+        assert value("$raw_path_has_s", request=line) == expected, line
+
+    def loggable(request: str, uri: str, status: str, port: str = "443") -> str:
+        values = {"request": request, "uri": uri, "status": status, "server_port": port}
+        return value("$loggable", **{var[1:]: value(var, **values) for var in parts})
+
+    # Запрос без перехода: `$uri` журнала — путь, по которому nginx выбрал location.
+    for request, uri, status, expected in (
+        ("GET /s/T HTTP/1.1", "/s/T", "200", "0"),
+        ("GET //s/T HTTP/1.1", "/s/T", "200", "0"),
+        ("GET /x/../s/T HTTP/1.1", "/s/T", "200", "0"),
+        ("GET /%73/T HTTP/1.1", "/s/T", "200", "0"),
+        ("GET /s%2FT HTTP/2.0", "/s/T", "200", "0"),
+        ("GET http://host/s/T HTTP/1.1", "/s/T", "200", "0"),
+        ("GET /S/T HTTP/1.1", "/S/T", "404", "0"),
+        ("GET /s/T%0A HTTP/1.1", "/s/T\n", "404", "0"),
+        ("GET /healthz HTTP/1.1", "/healthz", "200", "1"),
+        ("GET /healthz#/s/T HTTP/1.1", "/healthz", "200", "1"),
+        ("POST /api/v1/auth/login#/s/ HTTP/1.1", "/api/v1/auth/login", "401", "1"),
+        ("POST /agent/v1/enroll#/%73/ HTTP/2.0", "/agent/v1/enroll", "422", "1"),
+        ("GET /healthz?/s/ HTTP/1.1", "/healthz", "200", "1"),
+        ("GET /api/v1/admin/nodes/s/state HTTP/1.1", "/api/v1/admin/nodes/s/state", "422", "1"),
+        ("GET /sub/s2/x HTTP/1.1", "/sub/s2/x", "404", "1"),
+        ("POST /agent/v1/reports HTTP/2.0", "/agent/v1/reports", "200", "1"),
+        # На публичном server служебных путей нет: путь, нормализованный в служебный, — обычный
+        # запрос к приложению, и сырой /s/ его не прячет (роаст раунда 9).
+        ("GET /s/T/../../__not_found HTTP/1.1", NOT_FOUND_PATH, "404", "1"),
+        ("GET /%73/../__TOO_LARGE HTTP/1.1", "/__TOO_LARGE", "404", "1"),
+    ):
+        assert loggable(request, uri, status) == expected, (request, uri, status)
+    # Отвергнут до разбора URI — пустой `$uri` при любом статусе: 400 (негодный процент), 408
+    # (строка запроса не пришла за client_header_timeout), 414 (строка длиннее буфера), 505
+    # (HTTP/2.0 и выше поверх HTTP/1); `$request` тогда — сырые байты строки. Строка — форматом
+    # без строки запроса, не основным (роаст раунда 9: 408, 414 и 505 писали токен, стенд).
+    for request, status in (
+        ("GET /s/T%zz HTTP/1.1", "400"),
+        ("GET /healthz%zz HTTP/1.1", "400"),
+        ("GET /s/T", "408"),
+        ("GET /s/T?" + "a" * 9000, "414"),
+        ("GET /s/T HTTP/2.0", "505"),
+        ("GET /%73/T HTTP/3.0", "505"),
+    ):
+        for port in ("443", "8443", "8444"):
+            assert loggable(request, "", status, port) == "0", (request, status, port)
+            assert value("$unparsed", request=request, uri="", status=status, server_port=port) == (
+                "1"
+            ), (request, status, port)
+    for uri in ("/s/T", "/healthz", "/", NOT_FOUND_PATH):
+        for status in ("200", "400", "404", "408", "414", "505"):
+            assert value("$unparsed", request="GET / HTTP/1.1", uri=uri, status=status) == "0", uri
+    # Переведённый запрос: `$uri` журнала — служебный путь; служебные пути карты — ровно цели
+    # `rewrite` своего server (новый переход без записи в карте журнал бы открыл, а запись без
+    # перехода прятала бы обычные запросы).
+    tree = _nginx_tree()
+    targets = {
+        port: {
+            directive.words[2]
+            for _context, directive in _walk(_server_tree(tree, port))
+            if directive.words[:1] == ("rewrite",)
+        }
+        for port in ("443", "8443", "8444")
+    }
+    service = {NOT_FOUND_PATH, LENGTH_REQUIRED_PATH, TOO_LARGE_PATH}
+    assert targets["8443"] == targets["8444"] == service, targets
+    assert targets["443"] == set(), targets
+    for port in ("443", "8443", "8444"):
+        for path in sorted(targets["8443"] | {"/healthz", "/s/T"}):
+            expected = "1" if path in targets[port] else "0"
+            got = value("$uri_is_service", uri=path, server_port=port)
+            assert got == expected, (port, path)
+    for port in ("8443", "8444"):
+        for target in sorted(targets[port]):
+            for request, expected in (
+                ("GET /s%2FT%0A HTTP/1.1", "0"),
+                ("POST /s%2FT HTTP/1.1", "0"),
+                ("POST /%2Fs%2FT HTTP/2.0", "0"),
+                ("GET /s/T%0A HTTP/1.1", "0"),
+                ("GET /%73%2FT%0A HTTP/1.1", "0"),
+                ("GET /healthz%0A HTTP/1.1", "1"),
+                ("GET /healthz%0A#/s/T HTTP/1.1", "1"),
+                ("GET /healthz%0A?/s/T HTTP/1.1", "1"),
+            ):
+                for status in ("404", "411", "413", "429"):
+                    got = loggable(request, target, status, port)
+                    assert got == expected, (port, target, request, status)
+    # Referer со страницы подписки — «-» в любом написании пути, как у сырого ключа (раунд 7:
+    # прежний ~/s/ пропускал /S/ и /%73/); основной формат пишет именно `$log_referer`, а ответы
+    # `/s/` несут Referrer-Policy — браузер такой Referer и не отправит (раунд 9).
+    default, rules = _map_rules(http_level, "$http_referer", "$log_referer")
+    for referer, expected in (
+        ("https://h/s/T", "-"),
+        ("https://h/S/T", "-"),
+        ("https://h/%73/T", "-"),
+        ("https://h/s%2FT", "-"),
+        ("", "-"),
+        ("https://h/cabinet", "$http_referer"),
+    ):
+        assert _map_lookup(default, rules, referer) == expected, (referer, rules)
+    main_format = re.search(r"log_format\s+main\s+((?:'[^']*'\s*)+);", http_level)
+    assert main_format is not None
+    assert '"$log_referer"' in main_format.group(1), main_format.group(1)
+    assert "$http_referer" not in main_format.group(1), "Referer — только через $log_referer"
     logs = re.findall(r"access_log\s+(\S+)\s+(\w+)\s+if=(\S+);", http_level)
     assert logs == [
         ("/var/log/nginx/access.log", "main", "$loggable"),
@@ -921,8 +1824,70 @@ def test_the_subscription_token_never_reaches_the_access_log() -> None:
             "не в формате без разбора",
         )
     assert "$request_uri" not in text, "по $request_uri токен из отвергнутого запроса не виден"
-    subscription = dict(_locations(_server_by_listen(text, "443")))["^~ /s/"]
-    assert "access_log off;" in subscription
+    subscription = [d.words for d in _location_tree(tree, "443", "^~ /s/")]
+    assert ("access_log", "off") in subscription, subscription
+    assert ("add_header", "Referrer-Policy", "no-referrer", "always") in subscription, subscription
+
+
+# Директивы, которые меняют `$uri` запроса внутренним переходом или отдают файлы (index,
+# autoindex делают переход на индексный файл), и модули, чьи обработчики делают переходы во время
+# выполнения (njs, perl, lua — `internalRedirect`, `internal_redirect`, `ngx.exec`), — вне файла.
+STATIC_OR_SCRIPTED = ("index", "autoindex", "random_index", "load_module", "alias", "root")
+OTHER_UPSTREAMS = ("fastcgi_pass", "uwsgi_pass", "scgi_pass", "grpc_pass", "memcached_pass")
+
+
+def test_only_the_service_rewrites_change_the_uri() -> None:
+    """Н-25: журнал решает по `$uri` к моменту записи и держится на том, что `$uri` меняют только
+    переходы `rewrite` 8443/8444 в служебные location — их пути в карте `$uri_is_service`. Любой
+    другой внутренний переход увёл бы запрос подписки из `location /s/` (с его `access_log off`
+    и `error_log /dev/null`) на путь, который журнал пишет, — со строкой запроса и токеном (стенд:
+    `error_page 500 502 503 504 /50x.html;` при лежащем api — токен в access.log и в error.log;
+    роаст 001.25, раунд 9). Поэтому `error_page` — только в именованный location (он `$uri` не
+    меняет); `rewrite` — только в server 8443/8444 и только в служебные пути; `try_files` —
+    проба заведомо отсутствующего файла и код; каждый location решает сам (`proxy_pass`,
+    `return` или `try_files`), и ни у одного server нет запросов без location — отдачи файлов и
+    перехода на индексный файл нет; `X-Accel-Redirect` апстрима не исполняется (один
+    `proxy_ignore_headers` на уровне http — ниже он заменил бы список целиком), апстрим — только
+    `proxy_pass`; модулей скриптов и подключаемых модулей нет."""
+    tree = _nginx_tree()
+    found = _walk(tree)
+    for context, directive in found:
+        name = directive.words[0]
+        if name == "error_page":
+            assert directive.words[-1].startswith("@"), (context, directive.words)
+        if name == "try_files":
+            assert directive.words[1:-1] == ("/nonexistent",), (context, directive.words)
+            assert re.fullmatch(r"=[1-5]\d\d", directive.words[-1]), (context, directive.words)
+        assert name not in STATIC_OR_SCRIPTED and name not in OTHER_UPSTREAMS, directive.words
+        assert not name.startswith(("js_", "perl")) and "_by_lua" not in name, directive.words
+    rewrites = [directive for _, directive in found if directive.words[0] == "rewrite"]
+    node_rewrites = [
+        directive
+        for port in ("8443", "8444")
+        for _, directive in _walk(_server_tree(tree, port))
+        if directive.words[0] == "rewrite"
+    ]
+    assert len(rewrites) == len(node_rewrites) == 6, rewrites
+    for directive in node_rewrites:
+        assert directive.words[1] == "^" and directive.words[3:] == ("last",), directive.words
+        assert directive.words[2] in {NOT_FOUND_PATH, LENGTH_REQUIRED_PATH, TOO_LARGE_PATH}
+    (http,) = [d for d in tree if d.words == ("http",)]
+    assert http.block is not None
+    for server in (d for d in http.block if d.words == ("server",)):
+        assert server.block is not None
+        locations = [d for d in server.block if d.words[0] == "location"]
+        assert [d for d in locations if d.words[1:] == ("/",)], "запрос без location — к файлам"
+        for location in locations:
+            assert location.block is not None
+            decided = {d.words[0] for d in location.block} & {"proxy_pass", "return", "try_files"}
+            assert decided, (location.words, "location без решения отдал бы файл")
+    ignored = [
+        (context, directive.words[1:])
+        for context, directive in found
+        if directive.words[0] == "proxy_ignore_headers"
+    ]
+    assert len(ignored) == 1 and ignored[0][0] == (("http",),), ignored
+    assert "x-accel-redirect" in {word.lower() for word in ignored[0][1]}, ignored
 
 
 def _launch_files() -> list[Path]:
@@ -964,6 +1929,313 @@ def _service(document: object, name: str) -> dict[str, Any]:
     service = services.get(name, {})
     assert isinstance(service, dict), (name, service)
     return service
+
+
+def test_the_node_ca_of_the_api_is_the_one_nginx_trusts() -> None:
+    """Пара CA одна у прокси и у C-01 (001.25): nginx проверяет клиентов по ``ca.crt`` из
+    смонтированного каталога ``secrets/tls``, ``api`` подписывает листы ключом ``ca_key`` и
+    отдаёт ноде ``ca_pem`` из ``ca_cert``. Секрет ``ca_cert`` объявлен тем самым файлом
+    ``tls/ca.crt``, а не копией: разойдись они, CA выпускал бы листы, которые прокси отвергнет у
+    всего парка, и стенд молчал бы до первой ноды. Переменные ``api`` указывают на копии,
+    которые делает entrypoint в ``/run/secrets``; оверлей их не переопределяет."""
+    base_file, overlays = _compose_files()
+    base = yaml.safe_load(base_file.read_text(encoding="utf-8"))
+    assert base["secrets"]["ca_cert"] == {"file": "./secrets/tls/ca.crt"}
+    assert base["secrets"]["ca_key"] == {"file": "./secrets/ca_key"}
+    assert "./secrets/tls:/etc/nginx/certs:ro" in _service(base, "nginx")["volumes"]
+    agent = _server_by_listen(_config(), "8443")
+    assert re.findall(r"ssl_client_certificate\s+(\S+);", agent) == ["/etc/nginx/certs/ca.crt"]
+    api = _service(base, "api")
+    assert api["environment"]["CA_KEY_FILE"] == "/run/secrets/ca_key"
+    assert api["environment"]["CA_CERT_FILE"] == "/run/secrets/ca_cert"
+    mounted = {(item["source"], item["target"]) for item in api["secrets"]}
+    assert {
+        ("ca_key", "/run/host-secrets/ca_key"),
+        ("ca_cert", "/run/host-secrets/ca_cert"),
+    } <= mounted
+    for overlay in overlays:
+        over = _service(yaml.safe_load(overlay.read_text(encoding="utf-8")), "api")
+        environment = over.get("environment") or {}
+        assert not {"CA_KEY_FILE", "CA_CERT_FILE"} & set(environment), overlay.name
+        assert "secrets" not in over, overlay.name
+
+
+def _host_path(compose_file: Path, value: str, where: str) -> Path:
+    """Путь хоста из значения Compose. Интерполяция (``${PWD}``, ``${CA_DIR:-./secrets}``) —
+    отказ: её значение задаёт окружение запуска, и страж, не зная его, не может решить, что
+    окажется в контейнере (роаст 001.25, раунд 3), — пути томов, секретов, конфигов и сборки
+    пишутся литералом."""
+    assert "$" not in value, (compose_file.name, where, value, "путь с интерполяцией")
+    return (compose_file.parent / Path(value).expanduser()).resolve()
+
+
+def _host_sources(
+    compose_file: Path,
+    service: dict[str, Any],
+    declared: dict[str, dict[str, Path]],
+    bound_volumes: dict[str, Path],
+) -> list[Path]:
+    """Пути хоста, которые служба видит внутри контейнера или вносит в образ: файлы её секретов
+    и конфигов (по объявлениям верхнего уровня), источники томов-привязок (короткая и длинная
+    запись; в длинной ``type: bind`` источник — путь хоста и без префикса: Compose разрешает его
+    от каталога проекта), именованные тома, привязанные к каталогу хоста (``driver_opts`` с
+    ``device``), ``env_file``, пути ``develop.watch`` (синхронизация файлов хоста в контейнер),
+    контекст сборки, дополнительные контексты и секреты сборки."""
+    found = []
+    for kind in ("secrets", "configs"):
+        for item in service.get(kind) or []:
+            name = item["source"] if isinstance(item, dict) else item
+            if name in declared[kind]:
+                found.append(declared[kind][name])
+    for volume in service.get("volumes") or []:
+        if isinstance(volume, str):
+            source, bind = volume.split(":", 1)[0], False
+        elif volume.get("type", "volume") in ("bind", "volume"):
+            source, bind = volume.get("source", ""), volume.get("type") == "bind"
+        else:
+            continue  # tmpfs и прочее — не путь хоста
+        if bind or source.startswith((".", "/", "~", "$")):
+            found.append(_host_path(compose_file, source, "volumes"))
+        elif source in bound_volumes:
+            found.append(bound_volumes[source])
+    for rule in (service.get("develop") or {}).get("watch") or []:
+        found.append(_host_path(compose_file, str(rule.get("path", "")), "develop.watch"))
+    env_files = service.get("env_file") or []
+    for entry in [env_files] if isinstance(env_files, (str, dict)) else env_files:
+        path = entry.get("path") if isinstance(entry, dict) else entry
+        found.append(_host_path(compose_file, str(path), "env_file"))
+    build = service.get("build")
+    if build:
+        context = build.get("context", ".") if isinstance(build, dict) else build
+        found.append(_host_path(compose_file, str(context), "build.context"))
+        if isinstance(build, dict):
+            for extra in (build.get("additional_contexts") or {}).values():
+                if "://" not in str(extra) and not str(extra).startswith("service:"):
+                    found.append(_host_path(compose_file, str(extra), "build.additional_contexts"))
+            for item in build.get("secrets") or []:
+                name = item["source"] if isinstance(item, dict) else item
+                if name in declared["secrets"]:
+                    found.append(declared["secrets"][name])
+    return found
+
+
+def test_only_the_api_holds_the_node_ca_key() -> None:
+    """Ключ CA подписывает identity всего парка (§7.1): он доступен только ``api``, который
+    выпускает листы, — воркерам, планировщику, прокси и базе он не нужен, а каждый лишний
+    держатель — ещё одно место кражи (роаст 001.25, раунд 1). Сверка — по путям хоста, а не по
+    именам (раунд 2: второе имя секрета на тот же файл, том с каталогом-предком, ``configs``;
+    раунд 3: интерполированные пути, ``volumes_from``, ``pid`` соседа, именованный том с
+    ``driver_opts`` bind, секреты и контексты сборки; раунд 4: ``bind`` без префикса,
+    ``develop.watch``, ``privileged`` и ``devices``): у каждой службы основы и оверлеев, в том
+    числе унаследовавшей общий якорь, её пути (``_host_sources``) не содержат файла ключа CA —
+    кроме секрета ``ca_key`` у ``api``; чужие тома (``volumes_from``), пространство процессов
+    соседа (``pid``), весь хост (``privileged``) и его устройства (``devices`` — диск с файлом
+    ключа) не берёт ни одна служба."""
+    base_file, overlays = _compose_files()
+    documents = [
+        (path, yaml.safe_load(path.read_text(encoding="utf-8"))) for path in (base_file, *overlays)
+    ]
+    ca_key = (base_file.parent / documents[0][1]["secrets"]["ca_key"]["file"]).resolve()
+    declared: dict[str, dict[str, Path]] = {"secrets": {}, "configs": {}}
+    bound_volumes: dict[str, Path] = {}
+    for path, document in documents:
+        for kind in ("secrets", "configs"):
+            for name, spec in (document.get(kind) or {}).items():
+                if isinstance(spec, dict) and "file" in spec:
+                    declared[kind][name] = _host_path(path, spec["file"], f"{kind}.{name}")
+        for name, spec in (document.get("volumes") or {}).items():
+            device = ((spec or {}).get("driver_opts") or {}).get("device")
+            if device:
+                bound_volumes[name] = _host_path(path, str(device), f"volumes.{name}")
+    holders = set()
+    for path, document in documents:
+        for name, service in (document.get("services") or {}).items():
+            assert "volumes_from" not in service, (path.name, name, "чужие тома — и их секреты")
+            assert "pid" not in service, (path.name, name, "чужие процессы — и их /proc/*/root")
+            assert not service.get("privileged"), (path.name, name, "privileged — весь хост")
+            assert "devices" not in service, (path.name, name, "устройства хоста — и его диски")
+            sources = _host_sources(path, service, declared, bound_volumes)
+            if any(ca_key == source or ca_key.is_relative_to(source) for source in sources):
+                holders.add((path.name, name))
+            environment = service.get("environment") or {}
+            names = (
+                {entry.split("=", 1)[0] for entry in environment}
+                if isinstance(environment, list)
+                else set(environment)
+            )
+            if "CA_KEY_FILE" in names:
+                holders.add((path.name, name))
+    assert sorted(holders) == [("docker-compose.yml", "api")], sorted(holders)
+    api_secrets = [
+        item["source"] if isinstance(item, dict) else item
+        for item in documents[0][1]["services"]["api"]["secrets"]
+    ]
+    assert [name for name in api_secrets if declared["secrets"].get(name) == ca_key] == ["ca_key"]
+
+
+# Механизмы Compose, которыми служба получает файлы хоста или чужого контейнера, — список
+# разрешений, а не запретов (роаст 001.25, раунд 4): список запретов стража ключа CA три раунда
+# подряд обходили новыми способами — второе имя секрета, интерполяция пути, ``volumes_from``,
+# ``pid``, сокет Docker, ``/proc`` хоста, ``cap_add``, ``device_cgroup_rules``, внешний том,
+# ``build.ssh``. Всё, чего здесь нет, — отказ: новый ключ службы или новая привязка сначала
+# пересматриваются и вносятся сюда. Пути привязок — от каталога Compose, как их пишут файлы.
+ALLOWED_TOP_LEVEL_KEYS = frozenset({"name", "services", "secrets", "volumes"})
+ALLOWED_SERVICE_KEYS = frozenset(
+    {
+        "image",
+        "build",
+        "entrypoint",
+        "command",
+        "environment",
+        "env_file",
+        "secrets",
+        "volumes",
+        "tmpfs",
+        "ports",
+        "depends_on",
+        "healthcheck",
+        "logging",
+        "mem_limit",
+        "memswap_limit",
+        "cpus",
+        "pids_limit",
+    }
+)
+ALLOWED_BUILD = {"context": "../../control-plane", "dockerfile": "Dockerfile"}
+ALLOWED_ENV_FILES = frozenset({".env"})
+ALLOWED_BINDS: dict[str, frozenset[str]] = {
+    "postgres": frozenset(
+        {
+            "./postgres/entrypoint.sh",
+            "./postgres/initdb.d/10-roles.sh",
+            "../../control-plane/migrations/bootstrap/roles.sql",
+        }
+    ),
+    "redis": frozenset(),
+    "nginx": frozenset({"../nginx/nginx.conf", "./secrets/tls"}),
+    "api": frozenset({"../../control-plane/app", "../../control-plane/migrations"}),
+    "worker-critical": frozenset({"../../control-plane/app"}),
+    "worker-background": frozenset({"../../control-plane/app"}),
+    "scheduler": frozenset({"../../control-plane/app"}),
+}
+ALLOWED_NAMED_VOLUMES: dict[str, frozenset[str]] = {
+    "postgres": frozenset({"pg_data"}),
+    "redis": frozenset({"redis_data"}),
+}
+# Опубликованные порты — как их пишут файлы: наружу смотрит только nginx; база и Redis — в оверлее
+# разработки для тестов и только на 127.0.0.1 литералом: адрес переменной решала бы среда запуска,
+# и запись в файле ничего не говорила бы об открытости (роаст 001.25, раунд 6: стенд с
+# DEV_BIND_ADDR=0.0.0.0 открывал Redis без пароля и базу соседним проектам VM; с рабочей машины —
+# туннель deploy/scripts/stand-tunnel.sh). Роли приложения не публикуются (правило границы 2):
+# порт api 8000 снаружи дал бы клиенту задать X-Client-Cert и X-Forwarded-For самому — uvicorn
+# доверяет заголовкам прокси с любого адреса (роаст 001.25, раунд 5).
+ALLOWED_PORTS: dict[str, frozenset[str]] = {
+    "nginx": frozenset(
+        {
+            "${BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-80}:80",
+            "${BIND_ADDR:-0.0.0.0}:${HTTPS_PORT:-443}:443",
+            "${BIND_ADDR:-0.0.0.0}:${AGENT_PORT:-8443}:8443",
+            "${BIND_ADDR:-0.0.0.0}:${ENROLL_PORT:-8444}:8444",
+        }
+    ),
+    "postgres": frozenset({"127.0.0.1:${PG_HOST_PORT:-5432}:5432"}),
+    "redis": frozenset({"127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"}),
+}
+# Команда и точка входа — только у служб из чужих образов: роль приложения с ``command:`` или
+# ``entrypoint:`` обошла бы docker-entrypoint.sh — флаги uvicorn (access-log, заголовки прокси),
+# миграции при старте, копирование секретов и понижение прав (роаст 001.25, раунд 7).
+ALLOWED_LAUNCH_KEYS: dict[str, frozenset[str]] = {
+    "postgres": frozenset({"command", "entrypoint"}),
+    "redis": frozenset({"command"}),
+}
+
+
+def test_compose_services_use_only_reviewed_mechanisms() -> None:
+    """Ключ CA держит только ``api`` (страж выше сверяет пути хоста), но путь к файлу — не
+    единственный способ его получить: сокет Docker даёт ``docker exec`` в ``api``, ``/proc`` хоста
+    — ``/proc/<pid api>/root`` (все роли под одним uid), ``cap_add`` и ``device_cgroup_rules`` —
+    диск хоста, ``build.ssh`` — подпись ключом при сборке. Поэтому у служб основы и оверлеев —
+    только разрешённые ключи, у сборки — только контекст и Dockerfile, у томов — только
+    разрешённые привязки своей службы, объявленные именованные тома без драйвера, опций и
+    ``external``, у секретов — только литеральный ``file``, у ``env_file`` — только ``.env``
+    (роаст 001.25, раунд 4), у ``ports`` — только разрешённые записи своей службы: роли
+    приложения не публикуются (раунд 5), база и Redis — только на литеральном 127.0.0.1
+    (раунд 6), ``command`` и ``entrypoint`` — только у postgres и redis (раунд 7)."""
+    base_file, overlays = _compose_files()
+    for path in (base_file, *overlays):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        top = {key for key in document if not key.startswith("x-")}
+        assert top <= ALLOWED_TOP_LEVEL_KEYS, (path.name, sorted(top - ALLOWED_TOP_LEVEL_KEYS))
+        for name, spec in (document.get("volumes") or {}).items():
+            assert not spec, (path.name, name, "именованный том — без драйвера, опций и external")
+        for name, spec in (document.get("secrets") or {}).items():
+            assert isinstance(spec, dict) and set(spec) == {"file"}, (path.name, name, spec)
+            assert "$" not in str(spec["file"]), (path.name, name, "путь секрета — литерал")
+        for name, service in (document.get("services") or {}).items():
+            assert name in ALLOWED_BINDS, (path.name, name, "служба вне списка разрешений")
+            extra = set(service) - ALLOWED_SERVICE_KEYS
+            assert not extra, (path.name, name, sorted(extra))
+            if "build" in service:
+                assert service["build"] == ALLOWED_BUILD, (path.name, name, service["build"])
+            for port in service.get("ports") or []:
+                assert port in ALLOWED_PORTS.get(name, frozenset()), (path.name, name, port)
+            for key in ("command", "entrypoint"):
+                if key in service:
+                    assert key in ALLOWED_LAUNCH_KEYS.get(name, frozenset()), (path.name, name, key)
+            env_files = service.get("env_file") or []
+            for entry in [env_files] if isinstance(env_files, (str, dict)) else env_files:
+                file = entry.get("path") if isinstance(entry, dict) else entry
+                assert file in ALLOWED_ENV_FILES, (path.name, name, file)
+            for volume in service.get("volumes") or []:
+                if isinstance(volume, str):
+                    source = volume.split(":", 1)[0]
+                    kind = "bind" if source.startswith((".", "/", "~", "$")) else "volume"
+                else:
+                    kind, source = volume.get("type", "volume"), volume.get("source", "")
+                    assert kind in ("bind", "volume", "tmpfs"), (path.name, name, volume)
+                    assert set(volume) <= {"type", "source", "target", "read_only", "tmpfs"}, (
+                        path.name,
+                        name,
+                        volume,
+                    )
+                if kind == "bind":
+                    assert source in ALLOWED_BINDS[name], (path.name, name, source)
+                elif kind == "volume":
+                    assert source in ALLOWED_NAMED_VOLUMES.get(name, frozenset()), (
+                        path.name,
+                        name,
+                        source,
+                    )
+                else:
+                    assert "source" not in volume, (path.name, name, volume)
+
+
+def test_the_app_roles_keep_copied_secrets_in_memory() -> None:
+    """Точка входа образа копирует секреты из ``/run/host-secrets`` в ``/run/secrets`` владельцу
+    ``app`` (``docker-entrypoint.sh``). Без tmpfs копия — в записываемом слое контейнера: ключ CA
+    и ключ шифрования полей лежали бы на диске хоста всё время жизни контейнера и попадали бы в
+    ``docker commit``/``export`` (роаст 001.25, раунд 2). Каждая служба с секретами хоста держит
+    ``/run/secrets`` в tmpfs."""
+    base_file, overlays = _compose_files()
+    base = yaml.safe_load(base_file.read_text(encoding="utf-8"))
+    roles = {
+        name: service
+        for name, service in base["services"].items()
+        if any(
+            isinstance(item, dict) and str(item.get("target", "")).startswith("/run/host-secrets/")
+            for item in service.get("secrets") or []
+        )
+    }
+    assert set(roles) == {"api", "worker-critical", "worker-background", "scheduler"}, set(roles)
+    for name, service in roles.items():
+        tmpfs = service.get("tmpfs") or []
+        mounts = [tmpfs] if isinstance(tmpfs, str) else tmpfs
+        assert any(str(m).split(":", 1)[0] == "/run/secrets" for m in mounts), (name, tmpfs)
+    for overlay in overlays:
+        for name, service in (
+            yaml.safe_load(overlay.read_text(encoding="utf-8")).get("services") or {}
+        ).items():
+            assert "tmpfs" not in service, (overlay.name, name, "оверлей не переопределяет tmpfs")
 
 
 def test_the_containers_that_hold_bodies_have_a_memory_ceiling_and_no_swap() -> None:

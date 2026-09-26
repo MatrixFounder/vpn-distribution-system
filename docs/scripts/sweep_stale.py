@@ -271,16 +271,43 @@ def scan_file(sweep: Sweep, path: Path, rel: str) -> list[Hit]:
                 lead = [x for x in lines[max(0, i - 4) : i] if x.strip()]
                 fence_history = bool(lead and marker_re.search(lead[-1]))
             continue
+        # Фраза, перенесённая на следующую строку (комментарий, докстринг, абзац), ищется в паре
+        # строк без отступов и знаков комментария; совпадение, целиком лежащее в одной строке,
+        # найдено уже ею — пара его не дублирует. Строка пары — первая, история — по ней.
+        following = _joinable(lines[i + 1]) if i + 1 < len(lines) else ""
+        joined = f"{_joinable(line)} {following}"
         for pattern in sweep.patterns:
-            if pattern.regex.search(line):
+            single = pattern.regex.search(line)
+            wrapped = (
+                not single
+                and following
+                and pattern.regex.search(joined)
+                and not pattern.regex.search(lines[i + 1])
+            )
+            if single or wrapped:
                 history = (
                     (cutoff is not None and i >= cutoff)
                     or i in ranged
                     or bool(marker_re.search(line))
                     or (in_fence and fence_history)
                 )
-                hits.append(Hit(pattern.name, rel, i + 1, line.strip(), history))
+                text = line.strip() if single else joined.strip()
+                hits.append(Hit(pattern.name, rel, i + 1, text, history))
     return hits
+
+
+_JOIN_PREFIX = re.compile(r"^\s*(?:#+|//|--|\*|>)?\s*")
+# Строковый литерал Python, разорванный неявной конкатенацией (``"… момент "`` / ``"транзакции"``):
+# кавычки, префикс литерала и хвост из запятой или скобок склейке не нужны (роаст 001.25, раунд 4).
+_LITERAL_OPEN = re.compile(r"^(?:[rRbBuUfF]{1,2})?[\"']")
+_LITERAL_CLOSE = re.compile(r"[\"'][,)\]]*$")
+
+
+def _joinable(line: str) -> str:
+    """Строка без отступа, знака комментария и кавычек строкового литерала — для поиска фразы,
+    перенесённой через строку в комментарии, абзаце или неявной конкатенации литералов Python."""
+    text = _JOIN_PREFIX.sub("", line).rstrip()
+    return _LITERAL_CLOSE.sub("", _LITERAL_OPEN.sub("", text)).rstrip()
 
 
 GIT = shutil.which("git") or "git"
@@ -298,22 +325,46 @@ def _git(root: Path, *args: str) -> list[str]:
     )
 
 
+class MissingFilesError(Exception):
+    """Явно названные файлы, которых нет: развёртка по неполному списку отвечала бы «совпадений
+    0» с кодом 0 — ложная чистота (001.25: zsh передал список одним словом, скрипт получил один
+    несуществующий «файл»)."""
+
+
+class UnreadableFilesError(Exception):
+    """Явно названные файлы, которые не читаются как текст UTF-8: развёртка молча пропустила бы
+    их — та же ложная чистота (роаст 001.25, раунд 9)."""
+
+
 def select_files(
     root: Path, since: str | None, explicit: list[str], excludes: tuple[str, ...] = DEFAULT_EXCLUDES
 ) -> list[str]:
     if explicit:
-        names = explicit
-    else:
-        names = _git(root, "ls-files", "-m", "-o", "--exclude-standard")
-        if since:
-            names += _git(root, "diff", "--name-only", since)
+        # Явный список развёртывается целиком, при любом расширении: фильтр расширений — только
+        # для списка из git, иначе Dockerfile или .env.example, названные явно, молча выпадали
+        # бы с «совпадений 0» (роаст 001.25, раунд 9).
+        missing = [n for n in explicit if not (root / n).is_file()]
+        if missing:
+            raise MissingFilesError(missing)
+        unreadable = []
+        for n in explicit:
+            try:
+                (root / n).read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                unreadable.append(n)
+        if unreadable:
+            raise UnreadableFilesError(unreadable)
+        return sorted(dict.fromkeys(explicit))
+    names = _git(root, "ls-files", "-m", "-o", "--exclude-standard")
+    if since:
+        names += _git(root, "diff", "--name-only", since)
     unique = sorted(
         dict.fromkeys(
             n
             for n in names
             if n.endswith(EXTENSIONS)
             and (root / n).is_file()
-            and not (not explicit and any(n == e or n.startswith(e) for e in excludes))
+            and not any(n == e or n.startswith(e) for e in excludes)
         )
     )
     return unique
@@ -367,7 +418,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     root = root.resolve()
     sweep = load_sweep(args.patterns if args.patterns.is_absolute() else (root / args.patterns))
-    files = select_files(root, args.since, args.files, sweep.excludes)
+    try:
+        files = select_files(root, args.since, args.files, sweep.excludes)
+    except MissingFilesError as exc:
+        print(f"нет таких файлов: {', '.join(exc.args[0])}", file=sys.stderr)
+        return 2
+    except UnreadableFilesError as exc:
+        print(f"не текст UTF-8: {', '.join(exc.args[0])}", file=sys.stderr)
+        return 2
     hits = run(sweep, root, files)
     if args.json:
         print(
