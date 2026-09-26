@@ -127,7 +127,8 @@ async def test_failures_unknown_type_and_run_at(
                     NOOP,
                     {},
                     f"{PREFIX}later",
-                    run_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
+                    # по часам базы: выборку решает её now() (RF-2)
+                    run_at=await conn.fetchval("select now() + interval '1 hour'"),
                 )
             ).id
         assert await worker.run_once(pool, "background", "w") == 3, "boom, fatal и vanish"
@@ -280,11 +281,14 @@ async def test_wait_seconds_measures_backlog_and_claimed_delay(
 ) -> None:
     """Величина ожидания (ревью раунда 1, T-01/L-01/L-02): готовая, но не выбранная задача
     даёт ожидание «от готовности до сейчас»; выбранная — «от готовности до выборки»; строка в
-    ожидании повтора (``run_at`` позже прошлой выборки) не портит показатель. Всё по часам базы."""
+    ожидании повтора (``run_at`` позже прошлой выборки) не портит показатель. Всё по часам базы:
+    момент готовности тоже берётся из неё — по часам машины тестов, отстающим от базы или
+    опережающим её больше чем на 30 с (часы VM стенда переводит Parallels), задача была бы для
+    базы «не готова» и ожидание — 0,0 (RF-2)."""
     async with stand_pool(pg_dsn, monkeypatch, tmp_path) as pool:
         async with pool.acquire() as conn:
             base_wait = await jobs.wait_seconds(conn, dt.timedelta(minutes=5))
-            ready_since = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=30)
+            ready_since = await conn.fetchval("select now() - interval '30 seconds'")
             # Очередь critical: неизвестный тип, чтобы живой исполнитель стенда не выбрал.
             waiting = (
                 await jobs.enqueue(
@@ -345,11 +349,12 @@ async def test_critical_job_wait_is_within_half_of_n13_budget(
 async def test_claim_order_is_run_at_then_id(
     pg_dsn: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Выборка — самая ранняя по run_at, при равных run_at — по id (§5.4, контракт claim)."""
+    """Выборка — самая ранняя по run_at, при равных run_at — по id (§5.4, контракт claim).
+    Моменты — по часам базы: выборка сравнивает run_at с её now() (RF-2)."""
     async with stand_pool(pg_dsn, monkeypatch, tmp_path) as pool:
-        base = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=10)
         minute = dt.timedelta(minutes=1)
         async with pool.acquire() as conn:
+            base = await conn.fetchval("select now() - interval '10 minutes'")
             late = (
                 await jobs.enqueue(conn, "critical", NOOP, {}, f"{PREFIX}o3", base + 3 * minute)
             ).id
