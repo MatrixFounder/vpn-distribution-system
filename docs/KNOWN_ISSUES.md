@@ -50,6 +50,7 @@ introduce a new prefix. A common starter set (extend/replace freely):
 | `SEC-N` | `security`    | Security / auth / injection / secrets. |
 | `Q-N`   | `quality`     | Quality, UX, or robustness nits. |
 | `DF-N`  | `dogfood`     | Found while dogfooding the product itself. |
+| `RF-N`  | `test-flake`  | Тест, флакающий против стенда, найденный разбором прогона (run-feedback). |
 
 **Status vocabulary:** `open` · `fixed` · `documented` (accepted; guidance written) ·
 `by-design` (intended trade-off, not a defect) · `mitigated` · `wontfix`.
@@ -81,7 +82,13 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 
 ---
 
+## logic
+
+- **L-1** [Писатели истории: группа удалена между проверкой и вставкой — 500 вместо 404](issues/l-1-history-writers-fk-race.md) — severity `LOW`, status `open`, opened 2026-10-02
+
+
 ## test-flake
 
 - **RF-1** [test_scheduler_leadership_lock флакает против стенда](issues/rf-1-scheduler-leadership-lock-flake.md) — severity `SEV-3`, status `open`, opened 2026-09-15
 - **RF-2** [test_wait_seconds_measures_backlog_and_claimed_delay смешивает часы машины тестов и базы](issues/rf-2-wait-seconds-test-mixes-clocks.md) — severity `LOW`, status `fixed`, opened 2026-09-27, resolved 2026-09-27
+- **RF-3** [Тесты очереди с верхней временной границей флакают против стенда](issues/rf-3-jobs-timing-bounds-flake.md) — severity `LOW`, status `open`, opened 2026-10-02

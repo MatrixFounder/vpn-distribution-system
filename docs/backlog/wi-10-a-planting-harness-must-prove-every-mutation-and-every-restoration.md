@@ -85,3 +85,11 @@ planting, what was observed rather than a bare "red".
 **Related.** [WI-2](wi-2-builder-side-guards-need-a-planted-regression-before-trust.md) — establishes
 that guards must be planted; this item is about the mechanics that make a planting trustworthy, and
 does not duplicate it. Finding `fnd-20260910-134631-024a576a`.
+
+## Уточнение (2026-10-02, vpn-distribution-system 001.23)
+
+Замер посадки действителен, только если окружение набора было живо весь прогон: харнес проверяет
+доступность внешних зависимостей набора (база, очередь, канал до стенда) до и после прогона и ищет
+в журнале отказ подключения; прогон с аварией окружения — «НЕ ИЗМЕРЕНО», а не счёт красных. Случай:
+канал до стенда упал посреди прогона, и две посадки «измерили» 90 и 164 красных вместо одного-двух
+(finding `fnd-20261002-182715-b5f1308f`). Изменение текста правила — для владельца фреймворка.
