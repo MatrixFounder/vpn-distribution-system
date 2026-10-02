@@ -10,11 +10,18 @@
 ``nodes.billing_group_id`` не изменился (UC-09 A1), **TC-E2E-02** — два изменения коэффициента
 подряд дают два интервала без пересечения (§4.9), и критерий приёмки «добавление ноды в группу
 доступа не изменяет тарифы». Коды (001.20) остаются на заглушках. Операции нод (001.24) — в том
-же перечне, их сценарий — ``test_nodes``."""
+же перечне, их сценарий — ``test_nodes``.
+
+001.23: **TC-E2E-01** — поздний отчёт получает коэффициент своего периода (UC-04 A7), историю
+пишет ``GroupService`` настоящими сменами, читает ``multiplier.resolve``; писатели истории
+действуют с ``now()`` базы (момента в сигнатурах и в теле нет), их переопределение читает
+``resolve``, открытый интервал впереди часов базы — 409."""
 
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
+import types
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -22,7 +29,8 @@ from typing import Any
 import asyncpg
 import httpx
 import pytest
-from app.domain import codes
+from app.domain import codes, multiplier
+from app.domain import groups as groups_module
 from app.domain.groups import Assignment, GroupService
 from app.errors import ApiError
 from app.security.sessions import SessionStore
@@ -313,6 +321,16 @@ async def test_uc09_groups_and_multiplier_step(pg_dsn: str, redis_url: str) -> N
                 headers=headers,
             )
             assert response.status_code == 422, (bad, response.text)
+        # 001.23: момента смены в теле нет — смена действует с часов базы, не задним числом и не
+        # на будущее; прежнее поле ``valid_from`` — 422, а не молчаливый пропуск, и действующий
+        # интервал (9.9) не тронут: список ниже это сверяет.
+        for moment in ("2020-01-01T00:00:00Z", "2031-01-01T00:00:00Z"):
+            scheduled = await client.post(
+                f"/api/v1/admin/groups/billing/{group_id}/multiplier",
+                json={"multiplier": "3.0", "valid_from": moment},
+                headers=headers,
+            )
+            assert scheduled.status_code == 422, (moment, scheduled.text)
         listed = await client.get("/api/v1/admin/groups/billing")
         shown = {g["id"]: g["current_multiplier"] for g in listed.json()}
         assert shown[group_id] == "9.9", "показывается действующий интервал, а не первый"
@@ -402,7 +420,189 @@ async def test_uc09_a3_multiplier_history_has_no_overlap(pg_dsn: str) -> None:
         assert rows[0]["valid_to"] == rows[1]["valid_from"], "интервалы стыкуются без зазора"
         assert rows[1]["valid_to"] is None, "последний интервал действует"
         assert first.valid_to is None and second.multiplier == Decimal("3.0")
+        assert (first.previous_multiplier, second.previous_multiplier) == (None, Decimal("2.0"))
         assert hours.nodes == [plain, plain], "час закрыт только у ноды без переопределения"
+        assert hours.moments == [(plain, first.valid_from), (plain, second.valid_from)], (
+            "час закрыт тем же моментом, которым открыт новый интервал"
+        )
+
+
+async def test_uc04_a7_late_report_gets_the_multiplier_of_its_period(pg_dsn: str) -> None:
+    """TC-E2E-01 001.23 (UC-04 A7, §4.9 «Датированность», AC-07): коэффициент группы 2.0, затем
+    смена на 3.0; отчёт за период, начавшийся при 2.0, принятый после смены, получает 2.0 —
+    выбор идёт по ``period_start`` строки, а не по моменту приёма. Историю пишет доменная служба
+    панели (``GroupService``) настоящими сменами по часам базы, читает ``resolve``, поэтому тест
+    сверяет и согласие писателя интервалов с их читателем: стык ``valid_to`` прежнего =
+    ``valid_from`` нового принадлежит новому. ``period_start`` — микросекунда после начала
+    интервала 2.0, а не само начало: смена, укоротившая прежний интервал (переписавшая прошлое),
+    оставила бы начало покрытым и прошла бы незамеченной. Что смена позже периода, проверяется
+    явно — это предусловие, а не случай. Смена не трогает уже разрешённое: тот же период до и
+    после неё — 2.0 и то же списание."""
+    raw = 1_000_000_001
+    async with catalog(pg_dsn) as conn:
+        group = await billing_group(conn, "late")
+        node_id = await node(conn, group, 66)
+        pool = await asyncpg.create_pool(pg_dsn, min_size=1, max_size=2)
+        assert pool is not None
+        try:
+            service = GroupService(pool, RecordingHours())
+            await service.set_billing_group(node_id, group)
+            two = await service.set_group_multiplier(group, 2000)
+            period_start = two.valid_from + dt.timedelta(microseconds=1)
+            before_change = await multiplier.resolve(conn, node_id, period_start)
+            three = await service.set_group_multiplier(group, 3000)
+        finally:
+            await pool.close()
+
+        assert three.valid_from > period_start, "предусловие: смена позже начала периода"
+        assert before_change == multiplier.Resolved(2000, group, "group")
+        late = await multiplier.resolve(conn, node_id, period_start)
+        assert late == multiplier.Resolved(2000, group, "group"), "коэффициент своего периода"
+        assert multiplier.billable(raw, late.multiplier_milli) == 2_000_000_002
+        received = three.valid_from + dt.timedelta(minutes=30)
+        at_receipt = await multiplier.resolve(conn, node_id, received)
+        assert at_receipt == multiplier.Resolved(3000, group, "group"), "момент приёма — 3.0"
+        boundary = await multiplier.resolve(conn, node_id, three.valid_from)
+        assert boundary.multiplier_milli == 3000, "стык принадлежит новому интервалу"
+
+
+class _AppClock(dt.datetime):
+    """Часы приложения, заведомо далёкие от часов базы: граница интервала их не видит."""
+
+    @classmethod
+    def now(cls, tz: dt.tzinfo | None = None) -> _AppClock:
+        return cls(2000, 1, 1, tzinfo=dt.UTC)
+
+
+async def test_history_writers_take_effect_now_and_resolve_reads_them(
+    pg_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Писатели истории после 001.23 (решения заказчика после раундов 1 и 2 роаста): смена
+    действует с ``now()`` базы — ни задним числом (§4.9), ни на будущее (data-model §4.2.2
+    «``valid_to = now()``»): момента в сигнатурах и в теле маршрута нет, часы приложения
+    (подменены на 2000 год) в границу не входят. Проверяется записанная история, а не только
+    возвращённое значение: у ноды есть назначение, открытое час назад (с переопределением, в
+    группе, которой нет в денормализации ``nodes``), и ``set_billing_group`` закрывает его ровно
+    моментом нового — без зазора и без захода в прошлое: ``resolve`` за микросекунду до стыка —
+    прежние группа и переопределение, на стыке — новые. Прежние значения возвращаются из
+    закрытой строки истории, а не из ``nodes`` (Audit Log §4.16). Час учёта закрыт тем же
+    моментом. Открытый интервал, начатый позже ``now()`` смены (его записала транзакция, начатая
+    позже и закоммиченная раньше, или часы базы шагнули назад), — 409 с моментом его начала, а не
+    500 от ``CHECK``, и история не тронута; этот случай заводится прямой вставкой, потому что
+    гонку в тесте не воспроизвести детерминированно. Интервал, записанный между проверкой и
+    закрытием, проверка не видит — это моделирует подмена её запроса на пустой: закрытие
+    упирается в ``CHECK``, и ответ — тот же 409, только без момента."""
+    monkeypatch.setattr(
+        groups_module,
+        "dt",
+        types.SimpleNamespace(datetime=_AppClock, timedelta=dt.timedelta, UTC=dt.UTC),
+    )
+    async with catalog(pg_dsn) as conn:
+        group = await billing_group(conn, "writer")
+        old_group = await billing_group(conn, "old")
+        ahead_group = await billing_group(conn, "ahead")
+        node_id = await node(conn, group, 67)
+        ahead_node = await node(conn, ahead_group, 68)
+        opened: dt.datetime = await conn.fetchval(
+            "insert into node_billing_assignments "
+            "(node_id, billing_group_id, multiplier_override_milli, valid_from) "
+            "values ($1, $2, 4000, now() - interval '1 hour') returning valid_from",
+            node_id,
+            old_group,
+        )
+        ahead: dt.datetime = await conn.fetchval("select now() + interval '1 hour'")
+        await conn.execute(
+            "insert into billing_group_multipliers "
+            "(billing_group_id, multiplier_milli, valid_from) values ($1, 5000, $2)",
+            ahead_group,
+            ahead,
+        )
+        await conn.execute(
+            "insert into node_billing_assignments (node_id, billing_group_id, valid_from) "
+            "values ($1, $2, $3)",
+            ahead_node,
+            ahead_group,
+            ahead,
+        )
+        pool = await asyncpg.create_pool(pg_dsn, min_size=1, max_size=2)
+        assert pool is not None
+        try:
+            hours = RecordingHours()
+            service = GroupService(pool, hours)
+            before: dt.datetime = await conn.fetchval("select now()")
+            assigned = await service.set_billing_group(node_id, group, 3000)
+            changed = await service.set_group_multiplier(group, 2000)
+            changed_again = await service.set_group_multiplier(group, 2500)
+            after: dt.datetime = await conn.fetchval("select now()")
+            refusals = []
+            with pytest.raises(ApiError) as refused:
+                await service.set_group_multiplier(ahead_group, 2000)
+            refusals.append((refused.value.status, refused.value.code, refused.value.details))
+            with pytest.raises(ApiError) as refused:
+                await service.set_billing_group(ahead_node, ahead_group)
+            refusals.append((refused.value.status, refused.value.code, refused.value.details))
+            # Интервал, записанный между проверкой и закрытием (гонка), проверка не видит: её
+            # запрос подменён на пустой, и закрытие упирается в ``CHECK`` — тоже 409, без момента.
+            missed = (
+                "select null::timestamptz "
+                "where $1::uuid is not null and $2::timestamptz is not null"
+            )
+            monkeypatch.setattr(groups_module, "_OPEN_AHEAD_MULTIPLIER", missed)
+            monkeypatch.setattr(groups_module, "_OPEN_AHEAD_ASSIGNMENT", missed)
+            with pytest.raises(ApiError) as refused:
+                await service.set_group_multiplier(ahead_group, 2000)
+            refusals.append((refused.value.status, refused.value.code, refused.value.details))
+            with pytest.raises(ApiError) as refused:
+                await service.set_billing_group(ahead_node, ahead_group)
+            refusals.append((refused.value.status, refused.value.code, refused.value.details))
+        finally:
+            await pool.close()
+
+        history = await conn.fetch(
+            "select billing_group_id, multiplier_override_milli, valid_from, valid_to "
+            "from node_billing_assignments where node_id = $1 order by valid_from",
+            node_id,
+        )
+        assert [tuple(r) for r in history] == [
+            (old_group, 4000, opened, assigned.valid_from),
+            (group, 3000, assigned.valid_from, None),
+        ], "прежнее назначение закрыто ровно моментом нового"
+        assert before <= assigned.valid_from <= changed.valid_from <= after, "момент — часы базы"
+        assert changed.valid_from < changed_again.valid_from <= after
+        assert (assigned.previous_billing_group_id, assigned.previous_override_milli) == (
+            old_group,
+            4000,
+        ), "прежние значения — из истории, а не из nodes"
+        assert (changed.previous_multiplier, changed_again.previous_multiplier) == (
+            None,
+            Decimal("2.0"),
+        )
+        just_before = assigned.valid_from - dt.timedelta(microseconds=1)
+        assert await multiplier.resolve(conn, node_id, just_before) == (
+            multiplier.Resolved(4000, old_group, "node")
+        ), "до стыка — прежнее назначение"
+        assert await multiplier.resolve(conn, node_id, assigned.valid_from) == (
+            multiplier.Resolved(3000, group, "node")
+        ), "переопределение писателя — то, что читает resolve"
+        assert hours.moments == [(node_id, assigned.valid_from)], "час закрыт моментом смены"
+        assert refusals == [
+            (409, "conflict", {"open_valid_from": ahead.isoformat()}),
+            (409, "conflict", {"open_valid_from": ahead.isoformat()}),
+            (409, "conflict", {}),
+            (409, "conflict", {}),
+        ]
+        multipliers = await conn.fetch(
+            "select multiplier_milli, valid_from, valid_to from billing_group_multipliers "
+            "where billing_group_id = $1",
+            ahead_group,
+        )
+        assignments = await conn.fetch(
+            "select billing_group_id, valid_from, valid_to from node_billing_assignments "
+            "where node_id = $1",
+            ahead_node,
+        )
+        assert [tuple(r) for r in multipliers] == [(5000, ahead, None)], "история не тронута"
+        assert [tuple(r) for r in assignments] == [(ahead_group, ahead, None)], "не тронута"
 
 
 async def test_adding_a_node_to_an_access_group_does_not_change_plans(pg_dsn: str) -> None:

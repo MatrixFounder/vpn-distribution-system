@@ -33,8 +33,9 @@ UC-09 шаги 1–2, 6, A1…A3; R-18, R-23).
 
 Audit Log (§4.16, UC-09 шаг 7) требует записывать прежнее и новое значение коэффициента.
 Писать некуда: ``app/security/audit.py::record`` вводит 001.46, и 001.19 от неё не зависит.
-Обе операции истории возвращают прежнее и новое значение вызывающему, чтобы маршруту было что
-передать в журнал, когда заглушка появится (передано в примечания 001.46).
+Обе операции истории возвращают прежнее и новое значение вызывающему (прежнее — из закрытой
+строки истории, 001.23), чтобы маршруту было что передать в журнал, когда заглушка появится
+(передано в примечания 001.46).
 """
 
 from __future__ import annotations
@@ -45,15 +46,13 @@ from decimal import Decimal
 from typing import Annotated, Any, NamedTuple, Protocol
 
 import asyncpg
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.db.pool import transaction
-from app.domain.multiplier import MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
+from app.domain.multiplier import MILLI_PER_UNIT, MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
 from app.errors import ApiError
 
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100)]
-# Коэффициент показывается и принимается как десятичная дробь, хранится в тысячных (§4.2.2).
-MILLI_PER_UNIT = 1000
 
 
 class AccessGroupIn(BaseModel):
@@ -92,11 +91,15 @@ class BillingGroupPatch(BaseModel):
 
 
 class MultiplierIn(BaseModel):
-    """Новый интервал коэффициента (§4.9, UC-09 A2): 0.0…10.0 с шагом 0.1, действует с
-    ``valid_from`` (по умолчанию — с текущего момента) до следующего интервала."""
+    """Новый интервал коэффициента (§4.9, UC-09 A2): 0.0…10.0 с шагом 0.1, действует с момента
+    смены (``now()`` транзакции) до следующего интервала. Момента в теле нет: смена не
+    планируется и не задаётся задним числом (data-model §4.2.2 «``valid_to = now()``»; решение
+    заказчика в 001.23). Лишние поля — 422: прежний ``valid_from`` клиента иначе молча
+    пропускался бы, и клиент считал бы смену запланированной."""
+
+    model_config = ConfigDict(extra="forbid")
 
     multiplier: Decimal = Field(ge=0, le=10)
-    valid_from: dt.datetime | None = None
 
     @field_validator("multiplier")
     @classmethod
@@ -107,11 +110,15 @@ class MultiplierIn(BaseModel):
 
 
 class Multiplier(BaseModel):
+    """Записанный интервал коэффициента и прежнее значение — из закрытого им интервала (Audit
+    Log §4.16 требует прежнее и новое; ``None`` — у группы действующего интервала не было)."""
+
     id: uuid.UUID
     billing_group_id: uuid.UUID
     multiplier: Decimal
     valid_from: dt.datetime
     valid_to: dt.datetime | None
+    previous_multiplier: Decimal | None
 
 
 class BillingGroup(BillingGroupIn):
@@ -173,8 +180,34 @@ def from_milli(milli: int) -> Decimal:
     return (Decimal(milli) / MILLI_PER_UNIT).quantize(Decimal("0.1"))
 
 
+# Открытый интервал начат не раньше ``now()`` этой транзакции: его записала транзакция,
+# начатая позже и закоммиченная раньше, или часы базы шагнули назад. Закрытие дало бы
+# ``valid_to <= valid_from`` — нарушение ``CHECK`` таблицы, которое без перевода было бы 500.
+# Причину ответ не называет — их две, и по одному отказу их не различить; называет момент.
+_OPEN_AHEAD_MULTIPLIER = (
+    "select valid_from from billing_group_multipliers "
+    "where billing_group_id = $1 and valid_to is null and valid_from >= $2"
+)
+_OPEN_AHEAD_ASSIGNMENT = (
+    "select valid_from from node_billing_assignments "
+    "where node_id = $1 and valid_to is null and valid_from >= $2"
+)
+
+
 def _conflict(message: str) -> ApiError:
     return ApiError("conflict", message, status=409)
+
+
+def _open_is_ahead(open_from: dt.datetime | None) -> ApiError:
+    """409: действующий интервал начат не раньше момента смены, и до его начала смена
+    невозможна. Момент начала — в ``details``, когда он известен (проверка перед закрытием);
+    если интервал записан между проверкой и закрытием, остаётся только отказ ``CHECK``."""
+    return ApiError(
+        "conflict",
+        "действующий интервал начат не раньше момента смены — смена до его начала невозможна",
+        status=409,
+        details={"open_valid_from": open_from.isoformat()} if open_from is not None else {},
+    )
 
 
 def _not_found(what: str) -> ApiError:
@@ -329,31 +362,34 @@ class GroupService:
 
     async def add_multiplier(self, group_id: uuid.UUID, data: MultiplierIn) -> Multiplier:
         """Маршрут панели: десятичный коэффициент запроса → тысячные хранения (§4.2.2)."""
-        return await self.set_group_multiplier(
-            group_id, to_milli(data.multiplier), valid_from=data.valid_from
-        )
+        return await self.set_group_multiplier(group_id, to_milli(data.multiplier))
 
-    async def set_group_multiplier(
-        self, group_id: uuid.UUID, milli: int, *, valid_from: dt.datetime | None = None
-    ) -> Multiplier:
+    async def set_group_multiplier(self, group_id: uuid.UUID, milli: int) -> Multiplier:
         """Новый интервал коэффициента группы (§4.9; UC-09 шаг 1, A2, A3): действующий интервал
         закрывается моментом, которым открывается новый, поэтому история не рвётся и не
         перекрывается. Для каждой ноды группы, которая берёт коэффициент отсюда (то есть без
         собственного переопределения), час учёта закрывается в этой же транзакции.
 
-        ``valid_from`` в прошлом, попавшее в уже закрытый интервал, отклоняется ограничением
-        ``EXCLUDE`` — 409: задним числом списания не переписываются (§4.9 «Датированность»)."""
+        Момент смены — ``now()`` транзакции (``_now``): ни задним числом, ни на будущее.
+        Действующий интервал, начатый не раньше этого момента, — 409 с моментом его начала
+        (``_open_is_ahead``); одновременная смена той же группы — 409 от ``EXCLUDE``. Прежнее
+        значение — из закрываемой строки (``returning``), а не отдельным чтением до записи."""
         validate_multiplier(milli)
         async with transaction(self._pool) as conn:
-            at = await self._boundary(conn, valid_from)
+            at = await self._now(conn)
             if not await conn.fetchval("select true from billing_groups where id = $1", group_id):
                 raise _not_found("тарифицируемая группа")
-            await conn.execute(
-                "update billing_group_multipliers set valid_to = $2 "
-                "where billing_group_id = $1 and valid_to is null",
-                group_id,
-                at,
-            )
+            if (ahead := await conn.fetchval(_OPEN_AHEAD_MULTIPLIER, group_id, at)) is not None:
+                raise _open_is_ahead(ahead)
+            try:
+                previous_milli = await conn.fetchval(
+                    "update billing_group_multipliers set valid_to = $2 "
+                    "where billing_group_id = $1 and valid_to is null returning multiplier_milli",
+                    group_id,
+                    at,
+                )
+            except asyncpg.CheckViolationError as exc:
+                raise _open_is_ahead(None) from exc
             try:
                 row = await conn.fetchrow(
                     "insert into billing_group_multipliers "
@@ -372,6 +408,7 @@ class GroupService:
             multiplier=from_milli(row["multiplier_milli"]),
             valid_from=row["valid_from"],
             valid_to=row["valid_to"],
+            previous_multiplier=None if previous_milli is None else from_milli(previous_milli),
         )
 
     async def set_billing_group(
@@ -379,8 +416,6 @@ class GroupService:
         node_id: uuid.UUID,
         group_id: uuid.UUID,
         override_milli: int | None = None,
-        *,
-        valid_from: dt.datetime | None = None,
     ) -> Assignment:
         """Назначить ноде тарифицируемую группу и, необязательно, собственный коэффициент
         (UC-09 шаг 6). Действующее назначение закрывается, открывается новое, денормализация
@@ -396,24 +431,35 @@ class GroupService:
         одновременные назначения в очередь и превратила бы их в «последний выиграл» — вторая
         группа записалась бы поверх первой без единого отказа, а A1 требует отклонения. Арбитром
         остаётся ограничение целостности; последовательная смена группы (штатный перенос ноды)
-        при этом проходит, потому что действующий интервал к тому моменту уже закрыт."""
+        при этом проходит, потому что действующий интервал к тому моменту уже закрыт.
+
+        Момент — ``now()`` транзакции (``_now``): назначение не планируется, поэтому
+        денормализация ``nodes`` и выбор нод для закрытия часа (``_close_hours``) всегда описывают
+        действующее назначение. Открытое назначение, начатое не раньше этого момента, — 409 с
+        моментом его начала (``_open_is_ahead``). Прежние группа и переопределение — из
+        закрываемой строки истории (``returning``), а не из ``nodes``: строка ноды не
+        блокируется, и денормализация, прочитанная до закрытия, могла описывать уже не то, что
+        закрыто."""
         if override_milli is not None:
             validate_multiplier(override_milli)
         async with transaction(self._pool) as conn:
-            at = await self._boundary(conn, valid_from)
-            previous = await conn.fetchrow(
-                "select billing_group_id, multiplier_milli from nodes where id = $1", node_id
-            )
-            if previous is None:
+            at = await self._now(conn)
+            if not await conn.fetchval("select true from nodes where id = $1", node_id):
                 raise _not_found("нода")
             if not await conn.fetchval("select true from billing_groups where id = $1", group_id):
                 raise _not_found("тарифицируемая группа")
-            await conn.execute(
-                "update node_billing_assignments set valid_to = $2 "
-                "where node_id = $1 and valid_to is null",
-                node_id,
-                at,
-            )
+            if (ahead := await conn.fetchval(_OPEN_AHEAD_ASSIGNMENT, node_id, at)) is not None:
+                raise _open_is_ahead(ahead)
+            try:
+                closed = await conn.fetchrow(
+                    "update node_billing_assignments set valid_to = $2 "
+                    "where node_id = $1 and valid_to is null "
+                    "returning billing_group_id, multiplier_override_milli",
+                    node_id,
+                    at,
+                )
+            except asyncpg.CheckViolationError as exc:
+                raise _open_is_ahead(None) from exc
             try:
                 await conn.execute(
                     "insert into node_billing_assignments "
@@ -437,17 +483,26 @@ class GroupService:
             node_id=node_id,
             billing_group_id=group_id,
             override_milli=override_milli,
-            previous_billing_group_id=previous["billing_group_id"],
-            previous_override_milli=previous["multiplier_milli"],
+            previous_billing_group_id=None if closed is None else closed["billing_group_id"],
+            previous_override_milli=None if closed is None else closed["multiplier_override_milli"],
             valid_from=at,
         )
 
     @staticmethod
-    async def _boundary(conn: asyncpg.Connection, valid_from: dt.datetime | None) -> dt.datetime:
-        """Граница интервалов: переданный момент или ``now()`` транзакции. Значение берётся из
-        базы один раз и подставляется в оба оператора — закрытый и открытый интервалы обязаны
-        стыковаться ровно, а часы приложения и базы расходятся."""
-        at: dt.datetime = await conn.fetchval("select coalesce($1::timestamptz, now())", valid_from)
+    async def _now(conn: asyncpg.Connection) -> dt.datetime:
+        """Граница интервалов — ``now()`` транзакции. Значение берётся из базы один раз и
+        подставляется в оба оператора: закрытый и открытый интервалы обязаны стыковаться ровно,
+        а часы приложения и базы расходятся. Других моментов писатели не принимают — смена не
+        задаётся задним числом (§4.9 «Изменение коэффициента действует только на записи,
+        создаваемые после изменения») и не планируется (data-model §4.2.2 «``valid_to =
+        now()``»; решение заказчика в 001.23).
+
+        Окно, которое этим не закрыто: ``now()`` — момент начала транзакции, а новая граница
+        видна только после её фиксации. Отчёт, чей ``period_start`` попадает в окно «начало
+        транзакции смены — её фиксация» (длительность транзакции плюс допуск часов ноды 5 с,
+        §5.9), разрешится по прежнему интервалу, если приём успел раньше фиксации. Передано в
+        001.77: коэффициент интервала отчёта фиксировать по первой части и переиспользовать."""
+        at: dt.datetime = await conn.fetchval("select now()")
         return at
 
     async def _close_hours(

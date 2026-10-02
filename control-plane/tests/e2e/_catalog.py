@@ -132,8 +132,10 @@ async def access_group(conn: asyncpg.Connection, label: str) -> uuid.UUID:
 
 
 async def node(conn: asyncpg.Connection, billing_group_id: uuid.UUID, octet: int) -> uuid.UUID:
-    """Нода в тарифицируемой группе, с открытым интервалом назначения — как после ввода в
-    эксплуатацию. Адрес из документационного диапазона 203.0.113.0/24."""
+    """Нода в тарифицируемой группе (``nodes.billing_group_id``) **без** интервала назначения —
+    его заводит тест: таблица ``resolve`` 001.23 пишет историю прямыми вставками с моментов
+    марта 2026, и открытый интервал от ``now()`` пересёкся бы с её последним открытым
+    интервалом. Адрес из документационного диапазона 203.0.113.0/24."""
     node_id: uuid.UUID = await conn.fetchval(
         "insert into nodes (code, name, country, city, provider, public_ipv4, billing_group_id, "
         "bandwidth_mbps, max_conn_per_ip) values ($1, $1, 'JP', 'Tokyo', 'probe', $2, $3, 1000, 8) "
@@ -146,18 +148,23 @@ async def node(conn: asyncpg.Connection, billing_group_id: uuid.UUID, octet: int
 
 
 class RecordingHours:
-    """Служба учёта, запоминающая, какой ноде и когда закрыли час (UC-09 A3). Подключение
-    запоминается тоже: закрытие обязано идти на подключении транзакции смены, а не на своём."""
+    """Служба учёта, запоминающая, какой ноде, каким моментом и на каком подключении закрыли час
+    (UC-09 A3): момент обязан совпасть с границей нового интервала (data-model §4.2.2 «тем же
+    моментом»), подключение — быть подключением транзакции смены, а не своим."""
 
     def __init__(self) -> None:
-        self.closed: list[tuple[uuid.UUID, object]] = []
+        self.closed: list[tuple[uuid.UUID, object, object]] = []
 
     async def close_hour(self, conn: object, node_id: uuid.UUID, at: object) -> None:
-        self.closed.append((node_id, conn))
+        self.closed.append((node_id, conn, at))
 
     @property
     def nodes(self) -> list[uuid.UUID]:
-        return [node_id for node_id, _ in self.closed]
+        return [node_id for node_id, _, _ in self.closed]
+
+    @property
+    def moments(self) -> list[tuple[uuid.UUID, object]]:
+        return [(node_id, at) for node_id, _, at in self.closed]
 
 
 async def plan(

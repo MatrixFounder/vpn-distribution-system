@@ -1,0 +1,41 @@
+{
+  "task": "001.23",
+  "history_markers": [
+    "раунд",
+    "было",
+    "прежн",
+    "раньше",
+    "снят",
+    "поправка"
+  ],
+  "history_sections": {
+    "tests/tests-001/report-001-23.md": "^## Раунд 1 — роаст"
+  },
+  "patterns": [
+    {
+      "name": "границу строки billable держит порог полосы (001.33; раунд 1, L4)",
+      "regex": "граница строки[^.;\\n]*порог|порог[а-я]* (?:прироста )?по полосе[^.;\\n]*не (?:по )?(?:ширин|тип)|граница по порогу полосы",
+      "current": "порог полосы границу не удерживает; проверка billable ≤ INT8_MAX или граница bandwidth_mbps — 001.77/001.34"
+    },
+    {
+      "name": "raw строки до одного INT8_MAX (001.33; раунд 1, L4)",
+      "regex": "0…INT8_MAX|в ``?0…INT8_MAX",
+      "current": "uplink + downlink, до двух INT8_MAX"
+    },
+    {
+      "name": "до ввода ноды — действующая группа nodes.billing_group_id (раунд 1, L2/L3)",
+      "regex": "до ввода[^.;\\n]*nodes\\.billing_group_id|1\\.0 и ``?nodes\\.billing_group_id|действующ[а-я]+ групп[а-я]* ноды \\(``?nodes\\.billing_group_id",
+      "current": "1.0 из default и группа первого назначения"
+    },
+    {
+      "name": "неизвестная нода — голый LookupError (раунд 1, L9)",
+      "regex": "нода — ``?LookupError``?[;,.]|``LookupError``, а не 1\\.0|— ``?LookupError``?, а не",
+      "current": "NoBillingAssignmentError(LookupError)"
+    },
+    {
+      "name": "моменты писателей истории: прошлые/будущие valid_from (раунды 1–2, L1 и решение после раунда 2)",
+      "regex": "retroactive_change|MultiplierIn\\.valid_from|будущими моментами|прошлыми моментами|запланированн[а-я]+ на будущее|не позже запланированного|``_boundary``",
+      "current": "смена действует с now() базы; момента в сигнатурах и теле нет; 409 — открытый интервал впереди часов базы"
+    }
+  ]
+}

@@ -33,7 +33,7 @@ from app.accounting.service import (
 )
 from app.domain import multiplier
 from app.domain.composition import STUB_QUOTA_GRANT_BYTES
-from app.domain.nodes import STUB_BILLING_GROUP_ID, STUB_NODE_ID, stub_node
+from app.domain.nodes import STUB_NODE_ID, stub_node
 from app.domain.statuses import STREAM_GATE
 from app.errors import ApiError
 from pydantic import ValidationError
@@ -187,27 +187,6 @@ async def test_quota_and_limits_stubs() -> None:
     assert refused == ["disabled", "pending", "provisioning", "suspended"]
     await quotas.on_report(Sentinel(), NODE, {USER: 4096})  # заглушки: без исключений и без базы
     await LimitsService(Sentinel()).check(Sentinel(), [USER])
-
-
-async def test_multiplier_stub_is_the_default_level() -> None:
-    """Заглушка разрешения — 1.0 из уровня `default` (§4.9); `billable` заглушки читает только
-    `raw` — коэффициент вводит 001.23 вместе с таблицей случаев."""
-    assert (
-        multiplier.DEFAULT_MULTIPLIER_MILLI,
-        multiplier.MULTIPLIER_MILLI_MAX,
-        multiplier.MULTIPLIER_STEP_MILLI,
-    ) == (1000, 10000, 100)
-    resolved = await multiplier.resolve(Sentinel(), NODE, AT)
-    assert resolved == multiplier.Resolved(
-        multiplier_milli=1000, billing_group_id=STUB_BILLING_GROUP_ID, source="default"
-    )
-    assert multiplier.billable(1_000_000_001, 1000) == 1_000_000_001
-    assert multiplier.billable(5, 3000) == 5, "заглушка: коэффициент не применяется (001.23)"
-    for bad in (-100, 10100, 1050):  # вне диапазона, вне диапазона, не кратно шагу
-        with pytest.raises(ValueError, match="коэффициент"):
-            multiplier.Resolved(bad, STUB_BILLING_GROUP_ID, "group")
-    assert multiplier.Resolved(0, STUB_BILLING_GROUP_ID, "node").multiplier_milli == 0
-    assert multiplier.Resolved(10000, STUB_BILLING_GROUP_ID, "node").multiplier_milli == 10000
 
 
 async def test_reconciliation_aggregation_and_observation_stubs() -> None:
