@@ -158,47 +158,118 @@ Python-пакетов; общая база данных; межмодульны�
 
 ### 3.3 Диаграмма компонентов
 
+**Рисунок 3.1.** Входы в систему — кто обращается к хосту Control Plane и к ноде, и по какому
+протоколу.
+
 ```mermaid
+%%{init: {"layout": "dagre", "look": "classic", "flowchart": {"nodeSpacing": 45, "rankSpacing": 55, "wrappingWidth": 400}}}%%
 flowchart TB
-  subgraph Host["Control Plane — один хост (О-4)"]
-    NGX[C-09 nginx]
-    API[C-01 api]
-    WC[C-02 worker-critical]
-    WB[C-02 worker-background]
-    SCH[C-03 scheduler]
-    PG[(C-07 PostgreSQL 18)]
-    RD[(C-08 Redis 8)]
-    PRM[C-10 Prometheus + Alertmanager]
-    BK[C-11 pgbackrest]
-  end
-  WEB[C-04 web: cabinet, admin]
-  CLI[Клиентское приложение]
+  accTitle: Входы в систему
+  accDescr: Кто обращается к хосту Control Plane и к ноде, и через что.
+  WEB(["C-04 web<br/><small>кабинет · панель в браузере</small>"])
+  CLI(["Клиентское приложение"])
   subgraph Node["VPN-нода × 10"]
-    AG[C-05 node-agent]
-    XR[C-06 xray]
-    NFT[nftables]
+    AG("C-05 node-agent")
+    XR["C-06 xray"]
+    NFT["nftables"]
   end
-  CLI -->|HTTPS /s/token| NGX
-  WEB -->|HTTPS /api/v1| NGX
-  NGX --> API
-  AG -->|HTTPS mTLS /agent/v1 long-poll| NGX
+  subgraph Host["Хост Control Plane"]
+    NGX["C-09 nginx"]
+    API("C-01 api")
+  end
+  WEB -->|"HTTPS /api/v1"| NGX
+  CLI -->|"HTTPS /s/{token}"| NGX
+  CLI -->|"VPN · порты inbound"| XR
+  %% layout only: one extra rank keeps the agent edge clear of the client edges
+  AG --->|"HTTPS mTLS /agent/v1"| NGX
+  AG -->|"gRPC 127.0.0.1"| XR
+  AG -->|"nft"| NFT
+  NGX -->|"HTTP"| API
+  class WEB,CLI ext
+  class AG,API wf
+  class XR,NFT,NGX svc
+  style Node fill:#7F7F7F0D,stroke:#90A4AE
+  style Host fill:#7F7F7F0D,stroke:#90A4AE
+  classDef ext fill:#FFFFFF,stroke:#607D8B,color:#263238,stroke-dasharray:4 3
+  classDef wf fill:#E8F0FB,stroke:#2E5A8A,color:#0F2A47
+  classDef svc fill:#F5F5F5,stroke:#546E7A,color:#1F2A30
+```
+
+- Стрелка — вызов, от вызывающего к вызываемому.
+- Штриховой овал — клиент; скруглённый прямоугольник — процесс проекта; прямоугольник —
+  прокси, Xray-core или nftables.
+- Серая рамка — хост Control Plane или VPN-нода.
+- По ребру C-05 → C-09 агент держит long-poll (§3.4). Внутренние связи хоста — рисунки 3.2 и 3.3.
+
+**Рисунок 3.2.** Процессы приложения — кого вызывают C-01, C-02 и C-03.
+
+```mermaid
+%%{init: {"layout": "dagre", "look": "classic", "flowchart": {"nodeSpacing": 45, "rankSpacing": 55, "wrappingWidth": 400}}}%%
+flowchart TB
+  accTitle: Процессы приложения и хранилища
+  accDescr: Кого вызывают процессы C-01, C-02 и C-03 на хосте и за его пределами.
+  SCH("C-03 scheduler")
+  API("C-01 api")
+  WRK("C-02 worker<br/><small>critical · background</small>")
+  PG[("C-07 PostgreSQL 18")]
+  RD[("C-08 Redis 8")]
+  MAIL["SMTP-реле"]
+  WH(["Webhook-получатели"])
+  SCH --> PG
   API --> PG
   API --> RD
-  WC --> PG
-  WB --> PG
-  SCH --> PG
-  API -. pub/sub node:{id} .-> RD
-  RD -. пробуждение long-poll .-> API
-  AG -->|gRPC 127.0.0.1| XR
-  AG --> NFT
-  CLI -->|VLESS, Trojan| XR
-  WB -->|SMTP| MAIL[SMTP-реле]
-  WB -->|HTTPS| WH[Webhook-получатели]
-  PRM --> API
-  PRM -->|webhook| OPS[Оператор]
-  BK --> PG
-  BK -->|шифрованные копии| S3[(Удалённое хранилище)]
+  WRK --> PG
+  WRK -->|"публикация node:{id}"| RD
+  WRK -->|"SMTP"| MAIL
+  WRK --> WH
+  class WH ext
+  class SCH,API,WRK wf
+  class PG,RD db
+  class MAIL svc
+  classDef ext fill:#FFFFFF,stroke:#607D8B,color:#263238,stroke-dasharray:4 3
+  classDef wf fill:#E8F0FB,stroke:#2E5A8A,color:#0F2A47
+  classDef db fill:#F3EEF9,stroke:#5E35B1,color:#2A1653
+  classDef svc fill:#F5F5F5,stroke:#546E7A,color:#1F2A30
 ```
+
+- Стрелка — вызов, от вызывающего к вызываемому.
+- Скруглённый прямоугольник — процесс проекта; цилиндр — хранилище; прямоугольник — внешний
+  сервис; штриховой овал — внешний получатель.
+- C-02 — два экземпляра: почту и webhook отправляет `worker-background`.
+- В PostgreSQL C-02 держит очередь задач и данные, C-03 ставит периодические задачи. В Redis
+  C-01 держит сессии и счётчики частоты и подписан на каналы `node:{id}`.
+
+**Рисунок 3.3.** Наблюдаемость и резервные копии — кого вызывают C-10 и C-11.
+
+```mermaid
+%%{init: {"layout": "dagre", "look": "classic", "flowchart": {"nodeSpacing": 45, "rankSpacing": 55, "wrappingWidth": 400}}}%%
+flowchart TB
+  accTitle: Наблюдаемость и резервные копии
+  accDescr: Кого вызывают C-10 и C-11.
+  PRM("C-10 Prometheus + Alertmanager")
+  BK{{"C-11 pgbackrest"}}
+  APPS("C-01…C-03<br/><small>api · worker · scheduler</small>")
+  OPS(["Оператор"])
+  PG[("C-07 PostgreSQL 18")]
+  S3[("Удалённое хранилище<br/><small>S3-совместимое</small>")]
+  PRM -->|"/metrics"| APPS
+  PRM -->|"алерты · webhook"| OPS
+  BK -->|"копии · архив WAL"| PG
+  BK -->|"шифрованные копии"| S3
+  class OPS ext
+  class PRM,APPS wf
+  class PG,S3 db
+  class BK infra
+  classDef ext fill:#FFFFFF,stroke:#607D8B,color:#263238,stroke-dasharray:4 3
+  classDef wf fill:#E8F0FB,stroke:#2E5A8A,color:#0F2A47
+  classDef db fill:#F3EEF9,stroke:#5E35B1,color:#2A1653
+  classDef infra fill:#FAFAFA,stroke:#8D6E63,color:#3E2723
+```
+
+- Стрелка — вызов, от вызывающего к вызываемому.
+- Скруглённый прямоугольник — процесс; шестиугольник — резервное копирование; цилиндр —
+  хранилище; штриховой овал — оператор.
+- Не нарисовано: метрики нод C-10 получает через C-01.
 
 ### 3.4 Потоки данных
 

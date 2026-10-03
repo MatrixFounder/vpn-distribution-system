@@ -25,6 +25,10 @@
 
 # .claude runtime locks.
 /.claude/*.lock
+
+# Project-local entries (kept in version control).
+!/.agent/skills/vm-deploy
+!/.claude/skills/vm-deploy
 # <<< end agentic-development framework <<<
 
 # >>> project >>>
