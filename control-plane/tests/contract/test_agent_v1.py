@@ -15,6 +15,13 @@
 заголовков по-прежнему разбирает боевой код; обмен отвечает записанным ответом, а подлинность
 записанной выдачи проверяется отдельно (`test_the_recorded_enrollment_is_a_real_issuance`).
 Настоящие поиск и обмен — `tests/e2e/test_nodes.py` на живой базе.
+
+С 001.34 настоящий и приём отчёта: он пишет ключ и состояние интервала, а ответ зависит от того,
+что принято раньше, и от часов сервера — предусловие фикстуры отчёта (`given.accepted`,
+`given.server_time`, README). Здесь приём отвечает записанным ответом (`RecordedAccounting`,
+правило «нода отчитывается только за себя» — настоящее); что живой приём при том же предусловии
+отвечает ровно записанным — `tests/e2e/test_reports.py::test_the_recorded_report_answers_are_
+what_the_live_service_gives`.
 """
 
 from __future__ import annotations
@@ -30,10 +37,12 @@ from typing import Any, get_args
 
 import httpx
 import pytest
-from app.agent_api.deps import current_node
+from app.accounting.service import Accept, AccountingService, ReportIn, own_node
+from app.agent_api.deps import current_node, get_accounting_service
 from app.agent_api.enroll import get_node_service
 from app.db.pool import db_pool
-from app.domain.nodes import STUB_NODE_ID, Enrollment, NodeService, NodeStatus
+from app.domain.nodes import STUB_NODE_ID, Enrollment, Node, NodeService, NodeStatus
+from app.errors import ApiError
 from app.main import create_app
 from app.security.ca import InternalCA, serial_hex
 from cryptography import x509
@@ -56,8 +65,12 @@ EXPECTED = {
     "quota-request",
     "quota-request-refused",
     "report",
-    "report-node-mismatch",
     "report-continuation",
+    "report-duplicate",
+    "report-inconsistent",
+    "report-interval-closed",
+    "report-node-mismatch",
+    "report-rejected-time",
     "state-delta",
     "state-filtered",
     "state-cursor-ahead",
@@ -121,7 +134,32 @@ class RecordedEnrollment(NodeService):
         )
 
 
-def agent_app(node_status: NodeStatus = "active") -> httpx.AsyncClient:
+class RecordedAccounting(AccountingService):
+    """Приём, отвечающий записанным ответом фикстуры: настоящий приём пишет в базу, а прогон
+    герметичен. Маршрут настоящий — тело разбирает ``ReportIn``, ответ собирает ``Accept`` или
+    единый формат ошибки, правило «нода отчитывается только за себя» — боевое ``own_node``."""
+
+    def __init__(self, recorded: dict[str, Any]) -> None:
+        super().__init__(NoDatabase())
+        self.recorded = recorded
+
+    async def accept_report(self, node: Node, report: ReportIn, fingerprint: str) -> Accept:
+        own_node(node, report)
+        if self.recorded["status"] == 200:
+            return Accept.model_validate(self.recorded["body"])
+        error = self.recorded["body"]["error"]
+        raise ApiError(
+            error["code"],
+            error["message"],
+            status=self.recorded["status"],
+            details=error["details"],
+            headers={k: v for k, v in self.recorded["headers"].items() if k != "Content-Type"},
+        )
+
+
+def agent_app(
+    node_status: NodeStatus = "active", recorded: dict[str, Any] | None = None
+) -> httpx.AsyncClient:
     """Приложение без базы. ``node_status`` — предусловие фикстуры: статус ноды живёт на
     сервере, а не в запросе, поэтому фикстура объявляет его отдельно — иначе запрос не
     определял бы ответ и воспроизведение было бы невозможно. Подменён только поиск ноды в базе:
@@ -131,6 +169,8 @@ def agent_app(node_status: NodeStatus = "active") -> httpx.AsyncClient:
     app.dependency_overrides[db_pool] = NoDatabase
     app.dependency_overrides[current_node] = node_as(node_status)
     app.dependency_overrides[get_node_service] = RecordedEnrollment
+    if recorded is not None:
+        app.dependency_overrides[get_accounting_service] = lambda: RecordedAccounting(recorded)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     return httpx.AsyncClient(transport=transport, base_url="http://control-plane")
 
@@ -163,7 +203,8 @@ async def test_recorded_request_gets_the_recorded_response(path: Path) -> None:
     """Запрос из фикстуры → ровно тот ответ, который в ней записан: код и разобранное тело."""
     fixture = load(path)
     request, expected = fixture["request"], fixture["response"]
-    async with agent_app(fixture["given"]["node_status"]) as client:
+    recorded = expected if fixture["operation"] == "reports" else None
+    async with agent_app(fixture["given"]["node_status"], recorded) as client:
         response = await client.request(
             request["method"],
             request["path"],
@@ -214,7 +255,7 @@ def test_the_recorded_enrollment_is_a_real_issuance() -> None:
     for stem in presenting:
         headers = load(CONTRACTS / f"{stem}.json")["request"]["headers"]
         assert headers.get("X-Client-Cert") == STUB_CLIENT_CERT, stem
-    assert len(presenting) == 19, presenting
+    assert len(presenting) == 23, presenting
 
 
 def test_config_checksum_is_sha256_of_the_canonical_form() -> None:
@@ -276,7 +317,9 @@ def test_every_answer_records_the_headers_its_status_requires() -> None:
     так не ловится — это утверждение об отсутствии, а не страж. Требуемый набор выводится из
     кода ответа: у состояния (200 и 204) обязателен `Cache-Control: no-store` — в теле
     credentials; у отказов 403, 409 и 426 обязателен `Retry-After` — иначе частоту повторов
-    определяет только агент, а сервер повлиять на неё не может."""
+    определяет только агент, а сервер повлиять на неё не может. Исключение — 409 приёма отчёта
+    (`rejected_time`, `interval_closed`, 001.34): такую часть агент не повторяет вовсе и сразу
+    шлёт следующую, пауза здесь означала бы остановку слива буфера — `Retry-After` у них нет."""
     checked = {200: 0, 204: 0, 403: 0, 409: 0, 426: 0}
     for path in fixture_files():
         fixture = load(path)
@@ -286,12 +329,15 @@ def test_every_answer_records_the_headers_its_status_requires() -> None:
         # же файле, что и проверяемые заголовки, и подмена его вместе с удалением заголовка
         # прошла бы молча — снова утверждение об отсутствии вместо стража.
         is_state = fixture["request"]["path"] == "/agent/v1/state"
+        is_report = fixture["request"]["path"] == "/agent/v1/reports"
         assert fixture["operation"] == ("state" if is_state else fixture["operation"])
         if status == 200:
             assert headers.get("Content-Type", "").startswith("application/json"), path.stem
         if is_state and status in (200, 204):
             assert headers.get("Cache-Control") == "no-store", path.stem
-        if status in (403, 409, 426):
+        if is_report and status == 409:
+            assert "Retry-After" not in headers, path.stem
+        elif status in (403, 409, 426):
             assert headers.get("Retry-After", "").isdigit(), path.stem
         checked[status] = checked.get(status, 0) + 1
     assert all(checked[status] for status in (200, 204, 403, 409, 426)), checked

@@ -153,6 +153,57 @@ def test_period_end_must_follow_period_start() -> None:
     ReportIn.model_validate({**VALID, "period_end": "2026-09-10T12:00:00.000001Z"})
 
 
+def test_a_moment_outside_utc_is_refused_by_the_model() -> None:
+    """Грамматика метки допускает год 0001 с положительным смещением и год 9999 с отрицательным, а
+    такой момент в UTC — вне `datetime`: asyncpg переводит параметр `timestamptz` в UTC и падал
+    бы `OverflowError` — 500 и бесконечный повтор агента вместо отказа (роаст 001.34, раунд 3,
+    F-5). Модель приводит метку к UTC, непредставимая — `value_error`; края диапазона в UTC и
+    смещение, отличное от нуля, — приём."""
+    address = VALID["online_ips"][0]
+    for label, body in (
+        (
+            "start before year 1 in UTC",
+            {
+                **VALID,
+                "period_start": "0001-01-01T00:00:00+00:01",
+                "period_end": "0001-01-01T00:01:00Z",
+            },
+        ),
+        (
+            "end after year 9999 in UTC",
+            {
+                **VALID,
+                "period_start": "9999-12-31T23:59:00Z",
+                "period_end": "9999-12-31T23:59:59-00:01",
+            },
+        ),
+        (
+            "last_seen before year 1 in UTC",
+            {**VALID, "online_ips": [{**address, "last_seen": "0001-01-01T00:00:00+00:01"}]},
+        ),
+    ):
+        assert errors_of(body) == ["value_error"], label
+    ReportIn.model_validate(
+        {**VALID, "period_start": "0001-01-01T00:00:00Z", "period_end": "0001-01-01T00:01:00Z"}
+    )
+    ReportIn.model_validate(
+        {
+            **VALID,
+            "period_start": "9999-12-31T23:59:00Z",
+            "period_end": "9999-12-31T23:59:59.999999Z",
+        }
+    )
+    shifted = ReportIn.model_validate(
+        {
+            **VALID,
+            "period_start": "2026-09-10T15:00:00+03:00",
+            "period_end": "2026-09-10T15:01:00+03:00",
+        }
+    )
+    assert shifted.period_start == dt.datetime(2026, 9, 10, 12, tzinfo=dt.UTC)
+    assert shifted.period_start.utcoffset() == dt.timedelta(0)
+
+
 def test_users_are_unique_in_lines_and_pairs_are_unique_in_addresses() -> None:
     """Первичные ключи `traffic_lines` (пользователь) и `user_online_ips` (пользователь × адрес
     в пределах ноды): дубль — 422. Один адрес у двух пользователей и два адреса у одного — не

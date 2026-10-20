@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Sequence
+from typing import Any
 
 import asyncpg
 import psycopg
@@ -211,9 +212,9 @@ async def check_accounting_constraints(conn: asyncpg.Connection) -> None:
     epoch = uuid.uuid4()
     t0 = dt.datetime(2026, 2, 1, tzinfo=dt.UTC)
     report = (
-        "insert into traffic_reports (node_id, counter_epoch, report_seq, period_start, "
-        "period_end, status, node_rx_bytes, node_tx_bytes) "
-        "values ($1, $2, $3, $4, $5, 'accepted', $6, $7)"
+        "insert into traffic_reports (node_id, counter_epoch, report_seq, parts_total, "
+        "period_start, period_end, status, node_rx_bytes, node_tx_bytes) "
+        "values ($1, $2, $3, 1, $4, $5, 'accepted', $6, $7)"  # parts_total — с 140 (001.34)
     )
     await conn.execute(report, node_id, epoch, 1, t0, t0 + dt.timedelta(minutes=1), 10, 20)
     await rejected(
@@ -462,3 +463,161 @@ async def test_maintenance_uses_utc_regardless_of_session_timezone(
     finally:
         await conn.close()
         await drop_partitions_except(migrate_env, pg_dsn, before)
+
+
+# --- 140: приём отчёта — состояние интервала и правила частей (задача 001.34) ---
+
+
+async def _schema_140(conn: asyncpg.Connection) -> dict[str, Any]:
+    """Объекты миграции 140, видимые роли приложения."""
+    return {
+        "labels": await conn.fetchval("select enum_range(null::report_status)::text[]"),
+        "intervals": await conn.fetchval("select to_regclass('report_intervals') is not null"),
+        "parts_total": await conn.fetchval(
+            "select count(*) from information_schema.columns where table_schema = "
+            "'control_plane' and table_name = 'traffic_reports' and column_name = 'parts_total'"
+        ),
+        "lines_key": await conn.fetchval(
+            "select to_regclass('traffic_lines_interval_user_key') is not null"
+        ),
+        "bandwidth": await conn.fetchval(
+            "select pg_get_constraintdef(oid) from pg_constraint "
+            "where conname = 'nodes_bandwidth_mbps_check'"
+        ),
+    }
+
+
+async def test_migration_140_apply_rollback_reapply(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Применение даёт значение `interval_closed`, колонку `parts_total`, таблицу
+    `report_intervals`, уникальность пользователя в интервале и границу полосы; откат ровно до
+    140 возвращает прежнее (перечисление — без нового значения, полоса — только `> 0`); откат
+    останавливается, пока есть отказанная часть со статусом `interval_closed` (пересоздание
+    перечисления не приводит её к старому типу), — удалить её решает оператор."""
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        applied = await _schema_140(conn)
+        assert applied["labels"][-1] == "interval_closed"
+        assert applied["intervals"] and applied["parts_total"] == 1 and applied["lines_key"]
+        assert "100000" in str(applied["bandwidth"])
+        group = await conn.fetchval(
+            "insert into billing_groups (name) values ($1) returning id", f"t140-{uuid.uuid4()}"
+        )
+        node_id = await insert_node(conn, f"t140-{uuid.uuid4().hex[:8]}", group)
+        await conn.execute(
+            "insert into traffic_reports (node_id, counter_epoch, report_seq, parts_total, "
+            "period_start, period_end, status, node_rx_bytes, node_tx_bytes) values ($1, $2, 1, "
+            "1, now() - interval '1 minute', now(), 'interval_closed', 0, 0)",
+            node_id,
+            uuid.uuid4(),
+        )
+    finally:
+        await conn.close()
+    try:
+        blocked = run_cli(migrate_env, "migrate", "--rollback")
+        assert blocked.returncode != 0, "откат не приводит отказанную часть к старому типу молча"
+        assert "interval_closed" in blocked.stderr, blocked.stderr
+        conn = await asyncpg.connect(pg_dsn)
+        try:
+            await conn.execute("delete from traffic_reports where node_id = $1", node_id)
+        finally:
+            await conn.close()
+        rollback_through(migrate_env, "140_report_acceptance")
+        conn = await asyncpg.connect(pg_dsn)
+        try:
+            rolled = await _schema_140(conn)
+        finally:
+            await conn.close()
+        assert rolled["labels"] == ["accepted", "duplicate", "rejected_time", "held_anomaly"]
+        assert not rolled["intervals"] and rolled["parts_total"] == 0 and not rolled["lines_key"]
+        assert rolled["bandwidth"] == "CHECK ((bandwidth_mbps > 0))"
+    finally:
+        assert run_cli(migrate_env, "migrate").returncode == 0
+        conn = await asyncpg.connect(pg_dsn)
+        try:
+            await conn.execute("delete from traffic_reports where node_id = $1", node_id)
+            await conn.execute("delete from nodes where id = $1", node_id)
+            await conn.execute("delete from billing_groups where id = $1", group)
+        finally:
+            await conn.close()
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        assert await _schema_140(conn) == applied
+    finally:
+        await conn.close()
+
+
+async def test_report_constraints_of_140(pg_dsn: str) -> None:
+    """Ограничения 140 под app_rw: номер отчёта с единицы, число частей 1…1000, у интервала —
+    принятых частей не больше объявленных, закрытие и его причина вместе, причина из перечня (все
+    пять, `capped` — с раунда 2 роаста), `capped` — только удержанный и с нулевыми суммами (часть
+    сверх потолка открытых не списывается — раунд 3), интервалы ноды не перекрываются (EXCLUDE),
+    полоса ноды до 100 000 Мбит/с."""
+    conn = await asyncpg.connect(pg_dsn)
+    group = await conn.fetchval(
+        "insert into billing_groups (name) values ($1) returning id", f"t140-{uuid.uuid4()}"
+    )
+    node_id = await insert_node(conn, f"t140-{uuid.uuid4().hex[:8]}", group)
+    epoch = uuid.uuid4()
+    report = (
+        "insert into traffic_reports (node_id, counter_epoch, report_seq, parts_total, "
+        "period_start, period_end, status, node_rx_bytes, node_tx_bytes) values ($1, $2, $3, $4, "
+        "now() - interval '1 minute', now(), 'accepted', 0, 0)"
+    )
+    interval = (
+        "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+        "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, accepted_downlink_bytes, "
+        "held, first_received_at, last_received_at, closed_at, close_reason) values ($1, $2, $3, "
+        "$3::timestamptz + interval '1 minute', 1, $4, $5, 0, 0, $7 is not distinct from "
+        "'capped', now(), now(), $6, $7)"
+    )
+    capped = (
+        "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+        "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, accepted_downlink_bytes, "
+        "held, first_received_at, last_received_at, closed_at, close_reason) values ($1, $2, $3, "
+        "$3::timestamptz + interval '1 minute', 1, 1, 1, $4, $5, $6, now(), now(), now(), "
+        "'capped')"
+    )
+    start = dt.datetime(2026, 10, 1, 12, tzinfo=dt.UTC)
+    try:
+        for seq, parts in ((0, 1), (1, 0), (1, 1001)):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(report, node_id, epoch, seq, parts)
+        await conn.execute(report, node_id, epoch, 1, 1000)
+        for parts_total, accepted, closed_at, reason in (
+            (2, 3, None, None),
+            (2, 0, None, None),
+            (2, 1, start, None),
+            (2, 1, None, "completed"),
+            (2, 1, start, "lost"),
+        ):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(
+                    interval, node_id, epoch, start, parts_total, accepted, closed_at, reason
+                )
+        await conn.execute(interval, node_id, epoch, start, 2, 1, None, None)
+        with pytest.raises(asyncpg.ExclusionViolationError):
+            await conn.execute(
+                interval, node_id, uuid.uuid4(), start + dt.timedelta(seconds=30), 1, 1, None, None
+            )
+        await conn.execute(
+            interval, node_id, uuid.uuid4(), start + dt.timedelta(minutes=1), 1, 1, None, None
+        )
+        later = start + dt.timedelta(minutes=2)
+        for reason in ("completed", "superseded", "deadline", "age", "capped"):
+            await conn.execute(interval, node_id, uuid.uuid4(), later, 1, 1, later, reason)
+            later += dt.timedelta(minutes=1)
+        for uplink, downlink, held in ((0, 0, False), (1, 0, True), (0, 1, True)):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(capped, node_id, uuid.uuid4(), later, uplink, downlink, held)
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute("update nodes set bandwidth_mbps = 100001 where id = $1", node_id)
+        await conn.execute("update nodes set bandwidth_mbps = 100000 where id = $1", node_id)
+    finally:
+        await conn.execute("delete from report_intervals where node_id = $1", node_id)
+        await conn.execute("delete from traffic_reports where node_id = $1", node_id)
+        await conn.execute("delete from nodes where id = $1", node_id)
+        await conn.execute("delete from billing_groups where id = $1", group)
+        await conn.close()

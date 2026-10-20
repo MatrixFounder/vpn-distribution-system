@@ -12,7 +12,7 @@ import asyncpg
 import psycopg
 from app.cli import migrate_dsn
 
-from ._cli import MIGRATIONS_DIR, migration_count, rollback_through, run_cli
+from ._cli import MIGRATIONS_DIR, clear_test_reports, migration_count, rollback_through, run_cli
 from ._spec import EXPECTED_ENUMS
 
 EXPECTED_EXTENSIONS = {"btree_gist", "citext"}
@@ -131,6 +131,7 @@ async def test_migration_0001_apply_rollback_apply(
     assert applied.returncode == 0, applied.stderr
     assert_migrated_state(await db_state(pg_dsn), migrate_env)
 
+    clear_test_reports(migrate_env)  # откат 140 не приводит отказанные части к старому типу
     rolled_back = run_cli(migrate_env, "migrate", "--rollback-all")
     assert rolled_back.returncode == 0, rolled_back.stderr
     state = await db_state(pg_dsn)

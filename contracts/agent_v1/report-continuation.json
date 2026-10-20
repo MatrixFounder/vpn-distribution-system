@@ -2,7 +2,11 @@
   "operation": "reports",
   "summary": "Продолжение того же интервала после деления отказанной по размеру части: те же границы периода и эпоха, report_seq 2, parts_total вырос с 2 до 3, другой пользователь, нулевые счётчики интерфейса; last_accepted_seq — номер этой части",
   "given": {
-    "node_status": "active"
+    "node_status": "active",
+    "server_time": "2026-09-10T12:01:05Z",
+    "accepted": [
+      "report"
+    ]
   },
   "request": {
     "method": "POST",

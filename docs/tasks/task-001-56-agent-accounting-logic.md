@@ -130,4 +130,15 @@
   200 при пятнадцати в секунду, 14 с), long-poll состояния — не меньше 60 с; частота парка по
   остальным операциям — 15 в секунду на всех.
 
+Найдено при 001.34 (приём), решить здесь:
+
+- отказы части — 409 `rejected_time` и `interval_closed` с `details.reason` и
+  `details.last_accepted_seq`, без `Retry-After`: часть не повторять, номер пропустить
+  (`max(last_accepted_seq, номер) + 1`) и сразу слать следующую; 422 `report_inconsistent`
+  (`parts_total_decreased`, `counters_in_continuation`, `user_in_another_part`, `seq_reused`)
+  — ошибка агента: пропустить номер так же и поднять алерт; ответ на повтор отказанного
+  ключа — тот же отказ с `reason: repeated`;
+- фикстуры отчёта несут в `given` часы сервера (`server_time`) и принятые до них фикстуры
+  (`accepted`) — README каталога контрактов.
+
 Зависимости: 001.53, 001.77. Приоритет: Critical. Оценка: 4 ч. Этап: 9 — Node Agent (Go).

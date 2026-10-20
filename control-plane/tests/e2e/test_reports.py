@@ -6,30 +6,47 @@ R-19, R-21…R-24, R-26, R-27, R-29, R-48; UC-04): контракт обеих �
 
 Байтовая форма ответов закреплена отдельно — `tests/contract/test_agent_v1.py` по фикстурам
 `contracts/agent_v1/report*.json` и `quota-request.json`.
+
+Задача 001.34 — приём на живой базе (раздел внизу файла, стенд — `tests/e2e/_reporting.py`):
+TC-E2E-01…03 (повтор, порог, время), A3, правила частей и интервалов, якорь, закрытие, потолки
+открытых интервалов и смен эпохи, состав ноды, перепроверка identity под блокировкой, точка
+продолжения, статусы §4.6, метрика длительности, фикстуры отчёта как ответы живого приёма.
+Проверки формы и маршрута выше остаются герметичными: приём в них — `ShapeOnlyAccounting`.
 """
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
+from app import metrics
 from app.accounting import quota, service
 from app.accounting.device_limit import DeviceLimitService
 from app.accounting.quota import QuotaGrant, QuotaService
 from app.accounting.service import (
+    _EPOCH_CHANGES,
     BODY_MAX_COMMAS,
     BODY_MAX_OPENERS,
+    REPORT_MAX_EPOCHS_PER_DAY,
     REPORT_MAX_LINES,
     REPORT_MAX_ONLINE_IPS,
+    REPORT_MAX_OPEN_INTERVALS,
     Accept,
     AccountingService,
     ReportIn,
+    _Acceptance,
+    anomaly_threshold,
+    own_node,
 )
 from app.agent_api.body import BoundedBodyRoute
 from app.agent_api.deps import (
@@ -41,6 +58,7 @@ from app.agent_api.deps import (
 from app.agent_api.router import router as agent_router
 from app.db.pool import db_pool
 from app.domain import composition
+from app.domain.nodes import _LOCK_NODE as REVOCATION_LOCK
 from app.domain.nodes import STUB_NODE_ID, Node, NodeStatus, stub_node
 from app.domain.statuses import INT8_MAX, STREAM_GATE
 from app.errors import VALIDATION_ERRORS_MAX, VALIDATION_LOC_MAX_CHARS
@@ -51,13 +69,31 @@ from fastapi.dependencies.utils import get_dependant
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
-from tests._agent import HEADERS, node_as
+from tests._agent import FINGERPRINT, HEADERS, node_as
 from tests._reports import USER_A, USER_B, VALID_REPORT, report_with, widest_report
+
+from ._reporting import (
+    Line,
+    ReportingStand,
+    db_now,
+    insert_identity,
+    insert_node,
+    insert_user,
+    reporting,
+    wait_blocked_by,
+)
 
 REPORTS = "/agent/v1/reports"
 QUOTA = "/agent/v1/quota/request"
 OTHER_NODE_ID = uuid.UUID("00000000-0000-7000-8000-0000000000bb")
 VALID_QUOTA: dict[str, Any] = {"user_id": USER_A, "consumed_bytes": 536870912}
+# Величины требований — литералами, а не из констант приёма: вход, выведенный из проверяемого
+# предела, растёт вместе с ним, и страж не краснеет (посадка P04). Допуск часов §5.9 — 5 с: точки
+# у границы — 3 с внутри, 7 и 10 с снаружи. Константы закреплены своими утверждениями в
+# `tests/unit/accounting/test_acceptance.py`.
+BUFFER_DEPTH = dt.timedelta(hours=24)  # Н-8: якорь первого интервала
+PARTS_DEADLINE = dt.timedelta(hours=25)  # срок закрытия после последней части (README)
+INTERVAL_AGE = dt.timedelta(hours=48)  # потолок возраста открытого интервала (README)
 
 
 class NoDatabase:
@@ -67,16 +103,31 @@ class NoDatabase:
         raise AssertionError(f"обращение к базе: {name}")
 
 
+class ShapeOnlyAccounting(AccountingService):
+    """Приём без базы для проверок формы тела, вентиля и маршрута: правило «нода отчитывается
+    только за себя» — настоящее (``own_node``, его же вызывает служба до транзакции), ответ —
+    точка продолжения, равная номеру части. Настоящий приём — тесты 001.34 ниже, на живой
+    базе."""
+
+    def __init__(self) -> None:
+        super().__init__(NoDatabase())
+
+    async def accept_report(self, node: Node, report: ReportIn, fingerprint: str) -> Accept:
+        own_node(node, report)
+        return Accept(last_accepted_seq=report.report_seq, duplicate=False)
+
+
 @asynccontextmanager
 async def agent(
     status: NodeStatus = "active", overrides: dict[Any, Any] | None = None
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Клиент раздела без базы: нода запроса — фиксированная карточка в статусе `status`, признаки
-    и версия разбираются настоящим кодом (`tests/_agent.py::node_as`); `overrides` — прочие
-    зависимости (в том числе другая нода)."""
+    и версия разбираются настоящим кодом (`tests/_agent.py::node_as`), приём — без базы
+    (``ShapeOnlyAccounting``); `overrides` — прочие зависимости (в том числе другая нода)."""
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
     app.dependency_overrides[current_node] = node_as(status)
+    app.dependency_overrides[get_accounting_service] = ShapeOnlyAccounting
     for dependency, replacement in (overrides or {}).items():
         app.dependency_overrides[dependency] = replacement
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
@@ -98,21 +149,15 @@ async def test_reports_and_quota_contract_in_openapi(app_client: httpx.AsyncClie
     необязательным, молча подменяется умолчанием), пределы списков — литералами."""
     schema = (await app_client.get("/openapi.json")).json()
     paths = schema["paths"]
-    for path, model in ((REPORTS, "Accept"), (QUOTA, "QuotaGrant")):
+    common = {"200", "400", "401", "403", "411", "413", "422", "426", "429", "503"}
+    # 409 — отказ части отчёта (001.34): у запроса гранта его нет.
+    for path, model, codes in (
+        (REPORTS, "Accept", common | {"409"}),
+        (QUOTA, "QuotaGrant", common),
+    ):
         operation = paths[path]["post"]
         assert operation["tags"] == ["agent"], path
-        assert set(operation["responses"]) == {
-            "200",
-            "400",
-            "401",
-            "403",
-            "411",
-            "413",
-            "422",
-            "426",
-            "429",
-            "503",
-        }
+        assert set(operation["responses"]) == codes, path
         answer = operation["responses"]["200"]["content"]["application/json"]["schema"]
         assert answer["$ref"].endswith(f"/{model}"), (path, answer)
         assert "requestBody" in operation, path
@@ -124,6 +169,27 @@ async def test_reports_and_quota_contract_in_openapi(app_client: httpx.AsyncClie
         assert "прокси" in paths[path]["post"]["responses"]["429"]["description"], (
             "429 для этих операций отдаёт прокси — сказано второй стороне обмена"
         )
+    refusals = paths[REPORTS]["post"]["responses"]
+    for code in (
+        "rejected_time",
+        "future",
+        "too_old",
+        "overlap",
+        "before_anchor",
+        "interval_closed",
+        "`closed`",
+        "out_of_range",
+        "repeated",
+    ):
+        assert code in refusals["409"]["description"], code
+    for code in (
+        "report_inconsistent",
+        "parts_total_decreased",
+        "counters_in_continuation",
+        "user_in_another_part",
+        "seq_reused",
+    ):
+        assert code in refusals["422"]["description"], code
     assert "1 МиБ" in paths[REPORTS]["post"]["responses"]["413"]["description"]
     assert "64 КиБ" in paths[QUOTA]["post"]["responses"]["413"]["description"]
 
@@ -163,23 +229,6 @@ async def test_reports_and_quota_contract_in_openapi(app_client: httpx.AsyncClie
         schema["components"]["schemas"]["Accept"]["properties"]["last_accepted_seq"]["minimum"] == 0
     )
     assert "Settings" not in schema["components"]["schemas"], "настройки не публикуются (WI-6)"
-
-
-async def test_a_report_is_accepted_with_the_stub_answer() -> None:
-    """TC-E2E-01: валидный отчёт → 200 `{last_accepted_seq: <номер части>, duplicate: false}`
-    (заглушка без состояния: последний принятый — только что принятая часть) — с
-    идентификатором своей ноды в теле и без него, первая часть и продолжение."""
-    async with agent() as client:
-        for body in (
-            VALID_REPORT,
-            {**VALID_REPORT, "node_id": str(STUB_NODE_ID)},
-            {**VALID_REPORT, "report_seq": 1},
-            {**VALID_REPORT, "report_seq": 4, "parts_total": 2, "node_rx_bytes": 0},
-        ):
-            response = await client.post(REPORTS, json=body, headers=HEADERS)
-            assert response.status_code == 200, response.text
-            assert response.json() == {"last_accepted_seq": body["report_seq"], "duplicate": False}
-            assert response.headers["content-type"].startswith("application/json")
 
 
 async def test_a_quota_request_is_answered_with_the_stub_grant() -> None:
@@ -942,10 +991,10 @@ class RecordingAccounting(AccountingService):
 
     def __init__(self) -> None:
         super().__init__(None)
-        self.reports: list[tuple[uuid.UUID, ReportIn]] = []
+        self.reports: list[tuple[uuid.UUID, ReportIn, str]] = []
 
-    async def accept_report(self, node: Node, report: ReportIn) -> Accept:
-        self.reports.append((node.id, report))
+    async def accept_report(self, node: Node, report: ReportIn, fingerprint: str) -> Accept:
+        self.reports.append((node.id, report, fingerprint))
         return Accept(last_accepted_seq=7, duplicate=True)
 
 
@@ -979,7 +1028,8 @@ async def test_routes_hand_the_parsed_bodies_to_the_domain_and_return_its_answer
         assert grant.json() == {"quota_grant_bytes": 5, "issued_seq": 3}
 
     assert OTHER_NODE_ID != stub_node().id, "страж сверяет запрошенную ноду, а не фиксированную"
-    assert [node_id for node_id, _ in accounting.reports] == [OTHER_NODE_ID]
+    assert [node_id for node_id, _, _ in accounting.reports] == [OTHER_NODE_ID]
+    assert accounting.reports[0][2] == FINGERPRINT, "приём перепроверит предъявленную identity"
     parsed = accounting.reports[0][1]
     assert parsed.report_seq == 3 and parsed.node_id is None
     assert [line.user_id for line in parsed.lines] == [uuid.UUID(USER_A), uuid.UUID(USER_B)]
@@ -1033,3 +1083,1321 @@ async def test_the_pool_and_the_collaborators_reach_the_services_through_the_gra
     assert built._quotas is quotas and built._device_limits is limits, (  # noqa: SLF001
         "фабрика отдаёт приёму коллег из графа, а не создаёт свои"
     )
+
+
+# --- 001.34: приём на живой базе (R-19, R-21, R-22; UC-04 шаги 5, 6, 9, A1, A3, A4, A5) ---
+#
+# Нода, её состав и identity — строки живой базы (``tests/e2e/_reporting.py``), раздел опознаёт
+# ноду настоящим ``current_node``, приём пишет ``traffic_reports`` и ``report_intervals``. Границы
+# периодов — от часов базы (допуск §5.9 меньше шага часов VM стенда).
+
+ALERTS = "app.accounting.service"  # журнал событий для алертов приёма (правила — 001.68)
+
+
+def refusal(response: httpx.Response) -> tuple[int, str, str | None]:
+    """Код ответа, машинный код ошибки и причина из ``details.reason``."""
+    error = response.json()["error"]
+    return response.status_code, error["code"], error["details"].get("reason")
+
+
+def alerts(caplog: pytest.LogCaptureFixture, node_id: uuid.UUID, event: str) -> list[str]:
+    """Записи ERROR журнала приёма о событии ``event`` этой ноды."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == ALERTS
+        and record.levelno == logging.ERROR
+        and event in record.getMessage()
+        and str(node_id) in record.getMessage()
+    ]
+
+
+async def seconds_from_base(stand: ReportingStand, delta: dt.timedelta) -> float:
+    """Смещение от ``base`` стенда до «сейчас базы + ``delta``» в секундах."""
+    return (await db_now(stand.conn) + delta - stand.base).total_seconds()
+
+
+async def test_tc_e2e_01_a_repeated_report_changes_nothing_and_says_duplicate(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """TC-E2E-01, AC-06 (Н-20, UC-04 A1): тот же ключ дважды — 200 оба раза, второй раз с
+    `duplicate: true` и той же точкой продолжения; строка отчёта одна, состояние интервала не
+    сдвинулось, записей баланса по ключу нет. Свой `node_id` в теле — штатно."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        user = stand.users[0]
+        body = {
+            **stand.part(1, 0, lines=[Line(user, 1000, 2000)], ips=[(user, "198.51.100.7")]),
+            "node_id": str(stand.node_id),
+            "node_rx_bytes": 5000,
+            "node_tx_bytes": 4000,
+        }
+        first = await stand.post(body)
+        assert first.status_code == 200, first.text
+        assert first.json() == {"last_accepted_seq": 1, "duplicate": False}
+        before = await stand.interval(0)
+        assert before is not None
+        again = await stand.post(body)
+        assert again.status_code == 200, again.text
+        assert again.json() == {"last_accepted_seq": 1, "duplicate": True}
+        assert await stand.statuses() == ["accepted"]
+        assert dict(await stand.interval(0) or {}) == dict(before), "повтор интервал не трогает"
+        row = await stand.report_row(1)
+        assert row is not None
+        assert (row["parts_total"], row["node_rx_bytes"], row["node_tx_bytes"]) == (1, 5000, 4000)
+        assert (before["accepted_uplink_bytes"], before["accepted_downlink_bytes"]) == (1000, 2000)
+        assert (before["parts_accepted"], before["close_reason"]) == (1, "completed")
+        balance = await stand.conn.fetchval(
+            "select count(*) from balance_entries where ref_key like $1", f"%{stand.node_id}%"
+        )
+        assert balance == 0, "повтор баланса не меняет"
+
+
+async def test_tc_e2e_02_growth_beyond_the_channel_is_held_and_charged_up_to_it(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """TC-E2E-02 (UC-04 A5, §5.9 «Защита от аномального отчёта»): порог — полоса ноды ×
+    длительность интервала на сумму uplink + downlink (байт пользователя проходит порт дважды —
+    решение заказчика 2026-10-20), к нарастающей сумме принятых частей интервала. Ровно порог —
+    приём; каждое направление в пределе, а сумма сверх — `held_anomaly`: 200 с продвижением
+    точки продолжения, отчёт сохранён, к суммам интервала прибавлена только доля в пределах
+    порога, разложенная по направлениям пропорционально части (её спишет 001.77), алерт.
+    Продолжение, чья сумма с прежней частью переходит порог, — удержание того же интервала.
+    Числа — литералами (1 Мбит/с × 60 с = 7 500 000 байт)."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        ceiling = anomaly_threshold(1, dt.timedelta(seconds=60))
+        assert ceiling == 7_500_000
+        a, b = stand.users[:2]
+        at_ceiling = await stand.post(stand.part(1, 0, lines=[Line(a, 3_000_000, 4_500_000)]))
+        assert at_ceiling.json() == {"last_accepted_seq": 1, "duplicate": False}
+        assert (await stand.report_row(1) or {})["status"] == "accepted"
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            over = stand.part(2, 60, lines=[Line(a, 5_000_000, 0), Line(b, 0, 5_000_000)])
+            held = await stand.post(over)
+        assert held.status_code == 200, held.text
+        assert held.json() == {"last_accepted_seq": 2, "duplicate": False}
+        assert (await stand.report_row(2) or {})["status"] == "held_anomaly", (
+            "по 5 МБ в каждую сторону — в пределе направления, но 10 МБ суммы — сверх"
+        )
+        interval = await stand.interval(60)
+        assert interval is not None and interval["held"] is True
+        assert (interval["accepted_uplink_bytes"], interval["accepted_downlink_bytes"]) == (
+            3_750_000,
+            3_750_000,
+        ), "к сумме — доля в пределах порога, а не вся часть"
+        assert (interval["close_reason"], interval["closed_at"] is not None) == (
+            "completed",
+            True,
+        ), "удержанный однокусочный закрывается сразу — места среди открытых не занимает"
+        assert alerts(caplog, stand.node_id, "held_anomaly"), caplog.text
+        replayed = await stand.post(over)
+        assert replayed.json() == {"last_accepted_seq": 2, "duplicate": True}, (
+            "повтор удержанного — дубликат, как принятого"
+        )
+
+        first = stand.part(3, 120, total=2, lines=[Line(a, 4_000_000, 0)])
+        assert (await stand.post(first)).status_code == 200
+        second = stand.part(4, 120, total=2, lines=[Line(b, 3_000_000, 1_000_000)])
+        assert (await stand.post(second)).json() == {"last_accepted_seq": 4, "duplicate": False}
+        assert (await stand.report_row(4) or {})["status"] == "held_anomaly"
+        split = await stand.interval(120)
+        assert split is not None and split["held"] is True
+        # Остаток 3 500 000 по части 3 000 000 / 1 000 000: 2 625 000 и 875 000.
+        assert (split["accepted_uplink_bytes"], split["accepted_downlink_bytes"]) == (
+            6_625_000,
+            875_000,
+        )
+        assert (split["parts_accepted"], split["close_reason"]) == (2, "completed")
+
+
+async def test_the_threshold_follows_the_length_of_the_interval(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Порог §5.9 — полоса × длительность **этого** интервала, а не штатных 60 с (роаст 001.34,
+    раунд 3, C1): при 1 Мбит/с интервал 30 с держит 3 750 000 байт суммы, интервал часа (предел
+    периода) — 450 000 000; байт сверх — удержание с долей ровно до порога. Числа — литералами."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        user = stand.users[0]
+        for seq, start, end, volume, status, charged in (
+            (1, -7260, -7230, 3_750_000, "accepted", 3_750_000),
+            (2, -7230, -7200, 3_750_001, "held_anomaly", 3_750_000),
+            (3, -7200, -3600, 450_000_000, "accepted", 450_000_000),
+            (4, -3600, 0, 450_000_001, "held_anomaly", 450_000_000),
+        ):
+            response = await stand.post(stand.part(seq, start, end, lines=[Line(user, volume)]))
+            assert response.json() == {"last_accepted_seq": seq, "duplicate": False}, response.text
+            assert (await stand.report_row(seq) or {})["status"] == status, seq
+            interval = await stand.interval(start, end)
+            assert interval is not None
+            assert (interval["accepted_uplink_bytes"], interval["accepted_downlink_bytes"]) == (
+                charged,
+                0,
+            ), seq
+
+
+async def test_tc_e2e_03_a_period_ahead_of_the_server_clock_is_refused(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """TC-E2E-03 (UC-04 A4, §5.9 «Синхронизация времени»): `period_end` на 10 с впереди часов
+    сервера — 409 `rejected_time` без продвижения точки продолжения и без `Retry-After` (часть не
+    повторяется, следующая идёт сразу), отчёт записан со статусом, интервала нет, алерт. Допуск
+    5 с откалиброван с обеих сторон литералами: +7 с — отказ, +3 с — приём (по 2 с запаса на шаг
+    часов стенда; посадки допуска ×1,5 и ×0,5 краснеют); отказанный интервал
+    планку монотонности не поднимает — следующий интервал может его перекрыть."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        start = await seconds_from_base(stand, dt.timedelta(seconds=10 - 60))
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            ahead = await stand.post(stand.part(1, start))
+        assert refusal(ahead) == (409, "rejected_time", "future"), ahead.text
+        assert ahead.json()["error"]["details"]["last_accepted_seq"] == 0
+        assert "retry-after" not in ahead.headers, "часть не повторяется — паузы нет"
+        assert (await stand.report_row(1) or {})["status"] == "rejected_time"
+        assert await stand.interval(start) is None
+        assert alerts(caplog, stand.node_id, "rejected_time"), caplog.text
+        beyond = await seconds_from_base(stand, dt.timedelta(seconds=7 - 60))  # конец +7 с
+        assert refusal(await stand.post(stand.part(2, beyond))) == (409, "rejected_time", "future")
+        within = await seconds_from_base(stand, dt.timedelta(seconds=3 - 60))  # конец +3 с
+        accepted = await stand.post(stand.part(3, within))
+        assert accepted.json() == {"last_accepted_seq": 3, "duplicate": False}, accepted.text
+
+
+async def test_a_decreasing_counter_is_refused_by_the_model_and_leaves_no_trace(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """UC-04 A3: убывание счётчика обрабатывает агент (001.56); Control Plane отрицательную
+    дельту не принимает — 422 модели, ни отчёта, ни интервала."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        body = stand.part(1, 0, lines=[Line(stand.users[0], 10, 10)])
+        body["lines"][0]["uplink_bytes"] = -1
+        refused = await stand.post(body)
+        assert refused.status_code == 422 and refused.json()["error"]["code"] == "validation_error"
+        assert await stand.statuses() == [] and await stand.interval(0) is None
+
+
+async def test_parts_complete_an_interval_and_a_part_past_it_is_refused(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Правила частей (README): части интервала — последовательные номера с одинаковыми
+    границами; счётчик принятых, суммы по направлениям; интервал завершён на последней части и
+    закрыт; часть сверх объявленного числа — 409 `interval_closed` без `Retry-After`, записана
+    со статусом, точка продолжения не сдвигается, событие — WARNING журнала (разрыв видит
+    сверка, 001.37)."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        a, b, c = stand.users
+        one = await stand.post(stand.part(1, 0, total=2, lines=[Line(a, 10, 20)], rx=100, tx=90))
+        assert one.json() == {"last_accepted_seq": 1, "duplicate": False}
+        opened = await stand.interval(0)
+        assert opened is not None
+        assert (opened["first_seq"], opened["parts_total"], opened["parts_accepted"]) == (1, 2, 1)
+        assert opened["closed_at"] is None
+        two = await stand.post(stand.part(2, 0, total=2, lines=[Line(b, 5, 6)]))
+        assert two.json() == {"last_accepted_seq": 2, "duplicate": False}
+        done = await stand.interval(0)
+        assert done is not None
+        assert (done["parts_accepted"], done["close_reason"]) == (2, "completed")
+        assert (done["accepted_uplink_bytes"], done["accepted_downlink_bytes"]) == (15, 26)
+        with caplog.at_level(logging.WARNING, logger=ALERTS):
+            late = await stand.post(stand.part(3, 0, total=2, lines=[Line(c, 1, 1)]))
+        assert refusal(late) == (409, "interval_closed", "closed"), late.text
+        assert late.json()["error"]["details"]["last_accepted_seq"] == 2
+        assert "retry-after" not in late.headers
+        assert any(
+            r.levelno == logging.WARNING and "interval_closed" in r.getMessage()
+            for r in caplog.records
+            if r.name == ALERTS
+        ), caplog.text
+        assert (await stand.report_row(3) or {})["status"] == "interval_closed"
+        assert await stand.statuses() == ["accepted", "accepted", "interval_closed"]
+        again = await stand.post(stand.part(3, 0, total=2, lines=[Line(c, 1, 1)]))
+        assert refusal(again) == (409, "interval_closed", "repeated"), again.text
+
+
+async def test_the_declared_number_of_parts_only_grows_and_is_applied_before_the_range(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Деление отказанной по размеру части добавляет части: `parts_total` растёт, действует
+    последнее принятое; меньше прежнего — 422 `report_inconsistent` без записи; номер вне
+    диапазона (ниже первой принятой, за последней) — 409 `interval_closed` с причиной
+    `out_of_range`; новое число применяется до проверки диапазона — часть за прежним
+    объявленным, но в новом, принимается."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(5, 0, total=2))).status_code == 200
+        grown = await stand.post(stand.part(6, 0, total=3))
+        assert grown.json() == {"last_accepted_seq": 6, "duplicate": False}
+        assert (await stand.interval(0) or {})["parts_total"] == 3
+        shrunk = await stand.post(stand.part(7, 0, total=2))
+        assert refusal(shrunk) == (422, "report_inconsistent", "parts_total_decreased")
+        assert await stand.report_row(7) is None, "отказ по контракту ключа не записывает"
+        below = await stand.post(stand.part(4, 0, total=3))
+        assert refusal(below) == (409, "interval_closed", "out_of_range"), below.text
+        beyond = await stand.post(stand.part(8, 0, total=3))
+        assert refusal(beyond) == (409, "interval_closed", "out_of_range"), beyond.text
+        assert (await stand.report_row(8) or {})["status"] == "interval_closed"
+        widened = await stand.post(stand.part(9, 0, total=5))
+        assert widened.json() == {"last_accepted_seq": 9, "duplicate": False}, widened.text
+        interval = await stand.interval(0)
+        assert interval is not None
+        assert (interval["parts_total"], interval["parts_accepted"]) == (5, 3)
+        assert interval["closed_at"] is None, "часть 7 не принята — интервал не завершён"
+        assert (await stand.post(stand.part(7, 0, total=5))).status_code == 200
+        gapped = await stand.interval(0)
+        assert gapped is not None and gapped["parts_accepted"] == 4
+        assert gapped["closed_at"] is None, (
+            "номер 8 отказан и пропущен: без него интервал не завершится — его закроет следующий "
+            "интервал или срок, недостающая часть — разрыв (001.37)"
+        )
+
+
+async def test_a_continuation_carries_no_interface_counters_and_no_user_of_another_part(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Счётчики интерфейса несёт только первая часть; пользователь встречается в одной части
+    интервала — нарушения отвергаются по контракту (422 `report_inconsistent`), а не ошибкой
+    вставки 001.77 и не удвоением. Строку прежней части кладёт тест — её вставка — 001.77;
+    уникальность в схеме (`traffic_lines_interval_user_key`) — страховка того же правила."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        a, b, _ = stand.users
+        first = stand.part(1, 0, total=3, lines=[Line(a, 10, 10)], rx=50, tx=40)
+        assert (await stand.post(first)).status_code == 200
+        stranger = uuid.uuid4()
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            counted = await stand.post(
+                stand.part(2, 0, total=3, lines=[Line(b, 1, 1), Line(stranger, 1, 1)], rx=1)
+            )
+        assert refusal(counted) == (422, "report_inconsistent", "counters_in_continuation")
+        assert alerts(caplog, stand.node_id, "report_inconsistent"), caplog.text
+        assert alerts(caplog, stand.node_id, "foreign_users"), "чужой пользователь и при 422"
+        sent = await stand.post(stand.part(2, 0, total=3, lines=[Line(b, 1, 1)], tx=1))
+        assert refusal(sent) == (422, "report_inconsistent", "counters_in_continuation")
+        await stand.conn.execute(
+            "insert into traffic_lines (node_id, counter_epoch, report_seq, user_id, "
+            "period_start, period_end, raw_uplink_bytes, raw_downlink_bytes, billable_bytes, "
+            "multiplier_milli, billing_group_id) values ($1, $2, 1, $3, $4, $5, 10, 10, 20, "
+            "1000, $6)",
+            stand.node_id,
+            stand.epoch,
+            a,
+            stand.at(0),
+            stand.at(60),
+            uuid.uuid4(),
+        )
+        twice = await stand.post(stand.part(2, 0, total=3, lines=[Line(a, 1, 1)]))
+        assert refusal(twice) == (422, "report_inconsistent", "user_in_another_part")
+        assert await stand.report_row(2) is None
+        other = await stand.post(stand.part(2, 0, total=3, lines=[Line(b, 1, 1)]))
+        assert other.json() == {"last_accepted_seq": 2, "duplicate": False}, other.text
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await stand.conn.execute(
+                "insert into traffic_lines (node_id, counter_epoch, report_seq, user_id, "
+                "period_start, period_end, raw_uplink_bytes, raw_downlink_bytes, "
+                "billable_bytes, multiplier_milli, billing_group_id) values ($1, $2, 3, $3, $4, "
+                "$5, 1, 1, 2, 1000, $6)",
+                stand.node_id,
+                stand.epoch,
+                a,
+                stand.at(0),
+                stand.at(60),
+                uuid.uuid4(),
+            )
+
+
+async def test_intervals_of_a_node_are_monotonic_across_epochs(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Интервалы ноды монотонны и не перекрываются — и внутри эпохи, и через смену эпохи:
+    новый интервал, начавшийся раньше конца последнего принятого, — 409 `rejected_time` с
+    причиной `overlap`; новая эпоха нумерует с единицы и продолжает время, а её неудержанная
+    часть закрывает открытый интервал прежней эпохи (`superseded` — перезапуск Xray посередине
+    интервала, README)."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(1, 0))).status_code == 200
+        overlapping = await stand.post(stand.part(2, 30))
+        assert refusal(overlapping) == (409, "rejected_time", "overlap"), overlapping.text
+        earlier = await stand.post(stand.part(3, -120))
+        assert refusal(earlier) == (409, "rejected_time", "overlap"), earlier.text
+        assert earlier.json()["error"]["details"]["last_accepted_seq"] == 1, (
+            "отказанный номер 2 точку продолжения не двигает"
+        )
+        epoch, other = uuid.uuid4(), uuid.uuid4()
+        restarted = await stand.post(stand.part(1, 60, epoch=epoch))
+        assert restarted.json() == {"last_accepted_seq": 1, "duplicate": False}, restarted.text
+        crossing = await stand.post(stand.part(1, 90, epoch=other))
+        assert refusal(crossing) == (409, "rejected_time", "overlap"), crossing.text
+        assert (await stand.post(stand.part(4, 120))).json() == {
+            "last_accepted_seq": 4,
+            "duplicate": False,
+        }, "прежняя эпоха продолжает время после новой — тоже монотонно"
+        assert (await stand.post(stand.part(5, 180, total=2))).status_code == 200
+        # Номер 1 эпохи `other` уже записан отказом (`crossing`) — продолжаем со второго.
+        restart = await stand.post(stand.part(2, 240, epoch=other))
+        assert restart.json() == {"last_accepted_seq": 2, "duplicate": False}, restart.text
+        assert (await stand.interval(180) or {})["close_reason"] == "superseded"
+
+
+async def test_the_first_interval_is_anchored_to_the_buffer_depth(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Якорь первого интервала ноды: не раньше суток назад (глубина буфера Н-8) с допуском 5 с,
+    откалиброванным с обеих сторон — сутки и 7 с — `rejected_time` с причиной `before_anchor`,
+    сутки и 3 с — приём (посадки допуска ×1,5 и ×0,5 краснеют)."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        depth = -BUFFER_DEPTH
+        too_old = await seconds_from_base(stand, depth - dt.timedelta(seconds=7))
+        refused = await stand.post(stand.part(1, too_old))
+        assert refusal(refused) == (409, "rejected_time", "before_anchor"), refused.text
+        tolerated = await seconds_from_base(stand, depth - dt.timedelta(seconds=3))
+        edge = await stand.post(stand.part(2, tolerated, tolerated + 1))
+        assert edge.json() == {"last_accepted_seq": 2, "duplicate": False}, edge.text
+
+
+async def test_the_anchor_binds_only_the_first_interval_of_a_node(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Якорь — только для первого интервала ноды (решение заказчика 2026-10-20, роаст 001.34,
+    раунд 2): однокусочный интервал закрывается сразу, и якорь «первого после закрытия всех»
+    срабатывал почти на каждом интервале. Дальше держат монотонность и окно приёма 72 ч: нода,
+    чей последний интервал закрыт трое суток назад, отчитывается за 25 ч назад (слив буфера после
+    недоступности), а интервал, начатый до выдачи новой identity, принимается от неё (ротация,
+    Н-28)."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        now = await db_now(stand.conn)
+        old = now - dt.timedelta(days=3)
+        await stand.conn.execute(
+            "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+            "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+            "accepted_downlink_bytes, first_received_at, last_received_at, closed_at, "
+            "close_reason) values ($1, $2, $3, $3::timestamptz + interval '1 minute', 1, 1, 1, "
+            "0, 0, $3, $3, $3, 'completed')",
+            stand.node_id,
+            stand.epoch,
+            old,
+        )
+        start = await seconds_from_base(stand, -dt.timedelta(hours=25))
+        drained = await stand.post(stand.part(2, start))
+        assert drained.json() == {"last_accepted_seq": 2, "duplicate": False}, drained.text
+        rotated, _ = await insert_identity(stand.conn, stand.node_id, now, generation=2)
+        before = await seconds_from_base(stand, -dt.timedelta(seconds=30))
+        across = await stand.post(stand.part(3, before, before + 20), headers=rotated)
+        assert across.json() == {"last_accepted_seq": 3, "duplicate": False}, across.text
+
+
+async def test_the_first_interval_is_anchored_to_the_identity_and_the_first_assignment(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Якорь первого интервала — и не раньше выдачи identity запроса (с допуском часов ноды 5 с:
+    7 с раньше — отказ, 3 с — приём), и не раньше первого назначения ноды тарифицируемой группе
+    (без допуска: раньше него `multiplier.resolve` отвечает 1.0 по умолчанию — передано
+    001.23). Якорь держит только первый интервал, поэтому каждый случай — на своей ноде."""
+    for lead, start, expected in (
+        (10, -7, "before_anchor"),  # identity: за допуском
+        (10, -3, None),  # identity: в допуске, назначение раньше
+        (2, -3, "before_anchor"),  # назначение позже начала — без допуска
+        (2, -1, None),
+    ):
+        async with reporting(pg_dsn, migrate_env, age=dt.timedelta(hours=1)) as stand:
+            issued: dt.datetime = await stand.conn.fetchval(
+                "select issued_at from node_identities where node_id = $1", stand.node_id
+            )
+            await stand.conn.execute(
+                "update node_billing_assignments set valid_from = $2 where node_id = $1",
+                stand.node_id,
+                issued - dt.timedelta(seconds=lead),
+            )
+            offset = (issued - stand.base).total_seconds()
+            response = await stand.post(stand.part(1, offset + start))
+            if expected is None:
+                assert response.json() == {"last_accepted_seq": 1, "duplicate": False}, (
+                    lead,
+                    start,
+                    response.text,
+                )
+            else:
+                assert refusal(response) == (409, "rejected_time", expected), (lead, start)
+
+
+async def test_the_anchor_takes_the_first_assignment_and_none_does_not_stop_it(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Якорь — первое назначение ноды (`min(valid_from)`), а не последнее (раунд 3, m3): при двух
+    назначениях первый интервал между ними принимается. Ноду без назначений якорь не
+    останавливает — её шаг списания отвечает `NoBillingAssignmentError` (001.77; раунд 3, m4)."""
+    async with reporting(pg_dsn, migrate_env, age=dt.timedelta(hours=1)) as stand:
+        now = await db_now(stand.conn)
+        moved = now - dt.timedelta(minutes=20)
+        await stand.conn.execute(
+            "update node_billing_assignments set valid_to = $2 where node_id = $1",
+            stand.node_id,
+            moved,
+        )
+        await stand.conn.execute(
+            "insert into node_billing_assignments (node_id, billing_group_id, valid_from) "
+            "select node_id, billing_group_id, $2 from node_billing_assignments "
+            "where node_id = $1",
+            stand.node_id,
+            moved,
+        )
+        between = await seconds_from_base(stand, -dt.timedelta(minutes=30))
+        response = await stand.post(stand.part(1, between))
+        assert response.json() == {"last_accepted_seq": 1, "duplicate": False}, response.text
+    async with reporting(pg_dsn, migrate_env) as stand:
+        await stand.conn.execute(
+            "delete from node_billing_assignments where node_id = $1", stand.node_id
+        )
+        start = await seconds_from_base(stand, -dt.timedelta(hours=23))
+        response = await stand.post(stand.part(1, start))
+        assert response.json() == {"last_accepted_seq": 1, "duplicate": False}, response.text
+
+
+async def test_moments_at_the_edge_of_the_range_get_a_contract_answer(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Метка у края диапазона `datetime` — ответ по контракту, а не 500 кодирования asyncpg
+    (раунд 3, F-5): момент, который в UTC выходит за год 0001 или 9999, — 422 модели; края
+    диапазона в UTC доходят до приёма и записи — 409 `too_old` и `future`."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(1, 0))).status_code == 200  # дальше — окно, не якорь
+        for seq, start, end, expected in (
+            (2, "0001-01-01T00:00:00+00:01", "0001-01-01T00:01:00Z", (422, "validation_error")),
+            (3, "9999-12-31T23:59:00Z", "9999-12-31T23:59:59-00:01", (422, "validation_error")),
+            (4, "0001-01-01T00:00:00Z", "0001-01-01T00:01:00Z", (409, "rejected_time", "too_old")),
+            (5, "9999-12-31T23:59:00Z", "9999-12-31T23:59:59Z", (409, "rejected_time", "future")),
+        ):
+            response = await stand.post(
+                {**stand.part(seq, 0), "period_start": start, "period_end": end}
+            )
+            assert refusal(response)[: len(expected)] == expected, (seq, response.text)
+
+
+async def test_an_interval_closes_on_the_next_interval_the_deadline_and_its_age(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Интервал закрывается частью следующего интервала (`superseded`), сроком
+    `REPORT_PARTS_DEADLINE` после приёма последней части (`deadline`) и потолком возраста
+    `REPORT_MAX_INTERVAL_AGE` от первой (`age`); момент закрытия по времени — момент истечения,
+    а не приёма. Часть к закрытому — 409 `interval_closed`."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(1, 0, total=2))).status_code == 200
+        assert (await stand.post(stand.part(3, 60))).status_code == 200
+        superseded = await stand.interval(0)
+        assert superseded is not None and superseded["close_reason"] == "superseded"
+        after = await stand.post(stand.part(2, 0, total=2))
+        assert refusal(after) == (409, "interval_closed", "closed"), after.text
+
+        assert (await stand.post(stand.part(4, 120, total=2))).status_code == 200
+        now = await db_now(stand.conn)
+        last = now - PARTS_DEADLINE - dt.timedelta(minutes=1)
+        await stand.conn.execute(
+            "update report_intervals set first_received_at = $2, last_received_at = $2 "
+            "where node_id = $1 and period_start = $3",
+            stand.node_id,
+            last,
+            stand.at(120),
+        )
+        expired = await stand.post(stand.part(5, 120, total=2))
+        assert refusal(expired) == (409, "interval_closed", "closed"), expired.text
+        deadline = await stand.interval(120)
+        assert deadline is not None and deadline["close_reason"] == "deadline"
+        assert deadline["closed_at"] == last + PARTS_DEADLINE
+
+        assert (await stand.post(stand.part(6, 180, total=3))).status_code == 200
+        first = now - INTERVAL_AGE - dt.timedelta(minutes=1)
+        await stand.conn.execute(
+            "update report_intervals set first_received_at = $2, last_received_at = $3 "
+            "where node_id = $1 and period_start = $4",
+            stand.node_id,
+            first,
+            now - dt.timedelta(hours=1),
+            stand.at(180),
+        )
+        aged = await stand.post(stand.part(7, 180, total=3))
+        assert refusal(aged) == (409, "interval_closed", "closed"), aged.text
+        age = await stand.interval(180)
+        assert age is not None and age["close_reason"] == "age"
+        assert age["closed_at"] == first + INTERVAL_AGE
+
+        # Раньше срока и возраста интервал открыт: последняя часть сутки назад — до срока час.
+        assert (await stand.post(stand.part(8, 240, total=2))).status_code == 200
+        day_ago = now - dt.timedelta(hours=24)
+        await stand.conn.execute(
+            "update report_intervals set first_received_at = $2, last_received_at = $2 "
+            "where node_id = $1 and period_start = $3",
+            stand.node_id,
+            day_ago,
+            stand.at(240),
+        )
+        alive = await stand.post(stand.part(9, 240, total=2))
+        assert alive.json() == {"last_accepted_seq": 9, "duplicate": False}, alive.text
+        assert (await stand.interval(240) or {})["close_reason"] == "completed"
+
+
+async def test_a_new_interval_older_than_the_acceptance_window_is_refused(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Окно приёма — явная проверка (роаст 001.34, раунд 1): якорь действует только для первого
+    интервала ноды, и цепочка интервалов, каждый из которых закрывает недосланный предыдущий,
+    отставала бы от стенных часов без предела — до «no partition … found» вставки 001.77. Новый
+    интервал старше 72 ч (сутки буфера плюс потолок возраста открытого) — 409 `rejected_time` с
+    причиной `too_old`, и при открытом интервале тоже; законное отставание в окне — приём."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        now = await db_now(stand.conn)
+        ancient = now - dt.timedelta(days=20)
+        await stand.conn.execute(
+            "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+            "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+            "accepted_downlink_bytes, first_received_at, last_received_at) values ($1, $2, $3, "
+            "$3::timestamptz + interval '1 minute', 1, 2, 1, 0, 0, $4, $4)",
+            stand.node_id,
+            stand.epoch,
+            ancient,
+            now - dt.timedelta(hours=1),
+        )
+        stale = (ancient + dt.timedelta(minutes=1) - stand.base).total_seconds()
+        refused = await stand.post(stand.part(2, stale))
+        assert refusal(refused) == (409, "rejected_time", "too_old"), refused.text
+        # Граница — литералами с обеих сторон допуска 5 с: 72 ч и 7 с — отказ, 72 ч и 3 с — приём.
+        # Отказанная сторона — интервал 60 с: его конец уже в окне, и проверка по `period_end`
+        # вместо `period_start` его приняла бы (раунд 3, M3).
+        window = dt.timedelta(hours=72)
+        beyond = await seconds_from_base(stand, -window - dt.timedelta(seconds=7))
+        edge = await stand.post(stand.part(3, beyond))
+        assert refusal(edge) == (409, "rejected_time", "too_old"), edge.text
+        inside = await seconds_from_base(stand, -window - dt.timedelta(seconds=3))
+        tolerated = await stand.post(stand.part(4, inside, inside + 1))
+        assert tolerated.json() == {"last_accepted_seq": 4, "duplicate": False}, tolerated.text
+        lagging = await seconds_from_base(stand, -dt.timedelta(hours=71))
+        accepted = await stand.post(stand.part(5, lagging))
+        assert accepted.json() == {"last_accepted_seq": 5, "duplicate": False}, accepted.text
+
+
+async def test_a_continuation_is_not_bound_by_the_acceptance_window(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Окно приёма — правило нового интервала (раунд 3, m1): часть открытого интервала, первая
+    часть которого принята у края окна, принимается и тогда, когда его начало уже старше 72 ч, —
+    открытый интервал живёт сроком и возрастом от приёма, а не объявленным временем."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        now = await db_now(stand.conn)
+        start = (now - dt.timedelta(hours=73) - stand.base).total_seconds()
+        await stand.conn.execute(
+            "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+            "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+            "accepted_downlink_bytes, first_received_at, last_received_at) "
+            "values ($1, $2, $3, $4, 1, 2, 1, 0, 0, $5, $5)",
+            stand.node_id,
+            stand.epoch,
+            stand.at(start),
+            stand.at(start + 60),
+            now - dt.timedelta(hours=2),
+        )
+        continued = await stand.post(
+            stand.part(2, start, total=2, lines=[Line(stand.users[0], 10, 10)])
+        )
+        assert continued.json() == {"last_accepted_seq": 2, "duplicate": False}, continued.text
+        assert (await stand.interval(start) or {})["close_reason"] == "completed"
+
+
+async def test_a_held_part_does_not_close_the_interval_before_it(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Удержанная часть предыдущий интервал не закрывает: его оставшиеся части принимаются;
+    первая часть нового интервала открывает его с признаком удержания."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        a, b, _ = stand.users
+        assert (
+            await stand.post(stand.part(1, 0, total=2, lines=[Line(a, 1, 1)]))
+        ).status_code == 200
+        huge = stand.part(
+            3, 60, lines=[Line(b, anomaly_threshold(1, dt.timedelta(seconds=60)) + 1)]
+        )
+        assert (await stand.post(huge)).status_code == 200
+        assert (await stand.report_row(3) or {})["status"] == "held_anomaly"
+        previous = await stand.interval(0)
+        assert previous is not None and previous["closed_at"] is None, "удержание не закрывает"
+        held = await stand.interval(60)
+        assert held is not None and held["held"] is True
+        rest = await stand.post(stand.part(2, 0, total=2, lines=[Line(b, 1, 1)]))
+        assert rest.json() == {"last_accepted_seq": 3, "duplicate": False}, rest.text
+        assert (await stand.interval(0) or {})["close_reason"] == "completed"
+
+
+async def test_a_part_that_is_not_held_closes_the_intervals_before_it(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Интервал закрывается частью следующего интервала ноды — и тогда, когда следующий открыт
+    удержанной частью: его неудержанное продолжение закрывает открытые интервалы до себя
+    (`superseded`), а сам интервал остаётся открытым до своей последней части."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        a, b, _ = stand.users
+        big = anomaly_threshold(1, dt.timedelta(seconds=60)) + 1
+        assert (await stand.post(stand.part(1, 0, total=2, lines=[Line(a, 1)]))).status_code == 200
+        held = stand.part(2, 60, total=3, lines=[Line(b, 0, big)])
+        assert (await stand.post(held)).status_code == 200
+        assert (await stand.interval(0) or {})["closed_at"] is None
+        # После удержания сумма интервала на пороге: неудержанным бывает только продолжение без
+        # байтов — здесь с одними адресами.
+        calm = await stand.post(stand.part(3, 60, total=3, ips=[(a, "198.51.100.10")]))
+        assert calm.json() == {"last_accepted_seq": 3, "duplicate": False}, calm.text
+        assert (await stand.interval(0) or {})["close_reason"] == "superseded"
+        following = await stand.interval(60)
+        assert following is not None and following["closed_at"] is None
+        assert following["held"] is True, "неудержанное продолжение признак удержания не снимает"
+
+
+async def test_a_held_continuation_does_not_close_the_intervals_before_it(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Удержанное продолжение, как и удержанная первая часть, открытые интервалы до себя не
+    закрывает (раунд 3, F-2/M2): оставшиеся части прежнего интервала принимаются, а не становятся
+    разрывом."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        a, b, c = stand.users
+        big = anomaly_threshold(1, dt.timedelta(seconds=60)) + 1
+        first = stand.part(1, 0, total=2, lines=[Line(a, 1, 1)])
+        assert (await stand.post(first)).status_code == 200
+        assert (
+            await stand.post(stand.part(3, 60, total=3, lines=[Line(b, big)]))
+        ).status_code == 200
+        continued = await stand.post(stand.part(4, 60, total=3, lines=[Line(c, 1)]))
+        assert continued.json() == {"last_accepted_seq": 4, "duplicate": False}, continued.text
+        assert (await stand.report_row(4) or {})["status"] == "held_anomaly"
+        previous = await stand.interval(0)
+        assert previous is not None and previous["closed_at"] is None, (
+            "удержанное продолжение не закрывает"
+        )
+        rest = await stand.post(stand.part(2, 0, total=2, lines=[Line(b, 1, 1)]))
+        assert rest.json() == {"last_accepted_seq": 4, "duplicate": False}, rest.text
+        assert (await stand.interval(0) or {})["close_reason"] == "completed"
+
+
+async def test_a_clock_stepped_back_between_parts_keeps_the_interval(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Часы базы стенда шагают (prltimesync): приём последней части записан моментом впереди
+    нынешних часов. Следующая часть того же интервала принимается, а момент последнего приёма
+    назад не идёт — иначе `last_received_at >= first_received_at` упал бы ошибкой вставки (500
+    и бесконечный повтор агента)."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(1, 0, total=3))).status_code == 200
+        ahead = await db_now(stand.conn) + dt.timedelta(hours=1)
+        await stand.conn.execute(
+            "update report_intervals set first_received_at = $2, last_received_at = $2 "
+            "where node_id = $1",
+            stand.node_id,
+            ahead,
+        )
+        second = await stand.post(stand.part(2, 0, total=3))
+        assert second.json() == {"last_accepted_seq": 2, "duplicate": False}, second.text
+        interval = await stand.interval(0)
+        assert interval is not None and interval["last_received_at"] == ahead
+
+
+async def _open_intervals(stand: ReportingStand, count: int, start: float) -> None:
+    """``count`` открытых удержанных интервалов ноды подряд от ``start`` — состояние, которое
+    иначе собирала бы череда удержаний."""
+    now = await db_now(stand.conn)
+    for n in range(count):
+        await stand.conn.execute(
+            "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+            "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+            "accepted_downlink_bytes, held, first_received_at, last_received_at) "
+            "values ($1, $2, $3, $4, $5, 2, 1, 0, 0, true, $6, $6)",
+            stand.node_id,
+            stand.epoch,
+            stand.at(start + 60 * n),
+            stand.at(start + 60 * n + 60),
+            100 + 2 * n,
+            now,
+        )
+
+
+async def test_open_intervals_are_capped_and_a_part_over_the_cap_is_born_closed(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Открытых интервалов у ноды — не больше восьми (литерал контракта). Истёкший по сроку
+    интервал среди открытых не считается: при семи живых и одном истёкшем удержанная часть
+    нового интервала ещё открывает его (с признаком удержания); при восьми живых — удерживается,
+    её интервал рождается закрытым (`capped`, удержан, без списания — решение заказчика
+    2026-10-20) и поднимается алерт. Закрытый интервал держит правила: следующая часть того же
+    интервала — `interval_closed`, а не новый интервал с нулевыми суммами (роаст 001.34, раунд
+    1), перекрывающая — `overlap`. Часть, которая не удерживается, закрывает открытые
+    (`superseded`)."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        assert REPORT_MAX_OPEN_INTERVALS == 8
+        a, b, _ = stand.users
+        big = anomaly_threshold(1, dt.timedelta(seconds=60)) + 1
+        await _open_intervals(stand, 7, -480)
+        expired = await db_now(stand.conn) - dt.timedelta(hours=26)
+        await stand.conn.execute(
+            "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+            "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+            "accepted_downlink_bytes, held, first_received_at, last_received_at) "
+            "values ($1, $2, $3, $4, 200, 2, 1, 0, 0, true, $5, $5)",
+            stand.node_id,
+            stand.epoch,
+            stand.at(-60),
+            stand.at(0),
+            expired,
+        )
+        eighth = await stand.post(stand.part(1, 0, lines=[Line(a, big)], total=2))
+        assert eighth.json() == {"last_accepted_seq": 1, "duplicate": False}, eighth.text
+        opened = await stand.interval(0)
+        assert opened is not None and opened["held"] is True and opened["closed_at"] is None, (
+            "истёкший интервал места среди открытых не занимает"
+        )
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            over = await stand.post(stand.part(2, 60, total=3, lines=[Line(a, big)], rx=100))
+        assert over.json() == {"last_accepted_seq": 2, "duplicate": False}, over.text
+        assert (await stand.report_row(2) or {})["status"] == "held_anomaly"
+        capped = await stand.interval(60)
+        assert capped is not None
+        assert (capped["close_reason"], capped["held"]) == ("capped", True)
+        assert (capped["accepted_uplink_bytes"], capped["accepted_downlink_bytes"]) == (0, 0), (
+            "сверх потолка открытых — без списания"
+        )
+        assert alerts(caplog, stand.node_id, "open_intervals"), caplog.text
+        still = await stand.interval(0)
+        assert still is not None and still["closed_at"] is None, (
+            "часть сверх потолка открытые интервалы не закрывает (раунд 3, F-3)"
+        )
+        again = await stand.post(stand.part(3, 60, total=2, lines=[Line(a, 1)], rx=7))
+        assert refusal(again) == (409, "interval_closed", "closed"), again.text
+        overlapping = await stand.post(stand.part(4, 90, lines=[Line(b, 1)]))
+        assert refusal(overlapping) == (409, "rejected_time", "overlap"), overlapping.text
+        calm = await stand.post(stand.part(5, 120, lines=[Line(b, 1, 1)]))
+        assert calm.json() == {"last_accepted_seq": 5, "duplicate": False}, calm.text
+        reasons = await stand.conn.fetch(
+            "select close_reason from report_intervals where node_id = $1 and "
+            "period_start < $2 order by period_start",
+            stand.node_id,
+            stand.at(60),
+        )
+        assert [r["close_reason"] for r in reasons] == ["superseded"] * 7 + [
+            "deadline",
+            "superseded",
+        ]
+
+
+async def test_a_held_single_part_interval_takes_no_place_among_the_open(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Удержанный однокусочный интервал закрывается сразу (`completed`) и места среди открытых не
+    занимает (раунд 3, F-1/M1): при семи открытых он не доводит их до потолка, и следующая
+    удержанная часть нового интервала открывает его со списанием в пределах порога, а не
+    рождается закрытой без списания."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        a, b, _ = stand.users
+        big = anomaly_threshold(1, dt.timedelta(seconds=60)) + 1
+        await _open_intervals(stand, 7, -480)
+        single = await stand.post(stand.part(1, 0, lines=[Line(a, big)]))
+        assert single.json() == {"last_accepted_seq": 1, "duplicate": False}, single.text
+        held = await stand.interval(0)
+        assert held is not None
+        assert (held["held"], held["close_reason"]) == (True, "completed")
+        following = await stand.post(stand.part(2, 60, total=2, lines=[Line(b, big)]))
+        assert following.json() == {"last_accepted_seq": 2, "duplicate": False}, following.text
+        opened = await stand.interval(60)
+        assert opened is not None and opened["closed_at"] is None, "восьмой открытый — в потолке"
+        assert (opened["accepted_uplink_bytes"], opened["accepted_downlink_bytes"]) == (
+            7_500_000,
+            0,
+        )
+
+
+_EPOCH_SEED = (
+    "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+    "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+    "accepted_downlink_bytes, first_received_at, last_received_at, closed_at, "
+    "close_reason) values ($1, $2, $3, $4, 1, 1, 1, 0, 0, $5, $5, $5, 'completed')"
+)
+
+
+async def _seed_epochs(
+    stand: ReportingStand, epochs: list[uuid.UUID], start: float, ago: dt.timedelta
+) -> None:
+    """Закрытые интервалы подряд от ``start`` с эпохами ``epochs``, открытые ``ago`` назад."""
+    now = await db_now(stand.conn)
+    for n, epoch in enumerate(epochs):
+        await stand.conn.execute(
+            _EPOCH_SEED,
+            stand.node_id,
+            epoch,
+            stand.at(start + 60 * n),
+            stand.at(start + 60 * n + 60),
+            now - ago,
+        )
+
+
+async def test_epoch_changes_are_capped_per_day(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Смен эпохи — не больше 48 за скользящие сутки (литералы контракта): смена — соседние по
+    времени интервалы с разными эпохами, и возврат к прежней эпохе — тоже смена (чередование
+    двух эпох не обходит потолок — роаст 001.34, раунд 1). 47 смен в окне и сорок восьмая —
+    приём; сорок девятая — удержание (интервал открывается с признаком удержания, списание в
+    пределах порога идёт, открытый интервал до него не закрывается) и алерт; интервал той же
+    эпохи, что последний, — не смена. Окно — сутки: смена между интервалами, открытыми сутки и
+    две минуты и сутки и минуту назад, не считается, а в 23 ч 59 мин — считается."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert REPORT_MAX_EPOCHS_PER_DAY == 48
+        a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        user = stand.users[0]
+        await _seed_epochs(stand, [c], -3720, dt.timedelta(hours=24, minutes=2))
+        await _seed_epochs(stand, [a], -3660, dt.timedelta(hours=24, minutes=1))
+        alternating = [a if n % 2 == 0 else b for n in range(48)]  # 47 смен в окне
+        await _seed_epochs(stand, alternating, -3600, dt.timedelta(hours=23, minutes=59))
+        changed = await stand.post(stand.part(1, 0, total=2))  # b → эпоха стенда: сорок восьмая
+        assert changed.json() == {"last_accepted_seq": 1, "duplicate": False}, changed.text
+        assert (await stand.report_row(1) or {})["status"] == "accepted"
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            back = await stand.post(stand.part(9, 60, epoch=a, lines=[Line(user, 1000, 2000)]))
+        assert back.status_code == 200, back.text
+        assert (await stand.report_row(9, a) or {})["status"] == "held_anomaly"
+        held = await stand.interval(60, epoch=a)
+        assert held is not None and held["held"] is True
+        assert (held["accepted_uplink_bytes"], held["accepted_downlink_bytes"]) == (1000, 2000), (
+            "удержание по потолку смен эпохи списания не отменяет"
+        )
+        assert (await stand.interval(0) or {})["closed_at"] is None, "удержанная не закрывает"
+        assert alerts(caplog, stand.node_id, "epochs"), caplog.text
+        same = await stand.post(stand.part(10, 120, epoch=a))
+        assert same.json() == {"last_accepted_seq": 10, "duplicate": False}, same.text
+        assert (await stand.report_row(10, a) or {})["status"] == "accepted"
+
+
+async def test_an_epoch_change_across_the_window_edge_is_counted(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Смена случилась, когда открыт второй интервал пары: пара, чей первый интервал открыт до
+    окна, а второй — в окне, — тоже смена в сутках (роаст 001.34, раунд 2). 46 смен в окне и
+    смена на краю — 47; сорок восьмая — приём, сорок девятая — удержание."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        await _seed_epochs(stand, [c], -3660, dt.timedelta(hours=24, minutes=1))
+        alternating = [a if n % 2 == 0 else b for n in range(47)]  # 46 смен в окне
+        await _seed_epochs(stand, alternating, -3600, dt.timedelta(hours=23, minutes=59))
+        changed = await stand.post(stand.part(1, 0))
+        assert (await stand.report_row(1) or {})["status"] == "accepted", changed.text
+        other = uuid.uuid4()
+        over = await stand.post(stand.part(1, 60, epoch=other))
+        assert over.status_code == 200, over.text
+        assert (await stand.report_row(1, other) or {})["status"] == "held_anomaly"
+
+
+async def test_an_epoch_hold_over_the_open_cap_is_born_closed(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Потолок открытых интервалов — к любой удержанной части нового интервала, а не только к
+    удержанной порогом (раунд 3, F-4): при восьми открытых часть, удержанная одним потолком смен
+    эпохи (объём в пределах порога), рождает интервал закрытым (`capped`) без списания — решение
+    заказчика 2026-10-20."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        user = stand.users[0]
+        await _seed_epochs(stand, [c], -4320, dt.timedelta(hours=24, minutes=2))
+        await _seed_epochs(stand, [a], -4260, dt.timedelta(hours=24, minutes=1))
+        alternating = [a if n % 2 == 0 else b for n in range(48)]  # 47 смен в окне
+        await _seed_epochs(stand, alternating, -4200, dt.timedelta(hours=23, minutes=59))
+        await _open_intervals(stand, 8, -1320)  # эпоха стенда — сорок восьмая смена
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            over = await stand.post(stand.part(1, 0, epoch=a, lines=[Line(user, 1000, 2000)]))
+        assert over.json() == {"last_accepted_seq": 1, "duplicate": False}, over.text
+        assert (await stand.report_row(1, a) or {})["status"] == "held_anomaly"
+        capped = await stand.interval(0, epoch=a)
+        assert capped is not None
+        assert (capped["close_reason"], capped["held"]) == ("capped", True)
+        assert (capped["accepted_uplink_bytes"], capped["accepted_downlink_bytes"]) == (0, 0)
+        found = alerts(caplog, stand.node_id, "held_anomaly")
+        assert found and "reasons=epochs,open_intervals" in found[0], caplog.text
+
+
+def _plan_nodes(plan: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    yield plan
+    for child in plan.get("Plans", []):
+        yield from _plan_nodes(child)
+
+
+async def test_epoch_changes_are_read_by_the_index_from_the_predecessor_on(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Смены эпохи считаются под блокировкой ноды на каждой части со сменой эпохи: выборка
+    ограничена моментом открытия предшественника окна по индексу `(node_id, first_received_at)`,
+    а не всей историей ноды (раунд 3, P-1). План при запрете последовательного чтения: каждое
+    чтение `report_intervals` — по индексу с условием на `first_received_at`."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        window = await db_now(stand.conn) - dt.timedelta(hours=24)
+        async with stand.conn.transaction():
+            await stand.conn.execute("set local enable_seqscan = off")
+            raw = await stand.conn.fetchval(
+                "explain (format json) " + _EPOCH_CHANGES, stand.node_id, window
+            )
+        reads = [
+            node
+            for node in _plan_nodes(json.loads(raw)[0]["Plan"])
+            if node.get("Relation Name") == "report_intervals"
+        ]
+        assert len(reads) >= 2, raw
+        for node in reads:
+            condition = node.get("Index Cond", "") + node.get("Recheck Cond", "")
+            assert "first_received_at" in condition, raw
+
+
+async def test_lines_and_addresses_of_users_outside_the_node_are_dropped(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Нода недоверенная (§11.3): строка и адрес пользователя, которого нет в составе ноды
+    (`node_user_state`), отбрасываются с алертом — иначе нода списала бы трафик чужому
+    пользователю и блокировала бы чужие адреса; остальной отчёт принимается. Чужой — и
+    несуществующий идентификатор, и настоящий пользователь другой ноды, и пользователь вне
+    составов (раунд 3, C2): состав — этой ноды, а не «пользователь существует»."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        own, removed, stranger = stand.users[0], stand.users[1], uuid.uuid4()
+        elsewhere = await insert_user(stand.conn, await insert_node(stand.conn, stand.node_id))
+        nobody = await insert_user(stand.conn)
+        # Член состава — строка `node_user_state` в любом состоянии: `removed` до уплотнения
+        # тоже (буфер досылает трафик до отзыва).
+        await stand.conn.execute(
+            "update node_user_state set state = 'removed' where node_id = $1 and user_id = $2",
+            stand.node_id,
+            removed,
+        )
+        body = stand.part(
+            1,
+            0,
+            lines=[
+                Line(own, 10, 20),
+                Line(removed, 5, 5),
+                Line(stranger, 1_000_000, 1_000_000),
+                Line(elsewhere, 2_000_000, 0),
+                Line(nobody, 0, 3_000_000),
+            ],
+            ips=[
+                (own, "198.51.100.8"),
+                (stranger, "198.51.100.9"),
+                (elsewhere, "198.51.100.10"),
+                (nobody, "198.51.100.11"),
+            ],
+        )
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            response = await stand.post(body)
+        assert response.json() == {"last_accepted_seq": 1, "duplicate": False}, response.text
+        interval = await stand.interval(0)
+        assert interval is not None
+        assert (interval["accepted_uplink_bytes"], interval["accepted_downlink_bytes"]) == (15, 25)
+        found = alerts(caplog, stand.node_id, "foreign_users")
+        assert found and "lines=3 " in found[0] and "ips=3 " in found[0], caplog.text
+        caplog.clear()
+        ahead = await seconds_from_base(stand, dt.timedelta(seconds=10 - 60))
+        with caplog.at_level(logging.ERROR, logger=ALERTS):
+            refused = await stand.post(stand.part(2, ahead, lines=[Line(stranger, 1, 1)]))
+        assert refusal(refused)[:2] == (409, "rejected_time")
+        assert alerts(caplog, stand.node_id, "foreign_users"), (
+            "попытка списать чужому пользователю — сигнал и тогда, когда часть отказана"
+        )
+
+
+async def test_a_revocation_during_the_request_stops_the_report(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Identity сверяется в начале запроса, а приём — своя транзакция: отзыв, зафиксированный
+    между опознанием и записью, обязан остановить отчёт (001.25, раунд 2). Встречная операция
+    держит строку ноды тем же оператором, что отзыв и обмен (`FOR NO KEY UPDATE`, `nodes.py`; с
+    `FOR UPDATE` держателя страж не отличал бы ослабленную блокировку приёма — раунд 3, C3);
+    приём ждёт её и перепроверяет под блокировкой ровно ту identity, которой
+    запрос представился: отозвана только она (у ноды есть и другая, живая — повторный обмен),
+    истекла, нода выведена — 401; повторное опознание как `pending` — 403. Без записи."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        issued: dt.datetime = await stand.conn.fetchval(
+            "select issued_at from node_identities where node_id = $1", stand.node_id
+        )
+        await insert_identity(stand.conn, stand.node_id, issued, generation=2)
+        presented = (stand.fingerprint,)
+        node = (stand.node_id,)
+        for change, args, expected in (
+            (
+                "update node_identities set revoked_at = now() where cert_fingerprint = $1",
+                presented,
+                (401, "unauthenticated"),
+            ),
+            (
+                "update node_identities set expires_at = now() where cert_fingerprint = $1",
+                presented,
+                (401, "unauthenticated"),
+            ),
+            (
+                "update nodes set decommissioned_at = now() where id = $1",
+                node,
+                (401, "unauthenticated"),
+            ),
+            (
+                "update nodes set status = 'pending' where id = $1",
+                node,
+                (403, "node_not_approved"),
+            ),
+        ):
+            holder = await asyncpg.connect(pg_dsn)
+            try:
+                transaction = holder.transaction()
+                await transaction.start()
+                await holder.execute(REVOCATION_LOCK, stand.node_id)
+                await holder.execute(change, *args)
+                task = asyncio.create_task(stand.post(stand.part(1, 0)))
+                try:
+                    await wait_blocked_by(stand.conn, holder.get_server_pid())
+                except BaseException:
+                    task.cancel()
+                    raise
+                await transaction.commit()
+                response = await task
+            finally:
+                await holder.close()
+            assert (response.status_code, response.json()["error"]["code"]) == expected
+            assert await stand.statuses() == []
+            await stand.conn.execute(
+                "update node_identities set revoked_at = null, expires_at = now() + "
+                "interval '90 days' where node_id = $1",
+                stand.node_id,
+            )
+            await stand.conn.execute(
+                "update nodes set status = 'active', decommissioned_at = null where id = $1",
+                stand.node_id,
+            )
+
+
+async def test_two_acceptances_of_a_node_take_turns(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Один приём ноды за раз (раунд 3, C3): правила интервала читают и пишут его суммы, и второй
+    приём обязан ждать первого под блокировкой строки ноды, а не считать порог по суммам до него.
+    Первый — настоящий приём в открытой транзакции, второй — запрос раздела: второй ждёт, затем
+    видит сумму первого и удерживается с долей до порога; суммы интервала — ровно порог (1 Мбит/с
+    × 60 с = 7 500 000 байт: 2,5 + 2,5 МБ приняты, из 4 МБ — 2,5)."""
+    async with reporting(pg_dsn, migrate_env, bandwidth_mbps=1) as stand:
+        a, b, c = stand.users
+        opening = stand.part(1, 0, total=3, lines=[Line(a, 2_500_000)])
+        assert (await stand.post(opening)).status_code == 200
+        holder = await asyncpg.connect(pg_dsn)
+        try:
+            transaction = holder.transaction()
+            await transaction.start()
+            first = ReportIn.model_validate(stand.part(2, 0, total=3, lines=[Line(b, 2_500_000)]))
+            outcome = await _Acceptance(stand.node_id, stand.fingerprint, first).run(holder)
+            assert outcome.status == "accepted"
+            task = asyncio.create_task(
+                stand.post(stand.part(3, 0, total=3, lines=[Line(c, 4_000_000)]))
+            )
+            try:
+                await wait_blocked_by(stand.conn, holder.get_server_pid())
+            except BaseException:
+                task.cancel()
+                raise
+            await transaction.commit()
+            second = await task
+        finally:
+            await holder.close()
+        assert second.json() == {"last_accepted_seq": 3, "duplicate": False}, second.text
+        assert (await stand.report_row(3) or {})["status"] == "held_anomaly", (
+            "второй приём видит сумму первого"
+        )
+        interval = await stand.interval(0)
+        assert interval is not None
+        assert (interval["accepted_uplink_bytes"], interval["accepted_downlink_bytes"]) == (
+            7_500_000,
+            0,
+        )
+        assert interval["close_reason"] == "completed"
+
+
+async def test_the_continuation_point_and_repeated_refusals(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """`last_accepted_seq` — наибольший принятый номер эпохи (принятые и удержанные), а не номер
+    запроса: повтор старого отчёта отвечает текущей точкой. Повтор отказанного — тот же отказ
+    (`reason: repeated`, WARNING — потерянный ответ, а не новое событие); тот же номер с другими
+    записанными полями — любой из границ, числом частей, счётчиками интерфейса — 422
+    `seq_reused`: ключ уже лёг на другую часть, и ответ «дубликат» молча выбросил бы отчёт из
+    буфера."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        assert (await stand.post(stand.part(1, 0))).status_code == 200
+        ahead = stand.part(2, await seconds_from_base(stand, dt.timedelta(seconds=30)))
+        assert refusal(await stand.post(ahead))[:2] == (409, "rejected_time")
+        assert (await stand.post(stand.part(3, 60))).json()["last_accepted_seq"] == 3
+        with caplog.at_level(logging.WARNING, logger=ALERTS):
+            repeated = await stand.post(ahead)
+        assert refusal(repeated) == (409, "rejected_time", "repeated"), repeated.text
+        assert repeated.json()["error"]["details"]["last_accepted_seq"] == 3
+        assert any(
+            r.levelno == logging.WARNING and "repeated" in r.getMessage()
+            for r in caplog.records
+            if r.name == ALERTS
+        ), caplog.text
+        first = stand.part(1, 0)
+        for changed in (
+            {**first, "period_start": stand.at(1).isoformat()},
+            {**first, "period_end": stand.at(61).isoformat()},
+            {**first, "parts_total": 2},
+            {**first, "node_rx_bytes": 1},
+            {**first, "node_tx_bytes": 1},
+            stand.part(2, 120),
+        ):
+            reused = await stand.post(changed)
+            assert refusal(reused) == (422, "report_inconsistent", "seq_reused"), changed
+        old = await stand.post(stand.part(1, 0))
+        assert old.json() == {"last_accepted_seq": 3, "duplicate": True}, old.text
+
+
+async def test_every_approved_status_has_its_reports_accepted(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Столбец «Учитывается трафик» §4.6: отчёт принимается от ноды в любом статусе, кроме
+    `pending` (вентиль раздела, 403), — в `provisioning`, чтобы нода освободила буфер (не
+    тарифицируется — 001.77), в `offline`, `disabled`, `suspended` — из буфера."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        approved = sorted(status for status, gate in STREAM_GATE.items() if not gate.refused)
+        for n, status in enumerate(approved):
+            await stand.conn.execute(
+                "update nodes set status = $2 where id = $1", stand.node_id, status
+            )
+            response = await stand.post(stand.part(n + 1, 60 * n))
+            assert response.status_code == 200, (status, response.text)
+        assert len(approved) == 7
+        await stand.conn.execute("update nodes set status = 'pending' where id = $1", stand.node_id)
+        gated = await stand.post(stand.part(9, 600))
+        assert (gated.status_code, gated.json()["error"]["code"]) == (403, "node_not_approved")
+
+
+async def test_interval_durations_are_a_metric_per_node(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Штатный интервал — обязанность агента, и Control Plane её наблюдает (§5.9, README):
+    длительности принятых и удержанных за час интервалов (удержанный — тоже интервал агента;
+    раунд 3, m2) — ряды `control_plane_report_intervals` по ноде с
+    верхней границей `le` (накопительно, как у гистограммы); алерт на систематическое
+    превышение 60 с ставит 001.68."""
+    async with reporting(pg_dsn, migrate_env) as stand:
+        # Окно метрики — последний час (литерал): интервал, открытый 61 минуту назад, — за ним,
+        # 59 минут назад — в нём.
+        for minutes, start, held in ((61, -120, False), (59, -240, True)):
+            await stand.conn.execute(
+                "insert into report_intervals (node_id, counter_epoch, period_start, period_end, "
+                "first_seq, parts_total, parts_accepted, accepted_uplink_bytes, "
+                "accepted_downlink_bytes, held, first_received_at, last_received_at) values ($1, "
+                "$2, $3, $4, 1, 1, 1, 0, 0, $6, now() - make_interval(mins => $5), "
+                "now() - make_interval(mins => $5))",
+                stand.node_id,
+                uuid.uuid4(),
+                stand.at(start),
+                stand.at(start + 60),
+                minutes,
+                held,
+            )
+        assert (await stand.post(stand.part(1, 0))).status_code == 200
+        assert (await stand.post(stand.part(2, 60, 360))).status_code == 200
+        transport = httpx.ASGITransport(app=stand.app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            text = (await client.get("/metrics")).text
+        node = str(stand.node_id)
+        series = {
+            line.split(" ")[0]: line.split(" ")[1]
+            for line in text.splitlines()
+            if line.startswith("control_plane_report_intervals{") and node in line
+        }
+        assert series == {
+            f'control_plane_report_intervals{{node_id="{node}",le="{bound}"}}': value
+            for bound, value in (
+                ("60", "2"),
+                ("120", "2"),
+                ("300", "3"),
+                ("900", "3"),
+                ("3600", "3"),
+                ("+Inf", "3"),
+            )
+        }, text
+        assert "# TYPE control_plane_report_intervals gauge" in text
+
+
+async def test_a_failing_interval_series_does_not_mark_the_database_down(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ряд длительностей интервалов — учёт, а не признак доступности базы: его сбой (таблица снята
+    откатом, ошибка запроса) оставляет `control_plane_db_up 1` и остальные ряды, а самого ряда
+    нет — иначе алерт «база недоступна» поднимался бы на ошибке одного запроса."""
+
+    async def broken(conn: Any, window: Any = None) -> dict[Any, Any]:
+        raise asyncpg.UndefinedTableError('relation "report_intervals" does not exist')
+
+    monkeypatch.setattr(metrics, "interval_durations", broken)
+    async with reporting(pg_dsn, migrate_env) as stand:
+        transport = httpx.ASGITransport(app=stand.app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            text = (await client.get("/metrics")).text
+    assert "control_plane_db_up 1" in text, text
+    assert "control_plane_jobs{" in text
+    assert "control_plane_report_intervals{" not in text
+
+
+CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "agent_v1"
+
+
+def _shifted(body: dict[str, Any], delta: dt.timedelta) -> dict[str, Any]:
+    """Тело фикстуры с метками, сдвинутыми на ``delta``: ``given.server_time`` фикстуры
+    переносится на часы базы, всё остальное — как записано."""
+
+    def move(stamp: str) -> str:
+        return (dt.datetime.fromisoformat(stamp) + delta).isoformat()
+
+    moved: dict[str, Any] = json.loads(json.dumps(body))
+    moved["period_start"] = move(moved["period_start"])
+    moved["period_end"] = move(moved["period_end"])
+    for row in moved["online_ips"]:
+        row["last_seen"] = move(row["last_seen"])
+    return moved
+
+
+async def test_the_recorded_report_answers_are_what_the_live_service_gives(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Фикстуры отчёта (`contracts/agent_v1/report*.json`) — ответы настоящего приёма, а не
+    записанные вручную: при предусловии фикстуры — нода и пользователи, как записано, часы
+    сервера `given.server_time` (метки тела сдвигаются на разность с часами базы), принятые до
+    неё фикстуры `given.accepted` по порядку — живой приём отвечает ровно записанным кодом,
+    телом и заголовками; каждая предшествующая фикстура — тоже своим. Герметичный прогон
+    (`tests/contract`) отвечает записанным; этот тест держит записанное правдой."""
+    fixtures = {path.stem: json.loads(path.read_text()) for path in CONTRACTS.glob("report*.json")}
+    assert len(fixtures) == 7, sorted(fixtures)
+    members = sorted(
+        {
+            uuid.UUID(row["user_id"])
+            for fixture in fixtures.values()
+            for key in ("lines", "online_ips")
+            for row in fixture["request"]["body"][key]
+        }
+    )
+    identity = {"X-Client-Cert", "X-Node-Identity"}  # identity стенда, не фикстуры
+    for stem, fixture in sorted(fixtures.items()):
+        async with reporting(
+            pg_dsn,
+            migrate_env,
+            users=0,
+            node_id=STUB_NODE_ID,
+            member_ids=members,
+            status=fixture["given"]["node_status"],
+        ) as stand:
+            server_time = dt.datetime.fromisoformat(fixture["given"]["server_time"])
+            delta = await db_now(stand.conn) - server_time
+            for name in [*fixture["given"].get("accepted", []), stem]:
+                recorded = fixtures[name]
+                headers = {
+                    **{
+                        k: v for k, v in recorded["request"]["headers"].items() if k not in identity
+                    },
+                    **{k: v for k, v in stand.headers.items() if k in identity},
+                }
+                response = await stand.post(
+                    _shifted(recorded["request"]["body"], delta), headers=headers
+                )
+                expected = recorded["response"]
+                assert response.status_code == expected["status"], (stem, name, response.text)
+                assert response.json() == expected["body"], (stem, name)
+                for header, value in expected["headers"].items():
+                    assert response.headers.get(header) == value, (stem, name, header)
+                if expected["status"] == 409:
+                    assert "retry-after" not in response.headers, (stem, name)

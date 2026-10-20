@@ -11,12 +11,13 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import ipaddress
 import re
 import uuid
 from typing import Annotated
 
-from pydantic import AwareDatetime, BeforeValidator
+from pydantic import AfterValidator, AwareDatetime, BeforeValidator
 
 # Самая длинная строка грамматики ``TIMESTAMP``: «2026-09-10T12:00:57.123456+00:00» — 19 знаков
 # даты и времени, точка и шесть знаков дробной части, смещение из шести знаков. Константа —
@@ -50,6 +51,17 @@ def _timestamp_text(value: object) -> object:
     return value
 
 
+def _utc(value: dt.datetime) -> dt.datetime:
+    """Метка — в UTC: грамматика допускает год 0001 с положительным смещением и год 9999 с
+    отрицательным, а такой момент в UTC — вне ``datetime``; asyncpg переводит параметр
+    ``timestamptz`` в UTC при кодировании, и метка падала бы ``OverflowError`` — 500 и
+    бесконечный повтор агента вместо отказа по контракту (роаст 001.34, раунд 3, F-5)."""
+    try:
+        return value.astimezone(dt.UTC)
+    except OverflowError:
+        raise ValueError("метка времени вне диапазона, представимого в UTC") from None
+
+
 def _plain_address(value: object) -> object:
     """Адрес — текст без zone id: ``fe80::1%eth0`` библиотека ``ipaddress`` принимает, а
     ``inet`` PostgreSQL — нет; целые (3232235777) в контракт не входят."""
@@ -61,5 +73,5 @@ def _plain_address(value: object) -> object:
 
 
 CanonicalUuid = Annotated[uuid.UUID, BeforeValidator(_canonical_uuid)]
-Timestamp = Annotated[AwareDatetime, BeforeValidator(_timestamp_text)]
+Timestamp = Annotated[AwareDatetime, BeforeValidator(_timestamp_text), AfterValidator(_utc)]
 Address = Annotated[ipaddress.IPv4Address | ipaddress.IPv6Address, BeforeValidator(_plain_address)]

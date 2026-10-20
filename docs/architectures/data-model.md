@@ -180,7 +180,8 @@ nodes
   multiplier_milli       int NULL CHECK           — денормализация действующего переопределения
   resync_required        boolean                  — обязать агента взять полный снапшот (§5.2)
   ok_heartbeats          int                      — подряд успешных интервалов, для Н-15 и §4.7
-  bandwidth_mbps         int                      — порог аномалии (§5.9)
+  bandwidth_mbps         int                      — порог аномалии (§5.9); 1…100 000 Мбит/с:
+                                                     граница держит списание в bigint (001.34)
   max_conn_per_ip        int                      — Н-29
   desired_config_version int
   applied_config_version int
@@ -451,21 +452,21 @@ traffic_reports
   counter_epoch          uuid
   report_seq             bigint
   parts_total            int                      — объявленное нодой число частей интервала
-                                                     (контракт 001.33; колонка — 001.34)
+                                                     (контракт 001.33; колонка — миграция 140)
   period_start           timestamptz
   period_end             timestamptz
   received_at            timestamptz
   status                 report_status            — accepted | duplicate | rejected_time |
                                                      held_anomaly | interval_closed (последнее —
                                                      часть к закрытому интервалу, §5.2; значение
-                                                     добавляет миграция 001.34)
+                                                     добавляет миграция 140)
   node_rx_bytes          bigint                   — счётчики интерфейса (второй источник)
   node_tx_bytes          bigint
-  PK (node_id, counter_epoch, report_seq)
+  PK (node_id, counter_epoch, report_seq)          — CHECK report_seq ≥ 1: нумерация с единицы
 
 report_intervals                                   — состояние интервала отчёта: правила частей
                                                      §5.2 требуют помнить его между частями
-                                                     (миграция — 001.34)
+                                                     (миграция 140, 001.34)
   node_id                uuid FK nodes
   counter_epoch          uuid
   period_start           timestamptz
@@ -475,23 +476,26 @@ report_intervals                                   — состояние инт
   parts_accepted         int                      — принятых частей (счётчик, не пересчёт)
   accepted_uplink_bytes  bigint                   — нарастающие суммы raw по направлениям
   accepted_downlink_bytes bigint                     принятых частей и списанной в пределах
-                                                     потолка канала доли удержанных — к каждой
-                                                     порог §5.9 (полоса × длительность; канал
-                                                     дуплексный)
+                                                     потолка канала доли удержанных — к их
+                                                     сумме порог §5.9 (полоса × длительность:
+                                                     байт проходит порт дважды, 001.34)
   held                   boolean                  — в интервале удержанная часть (held_anomaly):
                                                      первая часть нового интервала открывает
                                                      его с held, удержанное продолжение ставит
                                                      held на существующей строке (второй строки
                                                      с тем же ключом нет), удержание по потолку
-                                                     открытых строки не создаёт; предыдущий
-                                                     интервал не закрывается
+                                                     открытых создаёт строку закрытой (capped,
+                                                     без списания); предыдущий интервал не
+                                                     закрывается
   first_received_at      timestamptz
   last_received_at       timestamptz              — от него скользящий срок закрытия; потолок
                                                      возраста (48 ч, REPORT_MAX_INTERVAL_AGE) —
                                                      от first_received_at
   closed_at              timestamptz NULL         — NULL — открыт
   close_reason           text NULL CHECK (close_reason IN ('completed', 'superseded',
-                                                     'deadline', 'age'))
+                                                     'deadline', 'age', 'capped'))
+  CHECK (close_reason IS DISTINCT FROM 'capped' OR (held AND accepted_uplink_bytes = 0
+         AND accepted_downlink_bytes = 0))        — capped — удержан и без списания (001.34)
   PK (node_id, counter_epoch, period_start, period_end)
   INDEX (node_id, period_end DESC)                 — последний принятый интервал ноды:
                                                      монотонность и якорь первого (§5.2)
@@ -514,6 +518,9 @@ traffic_lines                                      — факт, партици�
   multiplier_milli       int                      — применённый коэффициент
   billing_group_id       uuid
   PK (period_start, node_id, counter_epoch, report_seq, user_id)
+  UNIQUE (period_start, node_id, counter_epoch, period_end, user_id)
+                                                   — пользователь в одной части интервала:
+                                                     страховка правила приёма (001.34)
   INDEX (user_id, period_start), INDEX (node_id, period_start)
 
 traffic_hourly                                     — час, партиции по суткам, 90 дней

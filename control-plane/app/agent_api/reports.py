@@ -1,11 +1,13 @@
 """``POST /agent/v1/reports`` и ``POST /agent/v1/quota/request`` — отчёт о трафике и запрос
 гранта квоты (interfaces.md §5.2; постановка §5.9, §4.11; UC-04; R-19, R-21, R-26).
 
-Задача 001.33: маршруты на заглушках ``AccountingService`` и ``QuotaService``; схемы живут в
-``app.accounting`` (домен возвращает их, обратный порядок сделал бы домен зависимым от слоя
-API). Приём с ключом идемпотентности, допуском времени и порогом аномалии — 001.34, факты и
-списание — 001.77; правило гранта — 001.36; ``conn_stats[]`` для признаков перепродажи —
-001.39.
+Задача 001.33: маршруты и схемы (схемы живут в ``app.accounting`` — домен возвращает их,
+обратный порядок сделал бы домен зависимым от слоя API). Приём с ключом идемпотентности,
+допуском времени, правилами частей и порогом аномалии — ``AccountingService.accept_report``
+(001.34): маршрут передаёт ему ноду запроса и отпечаток сертификата, которым запрос
+представился, — identity перепроверяется под блокировкой ноды. Факты и списание — 001.77;
+правило гранта — 001.36 (до него ``QuotaService`` — заглушка); ``conn_stats[]`` для признаков
+перепродажи — 001.39.
 
 Тело отчёта — единственное в разделе, что весит больше сотен байт: до ``REPORT_MAX_LINES`` строк и
 ``REPORT_MAX_ONLINE_IPS`` адресов, 50 мс времени апстрима на стенде (p95 при двух потоках
@@ -60,9 +62,23 @@ REPORT_ERRORS: dict[int | str, dict[str, Any]] = {
         "description": "нода не подтверждена (`pending`, §4.6) — `node_not_approved`; отчёт "
         "содержит идентификатор другой ноды — `node_mismatch` (`Retry-After`)"
     },
+    409: {
+        "description": "часть отказана и записана, точка продолжения не сдвинута "
+        "(`details.last_accepted_seq`), `Retry-After` нет — часть не повторять, слать следующую: "
+        "`rejected_time` (`details.reason`: `future`, `too_old`, `overlap`, `before_anchor`) или "
+        "`interval_closed` (`closed`, `out_of_range`); повтор отказанного ключа — тот же отказ "
+        "с `repeated` (001.34)"
+    },
     413: {
         "description": "тело больше предела прокси (1 МиБ): отчёт делится и не повторяется "
         "как есть; ответ — страница nginx без тела единого формата"
+    },
+    422: {
+        "description": "тело не прошло модель (`validation_error`) или шире самого большого "
+        "допустимого (`too_wide`) — делить и не повторять как есть; часть противоречит принятым "
+        "частям интервала — `report_inconsistent` (`details.reason`: `parts_total_decreased`, "
+        "`counters_in_continuation`, `user_in_another_part`, `seq_reused`): ключ не записан, "
+        "ошибка агента (001.34)"
     },
     429: PROXY_429,
 }
@@ -84,7 +100,7 @@ QUOTA_ERRORS: dict[int | str, dict[str, Any]] = {
 )
 async def report(body: ReportIn, agent: Served, accounting: Accounting) -> Accept:
     """Нода — из identity запроса; ``node_id`` тела, если есть, служба сверяет с ней."""
-    return await accounting.accept_report(agent.node, body)
+    return await accounting.accept_report(agent.node, body, agent.fingerprint)
 
 
 @router.post(

@@ -11,6 +11,9 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
+import asyncpg
+
+from app.accounting.service import REPORT_INTERVAL_BUCKETS, interval_durations
 from app.db.pool import get_pool
 from app.jobs import queue as jobs
 from app.jobs.worker import CRITICAL_WAIT_BUDGET_SECONDS
@@ -32,6 +35,11 @@ async def render() -> str:
         async with pool.acquire() as conn:
             counts = await jobs.depth(conn)
             waits = await jobs.wait_seconds(conn, WAIT_WINDOW)
+            try:
+                intervals = await interval_durations(conn)
+            except asyncpg.PostgresError as exc:  # ряд учёта — не признак доступности базы
+                log.warning("метрики: длительности интервалов: %s: %s", type(exc).__name__, exc)
+                intervals = {}
     except Exception as exc:  # база недоступна — метрики живости всё равно отдаются
         log.warning("метрики: база недоступна: %s: %s", type(exc).__name__, exc)
         if pool is not None:  # устаревшие подключения (кэш типов, разрыв) — обновить
@@ -60,5 +68,14 @@ async def render() -> str:
         "# TYPE control_plane_jobs_wait_budget_seconds gauge",
         f'control_plane_jobs_wait_budget_seconds{{queue="critical"}} '
         f"{CRITICAL_WAIT_BUDGET_SECONDS:g}",
+        "# HELP control_plane_report_intervals Интервалы отчётов ноды, открытые за последний час "
+        "(принятые и удержанные части): число не длиннее le секунд, накопительно.",
+        "# TYPE control_plane_report_intervals gauge",
     ]
+    bounds = [str(bound) for bound in REPORT_INTERVAL_BUCKETS] + ["+Inf"]
+    for node_id, buckets in sorted(intervals.items()):
+        for bound, count in zip(bounds, buckets, strict=True):
+            lines.append(
+                f'control_plane_report_intervals{{node_id="{node_id}",le="{bound}"}} {count}'
+            )
     return "\n".join(lines) + "\n"

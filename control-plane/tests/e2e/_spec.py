@@ -28,7 +28,7 @@ EXPECTED_ENUMS: dict[str, list[str]] = {
     "period_source": ["redeem", "admin", "order"],
     "balance_source": ["report", "adjustment", "bonus", "late_report"],
     "code_kind": ["redeem", "promo"],
-    "report_status": ["accepted", "duplicate", "rejected_time", "held_anomaly"],
+    "report_status": ["accepted", "duplicate", "rejected_time", "held_anomaly", "interval_closed"],
     "reconciliation_kind": ["arithmetic", "cross_source", "continuity"],
     "event_type": [
         "subscription_activated",

@@ -27,9 +27,9 @@ from app.accounting.quota import (
 )
 from app.accounting.service import (
     RETRY_AFTER_NODE_MISMATCH,
-    Accept,
     AccountingService,
     ReportIn,
+    own_node,
 )
 from app.domain import multiplier
 from app.domain.composition import STUB_QUOTA_GRANT_BYTES
@@ -73,7 +73,7 @@ def report(**overrides: Any) -> ReportIn:
     [
         (
             AccountingService.accept_report,
-            "(self, node: 'Node', report: 'ReportIn') -> 'Accept'",
+            "(self, node: 'Node', report: 'ReportIn', fingerprint: 'str') -> 'Accept'",
         ),
         (
             AccountingService.close_hour,
@@ -129,22 +129,18 @@ def test_the_declared_signature_is_the_one_logic_tasks_will_find(
     assert str(inspect.signature(function)) == signature
 
 
-async def test_accounting_stub_accepts_and_checks_the_node() -> None:
-    """Приём без состояния (последний принятый — только что принятая часть, не дубликат — так
-    фикстура продолжения интервала записывает верный ответ), и одно настоящее правило:
-    идентификатор другой ноды в теле — 403 `node_mismatch` с `Retry-After`; свой или
-    отсутствующий — приём. Нода намеренно не фиксированная: сверяется запрошенная, а не
+async def test_accounting_refuses_another_node_before_the_database() -> None:
+    """Правило «нода отчитывается только за себя» служба проверяет до транзакции (001.34: приём
+    — живая база, `tests/e2e/test_reports.py`): идентификатор другой ноды в теле — 403
+    `node_mismatch` с `Retry-After`, и база не тронута (часовой); свой или отсутствующий
+    `node_id` правило пропускает. Нода намеренно не фиксированная: сверяется запрошенная, а не
     константа."""
     service = AccountingService(Sentinel())
     node = stub_node(node_id=NODE)
-    for seq in (1, 5, 2**63 - 1):
-        assert await service.accept_report(node, report(report_seq=seq)) == Accept(
-            last_accepted_seq=seq, duplicate=False
-        )
-    own = await service.accept_report(node, report(node_id=str(NODE)))
-    assert own.duplicate is False
+    own_node(node, report(node_id=str(NODE)))
+    own_node(node, report())
     with pytest.raises(ApiError) as refused:
-        await service.accept_report(node, report(node_id=str(STUB_NODE_ID)))
+        await service.accept_report(node, report(node_id=str(STUB_NODE_ID)), "0" * 64)
     assert (refused.value.status, refused.value.code) == (403, "node_mismatch")
     assert refused.value.details == {"node_id": str(NODE)}
     assert RETRY_AFTER_NODE_MISMATCH == 3600

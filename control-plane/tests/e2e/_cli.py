@@ -81,11 +81,33 @@ def clear_test_identities(env: dict[str, str]) -> None:
     )
 
 
+# Откат 140 пересоздаёт report_status без interval_closed и останавливается на строке с этим
+# статусом (решение 001.34: удалить отказанные части решает оператор). Строки отчётов тестовых
+# нод — данные тестов: прогон, убитый между вставкой и уборкой, оставил бы откат через 140
+# красным навсегда (роаст 001.34, раунд 2).
+REPORTS_MIGRATION = "140_report_acceptance"
+TEST_REPORT_NODE_CODES = ("t19-%", "t25-%", "t140-%")
+
+
+def clear_test_reports(env: dict[str, str]) -> None:
+    """Снять строки ``traffic_reports`` тестовых нод перед откатом через 140; строки других нод
+    не тестовые — откат на них остановится сам."""
+    with owner_connection(env) as conn:
+        conn.execute(
+            "delete from traffic_reports where node_id in "
+            "(select id from nodes where code like any(%s))",
+            [list(TEST_REPORT_NODE_CODES)],
+        )
+
+
 def rollback_through(env: dict[str, str], migration_id: str) -> int:
     """Откатить ровно столько шагов, чтобы снять ``migration_id`` (и всё, что новее); вернуть
     число шагов. Каждый шаг должен завершиться кодом 0 и снять ровно одну миграцию. Откат через
-    130 — после уборки identity тестовых нод (``clear_test_identities``)."""
+    140 — после уборки отчётов тестовых нод (``clear_test_reports``), через 130 — после уборки
+    их identity (``clear_test_identities``)."""
     steps = steps_to_remove(migration_id)
+    if steps >= steps_to_remove(REPORTS_MIGRATION):
+        clear_test_reports(env)
     if steps >= steps_to_remove(IDENTITY_MIGRATION):
         clear_test_identities(env)
     for _ in range(steps):

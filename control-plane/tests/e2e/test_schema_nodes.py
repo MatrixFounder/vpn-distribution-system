@@ -170,6 +170,9 @@ async def test_rollback_131_keeps_annulled_tokens_refused(
     assert reapplied.returncode == 0, reapplied.stderr
 
 
+# Ближайшая миграция над 130: откат через неё снимает всё, что новее 130, и останавливается
+# перед ней.
+ABOVE_IDENTITY = "131_bootstrap_token_annulled_at"
 IDENTITY_ROW = (
     "insert into node_identities (node_id, cert_fingerprint, cert_serial, token_hash, generation, "
     "expires_at, enrolled_from) values ($1, $2, $3, 'tok', 1, now() + interval '90 days', "
@@ -195,8 +198,7 @@ async def test_rollback_130_refuses_while_identities_exist(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-fp", "RB130")
-        first = run_cli(migrate_env, "migrate", "--rollback")
-        assert first.returncode == 0 and "откачено миграций — 1" in first.stdout, first.stderr
+        rollback_through(migrate_env, ABOVE_IDENTITY)  # 131 и новее (140) — до самой 130
         refused = run_cli(migrate_env, "migrate", "--rollback")
         assert refused.returncode != 0, refused.stdout
         assert "непустой node_identities" in refused.stdout + refused.stderr, refused.stderr
@@ -238,8 +240,8 @@ async def test_rollback_130_checks_under_the_table_lock(
             "insert into billing_groups (name) values ($1) returning id", billing
         )
         node_id = await insert_node(conn, code, billing_id)
-        first = run_cli(migrate_env, "migrate", "--rollback")  # 131: таблицу identity не трогает
-        assert first.returncode == 0 and "откачено миграций — 1" in first.stdout, first.stderr
+        # 131 и новее (140) таблицу identity не трогают — до самой 130.
+        rollback_through(migrate_env, ABOVE_IDENTITY)
         insert = writer.transaction()
         await insert.start()
         await writer.execute(IDENTITY_ROW, node_id, "rb-130-race", "RB130R")
@@ -300,7 +302,7 @@ async def test_rollback_through_130_clears_test_identities_first(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-left", "RB130L")
-        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 2
+        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 3, "140, 131 и сама 130"
         assert await conn.fetchval("select count(*) from node_identities") == 0
     finally:
         await conn.execute("delete from node_identities where cert_fingerprint = 'rb-130-left'")

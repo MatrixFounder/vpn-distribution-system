@@ -1,0 +1,66 @@
+{
+  "operation": "reports",
+  "summary": "Повтор первой части после потери ответа (Н-20): ключ уже принят — 200 с duplicate: true и текущей точкой продолжения (наибольший принятый номер эпохи — 2, а не номер повтора); баланс не меняется",
+  "given": {
+    "node_status": "active",
+    "server_time": "2026-09-10T12:01:05Z",
+    "accepted": [
+      "report",
+      "report-continuation"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "path": "/agent/v1/reports",
+    "query": {},
+    "headers": {
+      "X-Agent-Version": "0.1.0",
+      "X-Client-Cert": "-----BEGIN%20CERTIFICATE-----%0AMIIB1DCCAXqgAwIBAgIUfWAR%2FfLu9DsE1F3%2FVFUSZ6ejwLwwCgYIKoZIzj0EAwIw%0ALDEqMCgGA1UEAwwhY29udHJvbC1wbGFuZSBjb250cmFjdCBmaXh0dXJlIENBMCAX%0ADTI2MDkwMTAwMDAwMFoYDzIxMjYwOTAxMDAwMDAwWjAvMS0wKwYDVQQDDCQwMDAw%0AMDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwYjEwWTATBgcqhkjOPQIBBggq%0AhkjOPQMBBwNCAAQsO9wx1ddLfFAqjeqj%2FHwRD3V4XhjSBBFcogKWPm%2F%2BAuTQ%2Fqoc%0AWw%2FnwLM1S8t2ucicow1F2iubLzO%2FnafvvWWvo3UwczAMBgNVHRMBAf8EAjAAMA4G%0AA1UdDwEB%2FwQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAjAdBgNVHQ4EFgQUxTZV%0AoYBhk2ACvOPSqo%2FABOSLUxwwHwYDVR0jBBgwFoAUAfH3d%2F7qBOeAb1rfxzv3BUB2%0ANTswCgYIKoZIzj0EAwIDSAAwRQIhAINW0n5yflaA0inlYNOjY7KS9b%2Fp1uvnUE9e%0A%2FFZ4fNWJAiBjRmh9tjGFIHt3gTBrg7KHm0zNBHu9xHYej9oij%2B03VQ%3D%3D%0A-----END%20CERTIFICATE-----%0A",
+      "X-Node-Identity": "stub-identity-token-000000000000000000000000000"
+    },
+    "body": {
+      "node_id": "00000000-0000-7000-8000-0000000000b1",
+      "counter_epoch": "00000000-0000-7000-8000-0000000000e1",
+      "report_seq": 1,
+      "parts_total": 2,
+      "period_start": "2026-09-10T12:00:00Z",
+      "period_end": "2026-09-10T12:01:00Z",
+      "lines": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "uplink_bytes": 1048576,
+          "downlink_bytes": 10485760
+        },
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a4",
+          "uplink_bytes": 0,
+          "downlink_bytes": 2048
+        }
+      ],
+      "online_ips": [
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "ip": "198.51.100.23",
+          "last_seen": "2026-09-10T12:00:57Z"
+        },
+        {
+          "user_id": "00000000-0000-7000-8000-0000000000a1",
+          "ip": "2001:db8::17",
+          "last_seen": "2026-09-10T12:00:40Z"
+        }
+      ],
+      "node_rx_bytes": 12582912,
+      "node_tx_bytes": 2097152
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "last_accepted_seq": 2,
+      "duplicate": true
+    }
+  }
+}

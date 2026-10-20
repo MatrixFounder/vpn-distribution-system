@@ -2,7 +2,8 @@
   "operation": "reports",
   "summary": "Отчёт с идентификатором другой ноды: 403, нода отчитывается только за себя (§11.3)",
   "given": {
-    "node_status": "active"
+    "node_status": "active",
+    "server_time": "2026-09-10T12:01:05Z"
   },
   "request": {
     "method": "POST",

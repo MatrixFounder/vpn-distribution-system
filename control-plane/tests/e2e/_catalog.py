@@ -27,12 +27,17 @@ async def cleanup(conn: asyncpg.Connection, owner: asyncpg.Connection | None = N
     ``owner`` — подключение владельца для журнала баланса (см. ниже)."""
     like = f"{PREFIX}%"
     # Всё, что ссылается на ноду без каскада (001.25: токены, identity, история адресов;
-    # группы доступа ноды уходят каскадом), — до самой ноды.
+    # 001.34: отчёты, интервалы, состав; группы доступа ноды уходят каскадом), — до самой ноды.
+    # Строки traffic_lines (без FK, без DELETE у роли приложения) убирает стенд отчётов
+    # (``_reporting.py``) подключением владельца.
     for table in (
         "bootstrap_tokens",
         "node_identities",
         "node_ip_history",
         "node_billing_assignments",
+        "traffic_reports",
+        "report_intervals",
+        "node_user_state",
     ):
         await conn.execute(
             f"delete from {table} where node_id in (select id from nodes where code like $1)",  # noqa: S608 — имя из списка

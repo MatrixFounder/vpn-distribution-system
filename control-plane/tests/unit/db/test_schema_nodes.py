@@ -179,7 +179,7 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
 
 EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
     "nodes": {
-        ("c", "CHECK ((bandwidth_mbps > 0))"),
+        ("c", "CHECK (((bandwidth_mbps >= 1) AND (bandwidth_mbps <= 100000)))"),  # 140 (001.34)
         ("c", "CHECK ((max_conn_per_ip > 0))"),
         (
             "c",

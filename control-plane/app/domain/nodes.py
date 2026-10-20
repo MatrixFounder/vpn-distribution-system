@@ -80,6 +80,12 @@ BOOTSTRAP_TOKEN_BYTES = 32  # 256 бит (§7.2)
 IDENTITY_TOKEN_BYTES = 32  # токен identity — та же стойкость, что у bootstrap-токена
 
 Code = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]{1,63}$")]
+# Полоса порта VPS (Мбит/с) — база порога аномалии отчётов §5.9. Верхняя граница — ``CHECK``
+# таблицы (миграция 140, задача 001.34): порог держит границу строки и агрегатов списания в
+# ``bigint`` только при ограниченной полосе — при 10.0 и полном канале (порог — на сумму uplink +
+# downlink) год одной ноды на 100 Гбит/с укладывается в 2⁶³ − 1
+# (``tests/unit/accounting/test_acceptance.py``).
+BANDWIDTH_MBPS_MAX = 100_000
 Country = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 Currency = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100)]
@@ -110,7 +116,9 @@ class NodeIn(BaseModel):
     fqdn: Fqdn | None = None
     billing_group_id: uuid.UUID
     access_group_ids: list[uuid.UUID] = Field(default_factory=list)
-    bandwidth_mbps: int = Field(gt=0, description="порт VPS; порог аномалии отчётов §5.9")
+    bandwidth_mbps: int = Field(
+        gt=0, le=BANDWIDTH_MBPS_MAX, description="порт VPS; порог аномалии отчётов §5.9"
+    )
     max_conn_per_ip: int = Field(gt=0, description="лимит одновременных соединений с адреса Н-29")
     legal_profile: dict[str, Any] = Field(default_factory=dict)
     monthly_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
@@ -140,7 +148,7 @@ class NodePatch(BaseModel):
     fqdn: Fqdn | None = None
     billing_group_id: uuid.UUID | None = None
     access_group_ids: list[uuid.UUID] | None = None
-    bandwidth_mbps: int | None = Field(default=None, gt=0)
+    bandwidth_mbps: int | None = Field(default=None, gt=0, le=BANDWIDTH_MBPS_MAX)
     max_conn_per_ip: int | None = Field(default=None, gt=0)
     legal_profile: dict[str, Any] | None = None
     monthly_cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)

@@ -34,6 +34,23 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("status", "report_status", False, None),
         ("node_rx_bytes", "int8", False, None),
         ("node_tx_bytes", "int8", False, None),
+        ("parts_total", "int4", False, None),  # 140 (001.34): объявленное число частей
+    ],
+    "report_intervals": [  # 140 (001.34): состояние интервала отчёта
+        ("node_id", "uuid", False, None),
+        ("counter_epoch", "uuid", False, None),
+        ("period_start", "timestamptz", False, None),
+        ("period_end", "timestamptz", False, None),
+        ("first_seq", "int8", False, None),
+        ("parts_total", "int4", False, None),
+        ("parts_accepted", "int4", False, None),
+        ("accepted_uplink_bytes", "int8", False, None),
+        ("accepted_downlink_bytes", "int8", False, None),
+        ("held", "bool", False, "false"),
+        ("first_received_at", "timestamptz", False, None),
+        ("last_received_at", "timestamptz", False, None),
+        ("closed_at", "timestamptz", True, None),
+        ("close_reason", "text", True, None),
     ],
     "traffic_lines": [
         ("node_id", "uuid", False, None),
@@ -124,8 +141,33 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
         ("c", "CHECK ((node_rx_bytes >= 0))"),
         ("c", "CHECK ((node_tx_bytes >= 0))"),
         ("c", "CHECK ((period_end > period_start))"),
+        ("c", "CHECK (((parts_total >= 1) AND (parts_total <= 1000)))"),  # 140
+        ("c", "CHECK ((report_seq >= 1))"),  # 140: нумерация с единицы
         ("f", "FOREIGN KEY (node_id) REFERENCES nodes(id)"),
         ("p", "PRIMARY KEY (node_id, counter_epoch, report_seq)"),
+    },
+    "report_intervals": {
+        ("c", "CHECK ((accepted_downlink_bytes >= 0))"),
+        ("c", "CHECK ((accepted_uplink_bytes >= 0))"),
+        ("c", "CHECK (((closed_at IS NULL) = (close_reason IS NULL)))"),
+        (
+            "c",
+            "CHECK ((close_reason = ANY (ARRAY['completed'::text, 'superseded'::text, "
+            "'deadline'::text, 'age'::text, 'capped'::text])))",
+        ),
+        (  # 140, роаст раунд 3: capped — удержан и без списания
+            "c",
+            "CHECK (((close_reason IS DISTINCT FROM 'capped'::text) OR (held AND "
+            "(accepted_uplink_bytes = 0) AND (accepted_downlink_bytes = 0))))",
+        ),
+        ("c", "CHECK ((first_seq >= 1))"),
+        ("c", "CHECK ((last_received_at >= first_received_at))"),
+        ("c", "CHECK (((parts_accepted >= 1) AND (parts_accepted <= parts_total)))"),
+        ("c", "CHECK (((parts_total >= 1) AND (parts_total <= 1000)))"),
+        ("c", "CHECK ((period_end > period_start))"),
+        ("f", "FOREIGN KEY (node_id) REFERENCES nodes(id)"),
+        ("p", "PRIMARY KEY (node_id, counter_epoch, period_start, period_end)"),
+        ("x", "EXCLUDE USING gist (node_id WITH =, tstzrange(period_start, period_end) WITH &&)"),
     },
     "traffic_lines": {
         ("c", "CHECK ((billable_bytes >= 0))"),
@@ -201,6 +243,18 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
         "CREATE UNIQUE INDEX traffic_reports_pkey ON control_plane.traffic_reports USING btree "
         "(node_id, counter_epoch, report_seq)",
     },
+    "report_intervals": {
+        "CREATE INDEX report_intervals_node_id_first_received_at_idx ON "
+        "control_plane.report_intervals USING btree (node_id, first_received_at)",
+        "CREATE INDEX report_intervals_node_id_period_end_idx ON control_plane.report_intervals "
+        "USING btree (node_id, period_end DESC)",
+        "CREATE INDEX report_intervals_node_id_tstzrange_excl ON control_plane.report_intervals "
+        "USING gist (node_id, tstzrange(period_start, period_end))",
+        "CREATE INDEX report_intervals_open_idx ON control_plane.report_intervals USING btree "
+        "(node_id) WHERE (closed_at IS NULL)",
+        "CREATE UNIQUE INDEX report_intervals_pkey ON control_plane.report_intervals USING btree "
+        "(node_id, counter_epoch, period_start, period_end)",
+    },
     "traffic_lines": {
         "CREATE INDEX traffic_lines_node_id_period_start_idx ON ONLY control_plane.traffic_lines "
         "USING btree (node_id, period_start)",
@@ -208,6 +262,9 @@ EXPECTED_INDEXES: dict[str, set[str]] = {
         "USING btree (user_id, period_start)",
         "CREATE UNIQUE INDEX traffic_lines_pkey ON ONLY control_plane.traffic_lines USING btree "
         "(period_start, node_id, counter_epoch, report_seq, user_id)",
+        # 140 (001.34): пользователь — в одной части интервала (страховка правила приёма)
+        "CREATE UNIQUE INDEX traffic_lines_interval_user_key ON ONLY control_plane.traffic_lines "
+        "USING btree (period_start, node_id, counter_epoch, period_end, user_id)",
     },
     "traffic_hourly": {
         "CREATE INDEX traffic_hourly_node_id_hour_start_idx ON ONLY control_plane.traffic_hourly "
