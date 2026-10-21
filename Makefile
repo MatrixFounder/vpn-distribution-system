@@ -12,7 +12,11 @@ PYTEST := control-plane/.venv/bin/pytest
 # Проектные инструменты живут в дереве проекта (.bin/, .venv/, node_modules/), а не на машине:
 # глобальная установка меняет окружение всех остальных проектов на этой машине.
 BIN := $(CURDIR)/.bin
-GOLANGCI_VERSION := 2.13.2
+# CI ставит Go по спецификации «1.27», то есть последний патч линии. golangci-lint читает export
+# data этого компилятора своей копией x/tools: 2.13.2 не читает версию 5 из Go 1.27.3
+# («export data version 5 is greater than maximum supported version 4»); 2.15.0 (2026-10-16,
+# x/tools 0.52.0) читает её и Go 1.27.1. Новый патч Go с отказом typecheck — сначала эта версия.
+GOLANGCI_VERSION := 2.15.0
 GOLANGCI := $(BIN)/golangci-lint
 
 .PHONY: check lint typecheck test fmt setup migrate test-contract \
