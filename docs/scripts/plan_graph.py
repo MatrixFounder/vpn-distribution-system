@@ -33,12 +33,15 @@ from pathlib import Path
 
 START = "<!-- generated:plan-status start -->"
 END = "<!-- generated:plan-status end -->"
-TASK_RE = re.compile(r"- \*\*Задача (001\.\d{2})\*\* — ([^\n]+)\n((?:  - [^\n]+\n)+)")
+# Номер задачи — 001.NN; часть разделённой задачи — 001.NN с буквенным суффиксом (001.77b): ядро
+# сохраняет номер, отделённые части получают b, c, d.
+TASK_RE = re.compile(r"- \*\*Задача (001\.\d{2}[a-z]?)\*\* — ([^\n]+)\n((?:  - [^\n]+\n)+)")
 STAGE_RE = re.compile(r"^### (Этап (\d+) — [^\n]*?)(?: — \d+ ч)?$", re.MULTILINE)
-DEP_RE = re.compile(r"Задача (001\.\d{2})")
+DEP_RE = re.compile(r"Задача (001\.\d{2}[a-z]?)")
 DATE_RE = re.compile(r"\((?:с )?(\d{4}-\d{2}-\d{2})\)")
 RTM_RE = re.compile(
-    r"^- \[( |x)\] \[(R-\d+)\] (.*? — задачи ((?:\d{2}(?:, )?)+) \(приоритет \w+\))$", re.MULTILINE
+    r"^- \[( |x)\] \[(R-\d+)\] (.*? — задачи ((?:\d{2}[a-z]?(?:, )?)+) \(приоритет \w+\))$",
+    re.MULTILINE,
 )
 KINDS = {
     "CONFIGURATION": "конфигурация",
