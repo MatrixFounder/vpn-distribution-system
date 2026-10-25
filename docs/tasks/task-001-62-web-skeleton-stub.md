@@ -22,10 +22,23 @@
 ### Новые файлы
 
 - `web/packages/api-client/` — генерация из OpenAPI (`openapi-typescript`); `npm run gen`
-- `web/packages/i18n/{ru,en}.json` — строки интерфейса; `t(key)`; выбор языка: профиль → `navigator.language` → `en`
+- `web/packages/i18n/{ru,en}.json` — строки интерфейса; `t(key)`; выбор языка `pickLanguage(profile, navigator.languages)`: профиль → первый поддерживаемый язык из списка `navigator.languages` (из него браузер строит `Accept-Language`; правило сервера 001.65) → `en`
 - `web/apps/cabinet/src/routes.tsx` — `/`, `/subscription`, `/traffic`, `/onboarding`, `/profile` — заглушки
-- `web/apps/admin/src/routes.tsx` — `/dashboard`, `/users`, `/nodes`, `/groups`, `/plans`, `/codes`, `/settings`, `/audit` — заглушки
+- `web/apps/admin/src/routes.tsx` — `/dashboard`, `/users`, `/nodes`, `/groups`, `/plans`, `/codes`, `/settings`, `/audit`, `/approvals` (запросы второго подтверждения, В-34), `/admins` (раздел Administrators) и `/profile` (свой профиль администратора; оба — 001.89, В-33) — заглушки
 - `web/apps/cabinet/src/App.test.tsx` — рендер маршрутов
+- `web/apps/cabinet/vite.config.ts`, `web/apps/admin/vite.config.ts` — сборка; `build.target` —
+  минимальные версии перечня браузеров ниже
+
+### Изменения в существующих файлах
+
+#### Файлы: `web/apps/cabinet/package.json`, `web/apps/admin/package.json`
+
+- `browserslist` по перечню поддерживаемых браузеров (решение заказчика 2026-10-25, В-38; ОВ-14
+  закрыт): `last 2 Chrome versions, last 2 Firefox versions, last 2 Safari versions, last 2 Edge
+  versions, iOS >= 16, last 2 ChromeAndroid versions` — для обоих приложений. Кабинет
+  дополнительно поддерживает встроенные браузеры мессенджеров (Telegram, Instagram) на iOS и
+  Android; они работают на системном движке (WKWebView на iOS, Android System WebView), поэтому
+  цель сборки кабинета та же, а проверка в них — приёмка 001.63
 
 ### Интеграция компонентов
 
@@ -45,8 +58,9 @@
 
 1. **TC-UNIT-01:** Выбор языка
    - Проверяемая функция: `packages/i18n::pickLanguage`
-   - Входные данные: профиль `ru`; без профиля с `navigator.language = de`
-   - Ожидаемый результат: `ru`; `en`
+   - Входные данные: профиль `ru`; без профиля с `navigator.languages = ['de']`; без профиля с
+     `navigator.languages = ['de', 'ru']`
+   - Ожидаемый результат: `ru`; `en`; `ru`
 
 ### Регрессионные тесты
 
@@ -59,6 +73,7 @@
 
 - [ ] Клиент API собирается из схемы без ручных правок
 - [ ] Все ключи `i18n` присутствуют в обоих языках (тест)
+- [ ] `browserslist` и `build.target` обоих приложений соответствуют перечню браузеров (В-38)
 
 ## Примечания
 

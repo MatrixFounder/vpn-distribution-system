@@ -20,19 +20,25 @@
 
 ### Новые файлы
 
-- `control-plane/app/subscription/router.py` — `GET /s/{token}`, `GET /s/{token}/base64`, `GET /s/{token}/singbox`; выбор по `User-Agent`; страница для браузера
-- `control-plane/app/subscription/tokens.py` — `class SubscriptionTokenService`: `issue(user_id) -> str`; `resolve(token) -> user_id | None`; `reissue(user_id) -> str` — заглушки
+- `control-plane/app/subscription/tokens.py` — `class SubscriptionTokenService`: `issue(user_id) -> str`; `ensure_token(user_id, conn=None) -> str`; `resolve(token) -> user_id | None`; `reissue(user_id) -> str` — заглушки (параметр `ctx: AuditContext` у `reissue` добавляет 001.42)
 - `control-plane/app/subscription/composer.py` — `compose(user_id, country) -> list[Entry]` — отбор пар «нода × профиль» — заглушка
 - `control-plane/app/subscription/generators/base.py` — `class Generator(Protocol)`: `applicable(profile) -> bool`; `render(entries, user) -> bytes`
 - `control-plane/app/subscription/generators/base64.py` — заглушка: фиксированный список ссылок
 - `control-plane/app/subscription/generators/singbox.py` — заглушка: фиксированный JSON по схеме sing-box v1.14.0
 - `control-plane/app/subscription/page.py` — Jinja2-страница с инструкциями и кнопками импорта — заглушка
-- `control-plane/tests/e2e/test_subscription.py` — состояния, суффиксы, браузер; golden-файлы `tests/golden/subscription/*.{txt,json}`
+- `control-plane/tests/e2e/test_subscription.py` — состояния, суффиксы, браузер
+
+### Изменения в существующих файлах
+
+#### Файл: `control-plane/app/subscription/router.py`
+
+- заглушка 501 (001.10) заменяется маршрутами `GET /s/{token}`, `GET /s/{token}/base64`, `GET /s/{token}/singbox`; выбор по `User-Agent`; страница для браузера; docstring — «001.41–001.45» вместо «001.3x»
 
 ### Интеграция компонентов
 
-Заголовки ответа §5.6 задаются в `router.py`; путь запроса исключён из журнала приложения (Н-25)
-через фильтр логгера.
+Заголовки ответа §5.6 задаются в `router.py`. Путь запроса в журнал приложения не попадает по
+решению 001.25 (Н-25): access-log uvicorn выключен, строки модуля `app/subscription` пишут путь
+только через `errors.loggable_path`.
 
 <!-- contract:tests -->
 
@@ -66,7 +72,6 @@
 
 - [ ] Три маршрута и страница объявлены
 - [ ] Состояния `active|expired|traffic_exceeded|blocked → 200`, `unknown_token → 404` реализованы в маршрутизаторе
-- [ ] Golden-файлы заведены
 
 ## Примечания
 

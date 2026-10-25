@@ -18,23 +18,28 @@
 
 ## Описание изменений
 
+### Новые файлы
+
+- `control-plane/tests/unit/domain/test_probes.py` — подпись webhook; запись признака
+
 ### Изменения в существующих файлах
 
 #### Файл: `control-plane/app/domain/probes.py`
 
-- `class ProbeService`: `record(node_id, country, available)`; интерфейс `ProbeSource` с реализацией `WebhookProbeSource` (приём результатов проб по webhook с подписью)
+- `class ProbeService`: `record(node_id, country, available)`; интерфейс `ProbeSource` с реализацией `WebhookProbeSource` (приём результатов проб по webhook с подписью HMAC)
+
+#### Файл: `control-plane/app/api/hooks/probes.py`
+
+- `POST /api/v1/hooks/probes` (входящий webhook): вне `/admin`, без сессии администратора и CSRF, проверка подписи HMAC
 
 #### Файл: `control-plane/app/api/admin/probes.py`
 
-- `POST /admin/probes/results` (входящий webhook), `GET /admin/nodes/{id}/availability`
-
-#### Файл: `control-plane/app/subscription/composer.py`
-
-- фильтр: исключение ноды для пользователей из страны с `available = false` (001.44)
+- `GET /admin/nodes/{id}/availability` — разрешение `nodes.read`, Operator и выше (`security.md` §7.1: «доступность из стран»; реестр — 001.46, матрица — 001.48)
 
 ### Интеграция компонентов
 
-Источник проб — ОВ-A5; до его выбора реализуется только приём результатов.
+Источник проб — ОВ-A5; до его выбора реализуется только приём результатов. Фильтр выдачи по
+`node_country_availability` — 001.44; здесь — запись признака и сквозная проверка исключения.
 
 <!-- contract:tests -->
 
@@ -43,27 +48,38 @@
 ### Сквозные тесты
 
 1. **TC-E2E-01:** Недоступность из страны исключает ноду
-   - Входные данные: `available = false` для RU; пользователь с адресом RU
-   - Ожидаемый результат: ответ подписки без ноды; статус ноды не изменён (AC «Доступность по странам»)
+   - Входные данные: результат пробы `available = false` для RU, принятый webhook; пользователь с адресом RU
+   - Ожидаемый результат: ответ подписки без ноды (фильтр 001.44); статус ноды не изменён (AC-45)
 
 ### Модульные тесты
 
-- Не требуются: задача не содержит логики сверх заглушек или конфигурации.
+1. **TC-UNIT-01:** Подпись webhook
+   - Проверяемая функция: `app/domain/probes.py::WebhookProbeSource`
+   - Входные данные: тело с верной подписью HMAC; с неверной; без подписи
+   - Ожидаемый результат: принято; отказ; отказ
+2. **TC-UNIT-02:** Запись признака
+   - Проверяемая функция: `app/domain/probes.py::ProbeService.record`
+   - Входные данные: два результата по одной паре «нода × страна»
+   - Ожидаемый результат: одна строка `node_country_availability` с последним значением
 
 ### Регрессионные тесты
 
-- Команда: `cd control-plane && pytest tests/e2e/test_subscription.py -k country`
+- Команда: `cd control-plane && pytest tests/unit/domain/test_probes.py && pytest tests/e2e/test_subscription.py -k country`
 - Полный набор: `make test` — существующие тесты проходят.
 
 <!-- contract:acceptance -->
 
 ## Критерии приёмки
 
+- [ ] AC-45: недоступность ноды из страны исключает её из выдачи пользователям этой страны без
+  смены статуса
 - [ ] Признак хранится в `node_country_availability`
 - [ ] Статус ноды не меняется
+- [ ] Webhook проб принимается вне `/admin` только с верной подписью HMAC
 
 ## Примечания
 
-Приоритет S по §7.1 источника.
+Приоритет S по §7.1 источника. AC-45 принимается отдельно по готовности R-06 и приёмку MVP
+(001.73) не задерживает (решение заказчика 2026-10-25, В-46; `docs/TASK.md`).
 
-Зависимости: 001.30, 001.44, 001.49. Приоритет: Medium. Оценка: 3 ч. Этап: 4 — парк нод и Node API.
+Зависимости: 001.44, 001.49, 001.30. Приоритет: Medium. Оценка: 3 ч. Этап: 4 — парк нод и Node API.
