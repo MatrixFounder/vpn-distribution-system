@@ -74,12 +74,12 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
-- **WI-36** [Пересмотр закреплённых версий: Xray-core v26.10.21, sing-box v1.14.4](backlog/wi-36-xray-26-10-21-pin-revision.md) — effort `S`, status `open`, opened 2026-10-26
 - **WI-34** [Оставленная заявка retro другой задачи — не вложенность](backlog/wi-34-stale-retro-claim-is-not-nesting.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 - **WI-33** [Два решателя, один вход: разбор, декодирование и сравнение — одинаковы на обоих слоях](backlog/wi-33-two-deciders-one-input.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 
 ## Closed
 
+- **WI-36** [Пересмотр закреплённых версий: Xray-core v26.10.21, sing-box v1.14.4](backlog/wi-36-xray-26-10-21-pin-revision.md) — effort `S`, status `done`, opened 2026-10-26, resolved 2026-10-26
 - **WI-35** [Цикл задачи: посадки по подмножеству, перемер только затронутых, «решить здесь» до реализации, дробление крупных задач](backlog/wi-35-task-cycle-speedup.md) — effort `M`, status `done`, opened 2026-10-21, resolved 2026-10-25
 - **WI-32** [Утверждение об артефакте пишется после артефакта; метки посадок сверяются с харнесом](backlog/wi-32-claims-after-artefacts.md) — effort `S`, status `dropped`, opened 2026-09-15, resolved 2026-09-15
 - **WI-31** [Бриф роаста несёт версию интерпретатора и отметку о новых формах синтаксиса](backlog/wi-31-roast-brief-interpreter-version.md) — effort `S`, status `done`, opened 2026-09-15, resolved 2026-09-15
