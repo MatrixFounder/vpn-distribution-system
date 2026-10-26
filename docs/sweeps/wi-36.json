@@ -1,0 +1,31 @@
+{
+  "task": "WI-36",
+  "history_markers": [
+    "прежн",
+    "предыдущ",
+    "раунд",
+    "было"
+  ],
+  "patterns": [
+    {
+      "name": "закреплённая версия Xray-core v26.3.27 (WI-36)",
+      "literal": "26.3.27",
+      "current": "v26.10.21"
+    },
+    {
+      "name": "закреплённая версия sing-box v1.14.0 (WI-36)",
+      "literal": "1.14.0",
+      "current": "v1.14.4"
+    },
+    {
+      "name": "имена полей XHTTP версии v26.3.27 (WI-36)",
+      "regex": "sessionPlacement|sessionKey|session_placement|\\bsession_key\\b",
+      "current": "sessionIDPlacement, sessionIDKey; в модели session_id_placement, session_id_key"
+    },
+    {
+      "name": "умолчание minClientVer в ядре (WI-36)",
+      "regex": "выставляет минимальную версию|минимальн[а-я]* верси[а-я]* клиента по умолчанию",
+      "current": "в v26.10.21 умолчания нет; reality_min_client_ver = 1.8.1"
+    }
+  ]
+}

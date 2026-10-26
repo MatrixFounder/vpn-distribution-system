@@ -92,7 +92,7 @@ Python-пакетов; общая база данных; межмодульны�
 
 - Тип: сервис на ноде.
 - Назначение: обслуживание VPN-подключений по трём профилям §4.4.
-- Технологии: Xray-core v26.3.27 (О-8); `api.listen 127.0.0.1:10085` с `HandlerService`,
+- Технологии: Xray-core v26.10.21 (О-8); `api.listen 127.0.0.1:10085` с `HandlerService`,
   `StatsService`, `RoutingService`; политика уровня с `statsUserUplink`, `statsUserDownlink`,
   `statsUserOnline`.
 - Интерфейсы: входящие подключения клиентов на портах inbound; gRPC от C-05.

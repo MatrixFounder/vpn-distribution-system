@@ -309,7 +309,7 @@ inbounds
   reality_short_ids      text[]                   — hex, чётная длина, ≤ 16 символов
   reality_target         text
   reality_server_names   text[]
-  reality_min_client_ver text
+  reality_min_client_ver text                     — 1.8.1 из settings (WI-36)
   reality_max_client_ver text NULL
   reality_xver           int                      — 0 на всех нодах (В-17): это версия PROXY
                                                      protocol к цели, сторонний сайт-цель её
@@ -318,12 +318,12 @@ inbounds
   reality_limit_fb_up    int                      — миграция 060; объект Xray limitFallback*
   reality_limit_fb_down  int                        (три поля) в int не помещается — значения
                                                      в params (001.27)
-  client_fingerprint     text
+  client_fingerprint     text                     — из набора допустимых в settings; chrome (WI-36)
   client_spider_x        text
   trusted_x_forwarded_for inet[]                  — sockopt, для размещения за CDN (Д-14)
   params                 jsonb                    — поля профиля §4.4: flow, decryption, xhttp_*,
                                                      x_padding_*, uplink_http_method,
-                                                     session_placement, session_key;
+                                                     session_id_placement, session_id_key;
                                                      limit_fallback_upload и
                                                      limit_fallback_download — {after_bytes,
                                                      bytes_per_sec, burst_bytes_per_sec}
@@ -973,8 +973,9 @@ settings
 | `report_buffer_threshold_hours` | порог возраста `period_end` последнего принятого интервала ноды, ч; по умолчанию 20 — раньше исчерпания буфера Н-8 | 001.52 (событие `node_report_buffer_full`); тот же порог — правило алерта 001.68 | миграция |
 
 Значения, которые задачи читают «из `settings`» без имени ключа: соответствие
-`User-Agent → формат` (001.42), ссылки на клиенты (001.16), `min_client_ver` (001.27), версии
-Xray-core и sing-box (001.31; в панели — «версии»). Имя ключа и форму значения задаёт
+`User-Agent → формат` (001.42), ссылки на клиенты (001.16), `min_client_ver` и набор допустимых
+отпечатков `client_fingerprint` (001.27; набор меняет только миграция пересмотра §17.3, WI-36),
+версии Xray-core и sing-box (001.31; в панели — «версии»). Имя ключа и форму значения задаёт
 задача-владелец в своей миграции-сиде.
 
 Домены подписки — не ключ `settings`: их задаёт окружение развёртывания `SUBSCRIPTION_DOMAINS`

@@ -23,7 +23,8 @@
 ### Новые файлы
 
 - `control-plane/app/domain/inbounds.py` — `class InboundService`: `create_defaults(conn, node_id) -> list[Inbound]` (три профиля §4.4, порты 443 / из набора XHTTP / отдельный), `rotate_short_ids(inbound_id)`, `rotate_keypair(inbound_id, reason)`, `set_enabled(inbound_id, bool)`, `set_target(inbound_id, target, server_names)` — заглушки; `def gen_x25519() -> (priv, pub)` (реализуется: библиотека)
-- `control-plane/app/domain/xray_config.py` — `class XrayConfigBuilder`: `build(node: Node, inbounds: list[Inbound]) -> dict` — конфигурация без credentials: `api.listen 127.0.0.1:10085`, `policy` с `statsUser*`, три inbound с полями `realitySettings` и `xhttpSettings` в именах v26.3.27, outbound `blackhole` для правил блокировки — заглушка возвращает фиксированный словарь
+- `control-plane/app/domain/xray_config.py` — `class XrayConfigBuilder`: `build(node: Node, inbounds: list[Inbound]) -> dict` — конфигурация без credentials: `api.listen 127.0.0.1:10085`, `policy` с `statsUser*`, три inbound с полями `realitySettings` и `xhttpSettings` в именах v26.10.21, outbound `blackhole` для правил блокировки — заглушка возвращает фиксированный словарь
+  - состав inbound — `users`, транспорт — `streamSettings.method` (WI-36); прежние имена `clients` и `network` ядро v26.10.21 принимает как псевдонимы
 - `control-plane/tests/unit/domain/test_xray_config.py` — эталонный JSON конфигурации (golden file)
 
 ### Изменения в существующих файлах
@@ -90,7 +91,7 @@
   чтение — `nodes.read`, изменение и ротации — `nodes.write`
 - [ ] Серверная конфигурация (golden-файл) содержит поля §4.4 источника, включая `minClientVer`, `xver` (значение 0, В-17), `limitFallbackUpload`/`limitFallbackDownload` — объекты `{afterBytes, bytesPerSec, burstBytesPerSec}`; `spiderX` и `fingerprint` — только в клиентских ссылках (001.43)
 - [ ] Числа в документе конфигурации — только целые в пределах ±2⁵³; строки без U+2028, U+2029 и управляющих символов (README, «Контрольная сумма конфигурации»)
-- [ ] Имена полей XHTTP — `sessionPlacement`, `sessionKey` (v26.3.27)
+- [ ] Имена полей XHTTP — `sessionIDPlacement`, `sessionIDKey` (v26.10.21, WI-36); прежних имён `sessionPlacement` и `sessionKey` в конфигурации нет: ядро игнорирует их без ошибки
 - [ ] Раздел `agent` объявлен в контракте, фикстурах и README вне `config.json` и его контрольной суммы
 
 ## Примечания

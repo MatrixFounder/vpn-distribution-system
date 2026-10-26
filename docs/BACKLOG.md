@@ -74,6 +74,7 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
+- **WI-36** [Пересмотр закреплённых версий: Xray-core v26.10.21, sing-box v1.14.4](backlog/wi-36-xray-26-10-21-pin-revision.md) — effort `S`, status `open`, opened 2026-10-26
 - **WI-34** [Оставленная заявка retro другой задачи — не вложенность](backlog/wi-34-stale-retro-claim-is-not-nesting.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 - **WI-33** [Два решателя, один вход: разбор, декодирование и сравнение — одинаковы на обоих слоях](backlog/wi-33-two-deciders-one-input.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 

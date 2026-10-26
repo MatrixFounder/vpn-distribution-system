@@ -24,7 +24,7 @@
 - `control-plane/app/subscription/composer.py` — `compose(user_id, country) -> list[Entry]` — отбор пар «нода × профиль» — заглушка
 - `control-plane/app/subscription/generators/base.py` — `class Generator(Protocol)`: `applicable(profile) -> bool`; `render(entries, user) -> bytes`
 - `control-plane/app/subscription/generators/base64.py` — заглушка: фиксированный список ссылок
-- `control-plane/app/subscription/generators/singbox.py` — заглушка: фиксированный JSON по схеме sing-box v1.14.0
+- `control-plane/app/subscription/generators/singbox.py` — заглушка: фиксированный JSON по схеме sing-box v1.14.4
 - `control-plane/app/subscription/page.py` — Jinja2-страница с инструкциями и кнопками импорта — заглушка
 - `control-plane/tests/e2e/test_subscription.py` — состояния, суффиксы, браузер
 

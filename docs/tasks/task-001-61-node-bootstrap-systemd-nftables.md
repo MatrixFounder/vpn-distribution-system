@@ -12,7 +12,7 @@
 ## Цель задачи
 
 Подготовить установку ноды одной командой по `docs/architectures/deployment.md` §10.4: Xray-core
-v26.3.27 с проверкой контрольной суммы, `node-agent`, юниты systemd, конфигурация агента с двумя
+v26.10.21 с проверкой контрольной суммы, `node-agent`, юниты systemd, конфигурация агента с двумя
 адресами и якорем доверия (сертификат серверного CA, 001.66d), синхронизация часов, пакет
 nftables; сборка bootstrap-команды на стороне Control Plane.
 
@@ -42,7 +42,7 @@ nftables; сборка bootstrap-команды на стороне Control Plan
     значения по умолчанию; `bootstrap.sh` их не задаёт (решение заказчика 2026-10-25, В-10)
 - `deploy/node/xray.service` — юнит Xray: `-config /etc/xray/config.json`, `Restart=always`
 - `deploy/node/node-agent.service` — юнит агента: `After=xray.service`, `Restart=always`, watchdog
-- `deploy/node/XRAY_SHA256` — контрольная сумма архива Xray-core v26.3.27 (О-8)
+- `deploy/node/XRAY_SHA256` — контрольная сумма архива Xray-core v26.10.21 (О-8)
 
 ### Изменения в существующих файлах
 

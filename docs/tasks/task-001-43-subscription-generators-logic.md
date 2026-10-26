@@ -12,7 +12,7 @@
 ## Цель задачи
 
 Реализовать генерацию ссылок `vless://` и `trojan://` с параметрами REALITY и XHTTP и JSON по схеме
-sing-box v1.14.0 с автоселектором `urltest`; исключение неприменимых пар по матрице §5.6 источника.
+sing-box v1.14.4 с автоселектором `urltest`; исключение неприменимых пар по матрице §5.6 источника.
 
 <!-- contract:changes -->
 
@@ -28,10 +28,12 @@ sing-box v1.14.0 с автоселектором `urltest`; исключение
 #### Файл: `control-plane/app/subscription/generators/base64.py`
 
 - `vless://uuid@host:port?security=reality&sni=&fp=&pbk=&sid=&spx=&flow=&type=raw|xhttp&path=&mode=#name`; `trojan://password@host:port?security=reality&…#name`; имя = код ноды + профиль + коэффициент при ≠ 1.0
+- `fp` — `client_fingerprint` inbound; на v26.10.21 — `chrome` (WI-36)
 
 #### Файл: `control-plane/app/subscription/generators/singbox.py`
 
-- outbounds `vless` (reality, utls) и `trojan`; `applicable(vless_xhttp) = False`; `urltest` над всеми серверами; поля только из схемы v1.14.0
+- outbounds `vless` (reality, utls) и `trojan`; `applicable(vless_xhttp) = False`; `urltest` над всеми серверами; поля только из схемы v1.14.4
+- `tls.utls.fingerprint` — `client_fingerprint` inbound, то же значение, что `fp` ссылки (WI-36)
 
 #### Файл: `control-plane/app/subscription/composer.py`
 
@@ -75,6 +77,7 @@ Credentials пользователя для ноды — из `node_user_credent
 
 - [ ] AC-03 выполнен; AC-28 — в части генераторов (запись на включённый inbound — 001.44)
 - [ ] Имя записи содержит коэффициент при ≠ 1.0 (§5.6)
+- [ ] `fp` ссылки и `tls.utls.fingerprint` JSON `singbox` равны `client_fingerprint` inbound (WI-36)
 
 ## Примечания
 
