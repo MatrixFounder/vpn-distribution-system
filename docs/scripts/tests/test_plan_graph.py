@@ -1,5 +1,6 @@
 """Тесты графа плана (``docs/scripts/plan_graph.py``): части разделённой задачи с буквенным
-суффиксом (``001.77b``, WI-35) — запись, зависимость, критический путь и пункт чек-листа RTM."""
+суффиксом (``001.77b``, WI-35) — запись, зависимость, критический путь и пункт чек-листа RTM;
+критический путь и диаграмма по оставшейся работе."""
 
 from __future__ import annotations
 
@@ -52,7 +53,7 @@ class SuffixedParts(unittest.TestCase):
 
     def test_the_critical_path_runs_through_the_part(self) -> None:
         hours, path = pg.critical_path(pg.parse(PLAN), "001.73")
-        self.assertEqual((hours, path), (6, ["001.77", "001.77b", "001.73"]))
+        self.assertEqual((hours, path), (3, ["001.77b", "001.73"]))
 
     def test_an_rtm_item_waits_for_every_part(self) -> None:
         text = pg.apply(PLAN, pg.parse(PLAN))
@@ -70,6 +71,93 @@ class SuffixedParts(unittest.TestCase):
         broken = PLAN.replace("Зависимости: Задача 001.77b", "Зависимости: Задача 001.77c")
         with self.assertRaisesRegex(pg.PlanError, "001.77c"):
             pg.parse(broken)
+
+
+# От старта плана длиннее цепочка 001.10 → 001.12 (10 + 1 ч), но 001.10 принята; оставшаяся работа
+# длиннее через 001.11 (3 + 1 ч).
+REMAINING = """\
+### Этап 1 — схема — 13 ч
+
+- **Задача 001.10** — Каркас [STUB CREATION]
+  - Приоритет: Critical
+  - Оценка: 10 ч
+  - Зависимости: нет
+  - Статус: принята — коммит abc1234 (2026-10-25)
+
+- **Задача 001.11** — Очередь [STUB CREATION]
+  - Приоритет: High
+  - Оценка: 3 ч
+  - Зависимости: нет
+  - Статус: не начата
+
+### Этап 2 — кабинет — 1 ч
+
+- **Задача 001.12** — Безопасность [LOGIC IMPLEMENTATION]
+  - Приоритет: Critical
+  - Оценка: 1 ч
+  - Зависимости: Задача 001.10, Задача 001.11
+  - Статус: не начата
+
+<!-- generated:plan-status start -->
+<!-- generated:plan-status end -->
+"""
+
+
+def gantt_rows(text: str) -> list[str]:
+    """Секции и полосы диаграммы — строки после заголовка ``todayMarker off``."""
+    block = text.split("  todayMarker off\n", 1)[1].split("```", 1)[0]
+    return [line.strip() for line in block.splitlines()]
+
+
+class RemainingWork(unittest.TestCase):
+    def test_an_accepted_task_weighs_nothing_on_the_critical_path(self) -> None:
+        hours, path = pg.critical_path(pg.parse(REMAINING), "001.12")
+        self.assertEqual((hours, path), (4, ["001.11", "001.12"]))
+
+    def test_the_path_line_counts_only_remaining_tasks(self) -> None:
+        text = pg.render(pg.parse(REMAINING))
+        self.assertIn(
+            "Критический путь до задачи 001.12 по оставшейся работе (принятые задачи не входят) — "
+            "4 ч по оценкам, задач в цепочке — 2: 11 → 12.",
+            text.replace("\n", " "),
+        )
+
+    def test_the_gantt_draws_only_remaining_work(self) -> None:
+        rows = gantt_rows(pg.render(pg.parse(REMAINING)))
+        self.assertEqual(
+            rows,
+            [
+                "section Этап 1 — схема",
+                "11 Очередь — заглушки :active, crit, t11, 0, 3ms",
+                "section Этап 2 — кабинет",
+                "12 Безопасность — заглушки :crit, t12, after t11, 1ms",
+            ],
+        )
+
+    def test_a_task_waiting_only_on_accepted_work_starts_at_zero(self) -> None:
+        done = REMAINING.replace(
+            "  - Оценка: 3 ч\n  - Зависимости: нет\n  - Статус: не начата",
+            "  - Оценка: 3 ч\n  - Зависимости: нет\n"
+            "  - Статус: принята — коммит def5678 (2026-10-26)",
+        )
+        self.assertNotEqual(done, REMAINING)
+        plan = pg.parse(done)
+        self.assertEqual(pg.critical_path(plan, "001.12"), (1, ["001.12"]))
+        rows = gantt_rows(pg.render(plan))
+        self.assertEqual(
+            rows,
+            ["section Этап 2 — кабинет", "12 Безопасность — заглушки :active, crit, t12, 0, 1ms"],
+        )
+
+    def test_a_fully_accepted_plan_has_no_remaining_path(self) -> None:
+        done = REMAINING.replace(
+            "Статус: не начата", "Статус: принята — коммит def5678 (2026-10-26)"
+        )
+        plan = pg.parse(done)
+        self.assertEqual(pg.critical_path(plan, "001.12"), (0, []))
+        text = pg.render(plan)
+        self.assertIn("Критический путь до задачи 001.12: вся работа принята.", text)
+        self.assertNotIn("```mermaid", text)
 
 
 if __name__ == "__main__":

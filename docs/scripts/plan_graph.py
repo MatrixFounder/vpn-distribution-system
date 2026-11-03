@@ -5,7 +5,8 @@
 ``Зависимости:`` задают рёбра графа, строки ``Статус:`` — состояние. Скрипт собирает из них блок
 между маркерами ``<!-- generated:plan-status start -->`` и ``<!-- generated:plan-status end -->``
 (таблица прогресса по этапам, задачи, готовые к началу, критический путь, диаграмма Mermaid)
-и отмечает пункты чек-листа RTM, все задачи которых приняты.
+и отмечает пункты чек-листа RTM, все задачи которых приняты. Критический путь и диаграмма считают
+только оставшуюся работу: принятая задача весит 0 ч и на диаграмме не рисуется.
 
 Словарь статусов (строка ``  - Статус:`` в записи задачи):
 
@@ -48,11 +49,12 @@ KINDS = {
     "STUB CREATION": "заглушки",
     "LOGIC IMPLEMENTATION": "логика",
 }
-# Диаграмма Ганта без календаря: единица оси — час оценки, задача стартует после всех своих
-# зависимостей (``after``). Mermaid gantt умеет только даты, поэтому час оценки кодируется
-# миллисекундой от эпохи (``dateFormat x``, длительность ``Nms``), а ось подписана ``%-L`` —
-# миллисекундами, то есть часами от старта. Подпись справа от полосы, если правый отступ не
-# меньше ширины подписи плюс половины левого — иначе mermaid переносит её влево.
+# Диаграмма Ганта без календаря: единица оси — час оценки оставшейся работы, задача стартует после
+# всех своих непринятых зависимостей (``after``). Mermaid gantt умеет только даты, поэтому час
+# оценки кодируется миллисекундой от эпохи (``dateFormat x``, длительность ``Nms``), а ось
+# подписана ``%-L`` — миллисекундами, то есть часами от текущего состояния. Подпись справа от
+# полосы, если правый отступ не меньше ширины подписи плюс половины левого — иначе mermaid
+# переносит её влево.
 GANTT_INIT = {
     "theme": "base",
     "themeVariables": {
@@ -63,8 +65,6 @@ GANTT_INIT = {
         "taskTextOutsideColor": "#212121",
         "taskTextDarkColor": "#212121",
         "taskTextLightColor": "#212121",
-        "doneTaskBkgColor": "#c8e6c9",
-        "doneTaskBorderColor": "#2e7d32",
         "activeTaskBkgColor": "#fff3c4",
         "activeTaskBorderColor": "#f9a825",
         "critBkgColor": "#ffffff",
@@ -320,17 +320,22 @@ def check_acyclic(plan: Plan) -> None:
 
 
 def critical_path(plan: Plan, target: str) -> tuple[int, list[str]]:
-    """Самая длинная по оценке цепочка зависимостей до ``target`` (часы, задачи)."""
+    """Самая длинная по оценке цепочка оставшейся работы до ``target`` (часы, задачи).
+
+    Принятая задача весит 0 ч и в цепочку не входит: путь от старта плана через принятые задачи
+    показывает прошлое, а не то, что держит приёмку сейчас. Задача в работе весит полную оценку —
+    остаток её работы план не хранит.
+    """
+    accepted = plan.accepted
     memo: dict[str, tuple[int, list[str]]] = {}
 
     def longest(tid: str) -> tuple[int, list[str]]:
         if tid not in memo:
             task = plan.tasks[tid]
-            if not task.deps:
-                memo[tid] = (task.estimate, [tid])
-            else:
-                hours, path = max((longest(d) for d in task.deps), key=lambda x: x[0])
-                memo[tid] = (hours + task.estimate, [*path, tid])
+            hours, path = max((longest(d) for d in task.deps), key=lambda x: x[0], default=(0, []))
+            if tid not in accepted:
+                hours, path = hours + task.estimate, [*path, tid]
+            memo[tid] = (hours, path)
         return memo[tid]
 
     return longest(target)
@@ -391,44 +396,55 @@ def render(plan: Plan) -> str:
         )
     if not ready:
         lines.append("- нет: все незанятые задачи ждут зависимостей")
+    lines.append("")
+    if cp:
+        lines.append(
+            wrap(
+                f"Критический путь до задачи {final} по оставшейся работе (принятые задачи не "
+                f"входят) — {cp_hours} ч по оценкам, задач в цепочке — {len(cp)}: "
+                + " → ".join(tasks[t].nn for t in cp)
+                + "."
+            )
+        )
+    else:
+        lines.append(f"Критический путь до задачи {final}: вся работа принята.")
+    remaining = [t for t in plan.order if t not in accepted]
+    if not remaining:
+        lines += ["", END]
+        return "\n".join(lines)
     lines += [
         "",
         wrap(
-            f"Критический путь до задачи {final} — {cp_hours} ч по оценкам, "
-            f"{sum(1 for t in cp if t in accepted)} из {len(cp)} задач приняты: "
-            + " → ".join(tasks[t].nn for t in cp)
-            + "."
-        ),
-        "",
-        wrap(
-            "Диаграмма — Гант без календаря: горизонталь — часы оценки от старта, полоса задачи "
-            "начинается после всех её зависимостей и длится её оценку; секции — этапы. Заливка — "
-            "состояние (зелёная — принята, жёлтая — готова к началу или в работе, белая — ждёт "
-            "зависимостей), красная рамка — критический путь. Полные названия — в разделе "
-            "«Последовательность выполнения задач»."
+            "Диаграмма — Гант оставшейся работы без календаря: горизонталь — часы оценки от "
+            "текущего состояния, принятые задачи не показаны, полоса задачи начинается после всех "
+            "её непринятых зависимостей и длится её оценку; секции — этапы. Заливка — состояние "
+            "(жёлтая — готова к началу или в работе, белая — ждёт зависимостей), красная рамка — "
+            "критический путь. Полные названия — в разделе «Последовательность выполнения задач»."
         ),
         "",
         "```mermaid",
         "%%{init: " + json.dumps(GANTT_INIT, ensure_ascii=False, indent=2) + "}%%",
         "gantt",
-        "  title Порядок задач по графу зависимостей — часы оценки от старта, не календарь",
+        "  title Оставшаяся работа по графу зависимостей — часы оценки, не календарь",
         "  dateFormat x",
         "  todayMarker off",
     ]
     for stage in sorted(plan.stages):
+        in_stage = [t for t in remaining if tasks[t].stage == stage]
+        if not in_stage:
+            continue
         lines.append(f"  section {plan.stages[stage]}")
-        for t in plan.order:
+        for t in in_stage:
             task = tasks[t]
-            if task.stage != stage:
-                continue
             label = LABELS.get(task.nn) or task.title[:24] + "…"
             label = label.replace(":", " —")
             state = plan.state(task)
-            tags = ["done"] if state == "принята" else ["active"] if state != "ждёт" else []
+            tags = ["active"] if state != "ждёт" else []
             if t in cp:
                 tags.append("crit")
             suffix = " · в работе" if state == "в работе" else ""
-            start = f"after {' '.join('t' + tasks[d].nn for d in task.deps)}" if task.deps else "0"
+            waits = [d for d in task.deps if d not in accepted]
+            start = f"after {' '.join('t' + tasks[d].nn for d in waits)}" if waits else "0"
             meta = ", ".join([*tags, f"t{task.nn}", start, f"{task.estimate}ms"])
             lines.append(f"    {task.nn} {label}{suffix} :{meta}")
     lines += ["```", "", END]
