@@ -46,3 +46,53 @@ finding_ref: fnd-20261103-201814-9363706c
   которые ссылаются на v26.10.21.
 
 Решение заказчика 2026-11-03: завести пункт.
+
+## Решение заказчика (2026-11-03)
+
+Закрепить новую версию: Xray-core v26.10.31. sing-box остаётся на v1.14.4 — новее стабильного выпуска
+на 2026-11-03 нет.
+
+## Результаты пересмотра (2026-11-03)
+
+Метод WI-36: `gh api repos/XTLS/Xray-core/compare/v26.10.21...v26.10.31` (29 коммитов, 157 файлов,
+из них 89 — `.pb.go`: 84 меняют только строку версии генератора, 5 содержательны — observatory,
+dokodemo, tun, splithttp (`h2Params`), xdrive; ни одно из них документ не использует), исходники
+`infra/conf` обоих тегов, `go.mod`.
+
+- **Последний стабильный выпуск** на 2026-11-03 — v26.10.31 (GitHub, Latest); v26.10.29 отозван.
+- **Безопасность.** `transport/internet/system_listener.go`: `DefaultListener` выключает MPTCP
+  (`lc.SetMultipathTCP(false)`, в комментарии — CVE-2026-98432), включает только явный
+  `sockopt.tcpMptcp`. Документ конфигурации его не задаёт — MPTCP на слушателях Xray выключен.
+- **Библиотеки.** `github.com/xtls/reality` `83f6217`, `refraction-networking/utls` `aa6edf4`,
+  gRPC v1.84.0, `go 1.27` — те же, что в v26.10.21: требование X25519MLKEM768, умолчание
+  `minClientVer`, таблица отпечатков WI-36 действуют без изменений.
+- **gRPC API агента.** `HandlerService`, `StatsService` — только перегенерация; `RoutingService`
+  (`app/router/command/command.proto`) — только форматирование комментария.
+- **Имена полей.** Теги `json` структур, которые читает документ 001.26 (Config, API, Policy,
+  Router, Inbound/Outbound, VLESS, Trojan, Stream, REALITY, SplitHTTP, Socket), совпадают с
+  v26.10.21, кроме одного добавления: `SplitHTTPConfig.h2Params` (параметры HTTP/2 сервера
+  XHTTP). Список допустимых ключей `tests/unit/domain/test_xray_config.py::CORE_KEYS` дополнен;
+  в документе поле не задаётся.
+- **Прочее в конфигурации.** XHTTP принимает `OPTIONS` как `uplinkHTTPMethod` (профиль §4.4 —
+  `POST`); `requiresTransportSecurity` и предупреждения `fragment`/`noises` — исходящие клиента;
+  модуль inbound инициализируется последним — внутреннее.
+- **Допущения §9.1.** Из файлов, на которые ссылаются Д-1…Д-14, изменились только
+  `app/router/command/command.proto` (комментарий) и `transport/internet/splithttp/hub.go` (метод
+  `OPTIONS`, `h2Params`; применение `X-Forwarded-For` — `ApplyTrustedXForwardedFor`, строки
+  178–182 — то же): допущения подтверждены.
+- **MPTCP на нодах.** Агент ничего не слушает (в задачах и коде агента слушателей нет); Control
+  Plane на Go не написан. Защита в глубину — `net.mptcp.enabled = 0` на ноде: требование и критерий
+  приёмки внесены в 001.61.
+
+## Внесённые правки
+
+- Закрепление: `docs/TASK.md` (О-8, допущения, R-03, R-07, R-15), `docs/ARCHITECTURE.md`,
+  `docs/architectures/stack.md`, `deployment.md`, `system-architecture.md`, `docs/idea.md` (§4.4,
+  §9.1, ОВ-20, §17.3).
+- Задачи, ещё не начатые: 001.27, 001.29, 001.43, 001.56, 001.61 (версия архива, MPTCP), 001.80,
+  001.88. Текст принятой 001.26 не менялся — это история её проверки.
+- Код и тесты 001.26: комментарии и докстринги — v26.10.31; `CORE_KEYS` — `h2Params`; тест
+  `test_names_are_those_of_xray_v26_10_21` → `test_names_are_those_of_the_pinned_xray`.
+- Развёртка `docs/sweeps/wi-37.json`: вне истории — 10 совпадений, все объяснены: сама WI-37,
+  проверка допущений в TASK (обе версии), сравнение версий в idea §4.4, текст принятой 001.26,
+  «метод появился до v26.10.21» в 001.56.

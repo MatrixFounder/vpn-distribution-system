@@ -162,7 +162,7 @@
 - каркас конфигурации заглушки 001.28 (`composition.STUB_CONFIG_DOCUMENT`) — не выдача генератора
   и пишет прежние имена-псевдонимы (`clients`, `network`); поток конфигурации отдаёт документ из
   строки `node_config_versions`, которую пишет `publish_config` по `XrayConfigBuilder.build`
-  (имена v26.10.21): каркас снимается, `config` фикстур состояния переписывается;
+  (имена v26.10.31): каркас снимается, `config` фикстур состояния переписывается;
 - решить здесь: документ `build` несёт закрытый ключ REALITY (`realitySettings.privateKey`, без
   него сервер REALITY не стартует), а ключ — секрет §7.2 (AES-256-GCM,
   `inbound_secrets.private_key_enc`): открытым в `node_config_versions.config_json` он лежать не

@@ -39,7 +39,7 @@ ShortId = Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{2}){0,8}$")]
 # «имя:порт», то есть не длиннее 253 + 1 + 5 = 259.
 ServerName = Annotated[str, StringConstraints(min_length=1, max_length=253)]
 Target = Annotated[str, StringConstraints(min_length=1, max_length=259)]
-# ``sockopt.trustedXForwardedFor`` Xray v26.10.21 — имена заголовков, а не адреса
+# ``sockopt.trustedXForwardedFor`` Xray v26.10.31 — имена заголовков, а не адреса
 # (``SocketConfig.TrustedXForwardedFor []string``): ``X-Forwarded-For`` принимается, только если в
 # запросе есть один из этих заголовков; при пустом списке ядро его игнорирует и берёт настоящий
 # адрес соединения. Имя заголовка — token HTTP (RFC 9110 §5.1).
@@ -182,7 +182,7 @@ STUB_SHORT_IDS: dict[InboundProfile, str] = {
 STUB_TARGET = "www.example.com:443"
 STUB_SERVER_NAMES = ["www.example.com"]
 STUB_MIN_CLIENT_VER = "1.8.1"  # версия, которую передаёт sing-box (WI-36, §4.4)
-STUB_FINGERPRINT = "chrome"  # набор допустимых отпечатков на v26.10.21 (WI-36)
+STUB_FINGERPRINT = "chrome"  # набор допустимых отпечатков на v26.10.31 (WI-36, WI-37)
 STUB_XHTTP_PATH = "/9f3c1a7e"
 # Пределы fallback для зондирующих соединений: в бою рандомизируются на ноду (001.27), чтобы парк
 # не опознавался по одинаковым значениям; здесь — фиксированные.
@@ -212,7 +212,7 @@ def stub_public_key(profile: InboundProfile) -> str:
 
 def stub_params(profile: InboundProfile) -> dict[str, Any]:
     """Поля профиля §4.4 в форме колонки ``params``. ``flow`` профиля ``vless-xhttp`` по §4.4 —
-    none, то есть поля нет: Xray v26.10.21 принимает в ``flow`` только ``xtls-rprx-vision`` или
+    none, то есть поля нет: Xray v26.10.31 принимает в ``flow`` только ``xtls-rprx-vision`` или
     пустое значение. У Trojan ``flow`` нет вовсе."""
     fallback = {
         "limit_fallback_upload": dict(STUB_LIMIT_FALLBACK_UPLOAD),

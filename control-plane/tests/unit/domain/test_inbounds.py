@@ -53,7 +53,7 @@ async def test_tc_e2e_01_a_new_node_gets_three_inbounds_without_a_write() -> Non
     for item in created:
         assert item.enabled and item.reality_xver == 0, item.profile
         assert item.reality_min_client_ver == "1.8.1", "версия sing-box (WI-36)"
-        assert item.client_fingerprint == "chrome", "набор отпечатков v26.10.21 (WI-36)"
+        assert item.client_fingerprint == "chrome", "набор отпечатков v26.10.31 (WI-36, WI-37)"
         assert item.error_state is None and item.error_since is None
     assert len({item.client_spider_x for item in created}) == 3, "spx — свой у профиля (§4.4)"
     other = await service.create_defaults(NoConnection(), uuid.uuid4())
@@ -192,7 +192,7 @@ def test_params_are_a_closed_set_of_profile_fields() -> None:
 
 
 def test_trusted_x_forwarded_for_names_headers() -> None:
-    """``sockopt.trustedXForwardedFor`` Xray v26.10.21 — имена заголовков (``[]string``), при
+    """``sockopt.trustedXForwardedFor`` Xray v26.10.31 — имена заголовков (``[]string``), при
     которых ядро доверяет ``X-Forwarded-For``; адресов и сетей там нет. Имя — token HTTP."""
     base = stub_inbounds(NODE_ID)[1].model_dump()
     assert Inbound(**{**base, "trusted_x_forwarded_for": ["CF-Connecting-IP", "X-Real-IP"]})

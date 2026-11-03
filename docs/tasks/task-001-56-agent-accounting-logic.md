@@ -60,7 +60,7 @@
 
 - `StatsService`: `QueryStats`, `OnlineIPs` (адрес и `last_seen`), `Uptime` (`GetSysStats`) —
   реализация; `HandlerService` — 001.80, `RoutingService` — 001.58
-- v26.10.21: `GetUsersStats` возвращает адреса и `last_seen` всех пользователей онлайн одним
+- v26.10.31 (метод появился до v26.10.21): `GetUsersStats` возвращает адреса и `last_seen` всех пользователей онлайн одним
   вызовом (WI-36). Трафик в его ответе есть только у пользователей онлайн, и `reset` обнуляет
   только их счётчики; учёт трафика — `QueryStats`
 

@@ -28,7 +28,7 @@ sing-box v1.14.4 с автоселектором `urltest`; исключение
 #### Файл: `control-plane/app/subscription/generators/base64.py`
 
 - `vless://uuid@host:port?security=reality&sni=&fp=&pbk=&sid=&spx=&flow=&type=raw|xhttp&path=&mode=#name`; `trojan://password@host:port?security=reality&…#name`; имя = код ноды + профиль + коэффициент при ≠ 1.0
-- `fp` — `client_fingerprint` inbound; на v26.10.21 — `chrome` (WI-36)
+- `fp` — `client_fingerprint` inbound; на v26.10.31 — `chrome` (WI-36, WI-37)
 
 #### Файл: `control-plane/app/subscription/generators/singbox.py`
 

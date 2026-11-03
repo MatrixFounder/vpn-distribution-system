@@ -6,7 +6,7 @@
 ``limitFallback*`` на ноду — 001.27; запись версии в ``node_config_versions`` и выдача потоком
 конфигурации — 001.29.
 
-Имена полей — Xray-core v26.10.21 (§17.3, WI-36): состав inbound — ``settings.users`` (прежнее
+Имена полей — Xray-core v26.10.31 (§17.3, WI-37): состав inbound — ``settings.users`` (прежнее
 ``clients`` ядро принимает как псевдоним, но при обоих ключах берёт ``clients``), транспорт —
 ``streamSettings.method`` (прежнее ``network`` — псевдоним), место идентификатора сессии XHTTP —
 ``sessionIDPlacement`` и ``sessionIDKey``: прежние ``sessionPlacement`` и ``sessionKey`` ядро

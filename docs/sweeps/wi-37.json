@@ -1,0 +1,22 @@
+{
+  "task": "WI-37",
+  "history_markers": [
+    "прежн",
+    "предыдущ",
+    "раунд",
+    "было",
+    "WI-36"
+  ],
+  "patterns": [
+    {
+      "name": "закреплённая версия Xray-core v26.10.21 (WI-37)",
+      "literal": "26.10.21",
+      "current": "v26.10.31"
+    },
+    {
+      "name": "имя теста с версией ядра (WI-37)",
+      "regex": "of_xray_v26_10_21",
+      "current": "test_names_are_those_of_the_pinned_xray"
+    }
+  ]
+}

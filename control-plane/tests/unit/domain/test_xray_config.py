@@ -1,5 +1,5 @@
 """Конфигурация Xray заглушки 001.26 против эталона ``golden/xray-config.json``: форма серверного
-документа трёх профилей §4.4 в именах Xray-core v26.10.21 (WI-36), ограничения канонической
+документа трёх профилей §4.4 в именах Xray-core v26.10.31 (WI-37), ограничения канонической
 записи (``contracts/agent_v1/README.md``, «Контрольная сумма конфигурации») и согласованность с
 фиксированными inbound заглушки (``inbounds.stub_inbounds``).
 
@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 GOLDEN = Path(__file__).parent / "golden" / "xray-config.json"
 JSON_SAFE_INTEGER = 2**53
 LIMIT_FALLBACK_KEYS = {"afterBytes", "bytesPerSec", "burstBytesPerSec"}
-# Ключи, которые декодер Xray-core v26.10.21 знает, — теги ``json`` структур ``infra/conf`` тега
+# Ключи, которые декодер Xray-core v26.10.31 знает, — теги ``json`` структур ``infra/conf`` тега
 # (``xray.go`` Config/InboundDetourConfig/OutboundDetourConfig, ``api.go``, ``policy.go``,
 # ``router.go``, ``vless.go``, ``trojan.go``, ``transport_internet.go`` StreamConfig,
 # ``transport_security.go`` REALITYConfig, ``transport_method.go`` SplitHTTPConfig,
@@ -66,7 +66,7 @@ CORE_KEYS: dict[str, set[str]] = {
         "sessionIDTable sessionIDLength seqPlacement seqKey uplinkDataPlacement uplinkDataKey "
         "uplinkChunkSize noGRPCHeader noSSEHeader scMaxEachPostBytes scMinPostsIntervalMs "
         "scMaxBufferedPosts scStreamUpServerSecs serverMaxHeaderBytes xmux downloadSettings "
-        "extra".split()
+        "h2Params extra".split()
     ),
     "sockopt": set(
         "mark tcpFastOpen tproxy acceptProxyProtocol domainStrategy dialerProxy "
@@ -198,7 +198,7 @@ def test_client_only_fields_stay_out_of_the_server_config() -> None:
 
 def test_every_key_is_one_the_core_reads() -> None:
     """Критерий приёмки и WI-36: каждый ключ каждого объекта документа — из имён, которые знает
-    декодер v26.10.21; переименованный или устаревший ключ (``sessionPlacement``,
+    декодер v26.10.31; переименованный или устаревший ключ (``sessionPlacement``,
     ``xPaddingObfuscationMode``) ядро пропустило бы молча и применило бы умолчание."""
     document = golden()
 
@@ -228,7 +228,7 @@ def test_every_key_is_one_the_core_reads() -> None:
             known(stream["xhttpSettings"], "xhttp", f"{item['tag']}.xhttpSettings")
 
 
-def test_names_are_those_of_xray_v26_10_21() -> None:
+def test_names_are_those_of_the_pinned_xray() -> None:
     """Критерий приёмки и WI-36: состав — ``users``, транспорт — ``method``, XHTTP —
     ``sessionIDPlacement``/``sessionIDKey``. Прежние имена ядро либо принимает как псевдонимы
     (``clients``, ``network``), либо молча игнорирует (``sessionPlacement``, ``sessionKey``) —
@@ -261,7 +261,7 @@ def test_names_are_those_of_xray_v26_10_21() -> None:
 
 def test_flow_is_set_where_the_core_accepts_it() -> None:
     """Vision — только у ``vless-raw-vision``; ``flow`` none у XHTTP — это отсутствие поля:
-    значение ``none`` Xray v26.10.21 отвергает (допустимы ``xtls-rprx-vision`` и пусто). У
+    значение ``none`` Xray v26.10.31 отвергает (допустимы ``xtls-rprx-vision`` и пусто). У
     Trojan ``flow`` нет."""
     document = golden()
     assert inbound(document, "vless_raw_vision")["settings"]["flow"] == "xtls-rprx-vision"

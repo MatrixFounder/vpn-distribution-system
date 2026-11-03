@@ -137,7 +137,7 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
   решаются в 001.29 (её блок «Найдено при 001.26»): 001.29 пишет `config_json` и предшествует
   этой задаче, 001.36 и 001.40;
 - колонка `inbounds.trusted_x_forwarded_for` — `inet[]` (миграция 060), а
-  `sockopt.trustedXForwardedFor` Xray v26.10.21 — имена заголовков (`SocketConfig
+  `sockopt.trustedXForwardedFor` Xray v26.10.31 — имена заголовков (`SocketConfig
   .TrustedXForwardedFor []string`; `X-Forwarded-For` принимается, только если в запросе есть
   один из них; пустой список — заголовок игнорируется). Модель `Inbound` 001.26 уже несёт имена
   заголовков; колонку перевести миграцией в `text[]` и поправить `data-model.md` §4.2.3;
@@ -146,7 +146,7 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 - порт `trojan-reality` заглушки (8443) входит в набор XHTTP (2053, 2083, 2087, 2096, 8443):
   порт XHTTP выбирать из набора без порта Trojan той же ноды — иначе `UNIQUE (node_id, port)`
   отвергнет создание ноды;
-- `flow` профиля `vless-xhttp` (§4.4: none) — отсутствие поля в `settings`: Xray v26.10.21
+- `flow` профиля `vless-xhttp` (§4.4: none) — отсутствие поля в `settings`: Xray v26.10.31
   принимает в `settings.flow` только `xtls-rprx-vision` или пустое значение, `none` отвергает;
   обязательство агента брать `flow` пользователя из `settings.flow` — 001.80;
 - документ несёт `routing` (пустой набор правил) и первым outbound — `direct` (эталон 001.26):

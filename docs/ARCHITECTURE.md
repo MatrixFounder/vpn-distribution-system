@@ -111,7 +111,7 @@ docs/
 ## 6. Технологический стек
 
 Python 3.14 + FastAPI + asyncpg, Go 1.27 агент, React 19 + TypeScript, PostgreSQL 18, Redis 8,
-nginx, Xray-core v26.10.21, sing-box v1.14.4; целевые браузеры панели и кабинета (ОВ-14, В-38 б);
+nginx, Xray-core v26.10.31, sing-box v1.14.4; целевые браузеры панели и кабинета (ОВ-14, В-38 б);
 внешний сервис мониторинга доступности (В-43 а).
 
 → [details](architectures/stack.md)
