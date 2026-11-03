@@ -2020,15 +2020,43 @@ async def test_epoch_changes_are_read_by_the_index_from_the_predecessor_on(
 ) -> None:
     """Смены эпохи считаются под блокировкой ноды на каждой части со сменой эпохи: выборка
     ограничена моментом открытия предшественника окна по индексу `(node_id, first_received_at)`,
-    а не всей историей ноды (раунд 3, P-1). План при запрете последовательного чтения: каждое
-    чтение `report_intervals` — по индексу с условием на `first_received_at`."""
+    а не всей историей ноды (раунд 3, P-1). Проверяется пригодность запроса для этого индекса:
+    каждое чтение `report_intervals` идёт по нему с условием на `first_received_at`.
+
+    План смотрится на временной таблице `report_intervals` (первой в `search_path`) с одним этим
+    индексом — его определение берётся из живой схемы (`pg_indexes`). На живой таблице у
+    `node_id` ещё четыре ведущих индекса (первичный ключ, GiST ограничения исключения, индексы по
+    `period_end` и открытым интервалам), а таблица на стенде пуста: при равной оценке планировщик
+    брал любой из них с условием только на `node_id`, и выбор менялся от прогона к прогону (RF-4).
+    `ANALYZE` на подставных строках не годится: откат не возвращает `reltuples` в `pg_class`, и
+    планы соседних тестов сдвинулись бы. Временная таблица живёт в транзакции теста."""
     async with reporting(pg_dsn, migrate_env) as stand:
         window = await db_now(stand.conn) - dt.timedelta(hours=24)
+        live = await stand.conn.fetchval(
+            "select indexdef from pg_indexes where schemaname = 'control_plane' "
+            "and tablename = 'report_intervals' "
+            "and indexname = 'report_intervals_node_id_first_received_at_idx'"
+        )
+        assert live is not None, "индекс (node_id, first_received_at) есть в живой схеме"
+        assert live.count(" ON control_plane.report_intervals ") == 1, live
+        probe = live.replace(" ON control_plane.report_intervals ", " ON pg_temp.report_intervals ")
         async with stand.conn.transaction():
+            await stand.conn.execute(
+                "create temp table report_intervals "
+                "(like control_plane.report_intervals including defaults) on commit drop"
+            )
+            await stand.conn.execute(probe)
+            await stand.conn.execute("set local search_path = pg_temp, control_plane")
             await stand.conn.execute("set local enable_seqscan = off")
             raw = await stand.conn.fetchval(
                 "explain (format json) " + _EPOCH_CHANGES, stand.node_id, window
             )
+            indexes = await stand.conn.fetchval(
+                "select count(*) from pg_indexes "
+                "where schemaname = pg_my_temp_schema()::regnamespace::text "
+                "and tablename = 'report_intervals'"
+            )
+        assert indexes == 1, "у временной таблицы ровно один индекс — проверяемый"
         reads = [
             node
             for node in _plan_nodes(json.loads(raw)[0]["Plan"])
