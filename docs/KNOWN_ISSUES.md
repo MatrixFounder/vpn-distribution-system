@@ -92,3 +92,4 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 - **RF-1** [test_scheduler_leadership_lock флакает против стенда](issues/rf-1-scheduler-leadership-lock-flake.md) — severity `SEV-3`, status `open`, opened 2026-09-15
 - **RF-2** [test_wait_seconds_measures_backlog_and_claimed_delay смешивает часы машины тестов и базы](issues/rf-2-wait-seconds-test-mixes-clocks.md) — severity `LOW`, status `fixed`, opened 2026-09-27, resolved 2026-09-27
 - **RF-3** [Тесты очереди с верхней временной границей флакают против стенда](issues/rf-3-jobs-timing-bounds-flake.md) — severity `LOW`, status `open`, opened 2026-10-02
+- **RF-4** [test_epoch_changes_are_read_by_the_index_from_the_predecessor_on зависит от выбора плана](issues/rf-4-epoch-changes-plan-test-order-dependent.md) — severity `LOW`, status `open`, opened 2026-11-03
