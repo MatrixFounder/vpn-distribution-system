@@ -181,9 +181,17 @@ async def test_error_format(app_client: httpx.AsyncClient) -> None:
         assert error["code"] == "validation_error"
         locations = {tuple(e["loc"]) for e in error["details"]["errors"]}
         assert ("query", "config_version") in locations and ("query", "generation") in locations
+        assert ("query", "agent_section_version") in locations, "курсор раздела agent (001.26)"
         assert all({"loc", "msg", "type"} == set(e) for e in error["details"]["errors"])
-        for cursor in ("config_version", "users_seq", "generation"):  # каждый курсор §5.2 — ≥ 0
-            query = {"config_version": 0, "users_seq": 0, "generation": 0, cursor: -1}
+        # Каждый курсор §5.2 — ≥ 0, и курсор раздела agent (001.26) — тоже.
+        for cursor in ("config_version", "agent_section_version", "users_seq", "generation"):
+            query = {
+                "config_version": 0,
+                "agent_section_version": 0,
+                "users_seq": 0,
+                "generation": 0,
+                cursor: -1,
+            }
             negative = await agent.get("/agent/v1/state", params=query, headers=HEADERS)
             assert negative.status_code == 422, cursor
             errors = negative.json()["error"]["details"]["errors"]

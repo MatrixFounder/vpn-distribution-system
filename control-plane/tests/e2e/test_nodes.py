@@ -4,7 +4,7 @@ bootstrap-токен (Н-24, хеш, аннулирование прежнего
 подтверждение (шаг 7) → запросы раздела ``/agent/v1`` по сертификату и токену → отзыв identity
 (Н-31, UC-12 шаг 1, A1) → пересоздание новым токеном. Плюс контракт OpenAPI, валидация тела
 enrollment, отказ CA как ошибка запроса и операции панели, которые не реализованы и отвечают 501
-(изменение записи, ручной статус, вывод из эксплуатации).
+(изменение записи, ручной статус, вывод из эксплуатации; операции над inbound — 001.26).
 
 Раздел ``/agent/v1`` здесь настоящий целиком: сертификат приходит заголовком ``X-Client-Cert`` в
 той форме, в какой его передаёт nginx (``tests/_pki.py::escaped``), ``current_node`` ищет ноду в
@@ -61,7 +61,7 @@ NODE_STATUSES = [
 OTHER_NODE_ID = "11111111-1111-7111-8111-111111111111"
 AGENT_IP = "198.51.100.7"  # адрес, с которого «нода» обменивает токен (документационный диапазон)
 ADMIN_EMAIL = "t25-admin-%"  # уборка администраторов, заведённых этими тестами
-BEHIND = {"config_version": "0", "users_seq": "0", "generation": "1"}
+BEHIND = {"config_version": "0", "agent_section_version": "0", "users_seq": "0", "generation": "1"}
 
 
 def _ref(schema: dict[str, Any], ref: dict[str, Any]) -> dict[str, Any]:
@@ -1167,6 +1167,57 @@ async def test_the_operations_not_implemented_say_so(pg_dsn: str, redis_url: str
             "Tokyo 1",
             None,
         ), "ничего не записано"
+
+
+async def test_the_inbound_operations_are_stubs(pg_dsn: str, redis_url: str) -> None:
+    """Операции панели над inbound (001.26) — заглушки: 501 ``not_implemented`` с именем
+    операции и для настоящей ноды, и для несуществующего inbound; тело изменения проверяется
+    моделью раньше — цель только вместе с ``server_names``, пустое тело и лишнее поле — 422.
+    Логика — 001.27; строк ``inbounds`` у ноды до неё нет."""
+    async with onboarding(pg_dsn, redis_url) as ob:
+        real = (await ob.create_node())["id"]
+        listed = await ob.client.get(f"/api/v1/admin/nodes/{real}/inbounds")
+        assert listed.status_code == 501, listed.text
+        assert listed.json()["error"]["details"] == {"operation": "admin.inbounds.list"}
+        path = f"/api/v1/admin/inbounds/{uuid.uuid4()}"
+        for response, operation in (
+            (
+                await ob.client.patch(path, json={"enabled": False}, headers=ob.headers),
+                "admin.inbounds.update",
+            ),
+            (
+                await ob.client.patch(
+                    path,
+                    json={"target": "www.example.org:443", "server_names": ["www.example.org"]},
+                    headers=ob.headers,
+                ),
+                "admin.inbounds.update",
+            ),
+            (
+                await ob.client.post(f"{path}/rotate-short-ids", headers=ob.headers),
+                "admin.inbounds.rotate_short_ids",
+            ),
+            (
+                await ob.client.post(f"{path}/rotate-keypair", headers=ob.headers),
+                "admin.inbounds.rotate_keypair",
+            ),
+        ):
+            assert response.status_code == 501, (operation, response.text)
+            assert response.json()["error"]["details"] == {"operation": operation}
+        for bad in (
+            {},
+            {"target": "www.example.org:443"},
+            {"server_names": ["www.example.org"]},
+            {"enabled": False, "port": 444},
+        ):
+            response = await ob.client.patch(path, json=bad, headers=ob.headers)
+            assert response.status_code == 422, (bad, response.text)
+        assert (
+            await ob.conn.fetchval(
+                "select count(*) from inbounds where node_id = $1", uuid.UUID(real)
+            )
+            == 0
+        ), "заглушки ничего не пишут"
 
 
 async def test_node_record_validation(pg_dsn: str, redis_url: str) -> None:

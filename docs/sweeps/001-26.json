@@ -1,0 +1,36 @@
+{
+  "task": "001.26",
+  "history_markers": [
+    "прежн",
+    "предыдущ",
+    "раунд",
+    "было"
+  ],
+  "patterns": [
+    {
+      "name": "число фикстур agent_v1 до 001.26",
+      "regex": "\\b25 фикстур",
+      "current": "26 фикстур (state-agent-only.json)"
+    },
+    {
+      "name": "число фикстур с листом в X-Client-Cert до 001.26",
+      "regex": "\\b23 фикстур|у 23\\b|== 23\\b",
+      "current": "24"
+    },
+    {
+      "name": "число операций /api/v1/admin до 001.26",
+      "regex": "\\b28 операци|== 28\\b|18 \\+ 10 нод\"",
+      "current": "32 операции (18 + 10 нод + 4 inbound)"
+    },
+    {
+      "name": "запрос состояния без курсора раздела agent",
+      "regex": "config_version=&users_seq=&generation=",
+      "current": "config_version=&agent_section_version=&users_seq=&generation="
+    },
+    {
+      "name": "имя параметра раздела agent не названо",
+      "regex": "имя параметра — README|имя параметра — в README",
+      "current": "agent_section_version"
+    }
+  ]
+}

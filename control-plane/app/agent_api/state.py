@@ -6,6 +6,10 @@
 C-02 публикует после записи), полный снапшот, поколение и запись подтверждённых курсоров —
 001.75.
 
+Задача 001.26: раздел ``agent`` ответа и параметр ``agent_section_version`` — применённая агентом
+версия раздела, свой курсор рядом с ``config_version`` (отступление от 001.28 и контракта
+agent_v1, объявленное задачей).
+
 Удержанный long-poll не входит в выборку норматива Н-4 (p95 ≤ 200 мс для Node API): штатные 30 с
 ожидания — не задержка обработки. Разделение рядов метрики — 001.68.
 """
@@ -75,11 +79,14 @@ NO_STORE = {"Cache-Control": "no-store"}
 @router.get(
     "/state",
     response_model=None,
-    summary="Состояние ноды: дельты потоков, поколение identity, команды (§5.2)",
+    summary="Состояние ноды: дельты потоков, раздел agent, поколение, команды (§5.2)",
     responses={
         200: {"model": StateResponse},
         204: {"description": "изменений нет — удержание истекло"},
-        409: {"description": "поколение identity не совпадает — нужен снапшот"},
+        409: {
+            "description": "`generation` не совпадает с действующим (`generation_mismatch`) или "
+            "курсор ноды впереди сервера (`cursor_ahead`) — нужен снапшот"
+        },
         **AGENT_ERRORS_WITHOUT_BODY,
     },
 )
@@ -89,6 +96,9 @@ async def state(
     config_version: Annotated[int, Query(ge=0, le=INT4_MAX, description="применённая версия")],
     users_seq: Annotated[int, Query(ge=0, le=INT8_MAX, description="применённый курсор состава")],
     generation: Annotated[int, Query(ge=0, le=INT4_MAX, description="поколение identity ноды")],
+    agent_section_version: Annotated[
+        int, Query(ge=0, le=INT4_MAX, description="применённая версия раздела agent")
+    ],
     full: Annotated[bool, Query(description="полный снапшот вместо дельт")] = False,
 ) -> Response:
     """Курсоры обязательны и в форме снапшота: нода знает их всегда, а Control Plane по ним
@@ -99,7 +109,9 @@ async def state(
     в цикле событий процесса api (их два), где 001.75 держит припаркованные запросы. ``by_alias``
     обязателен: поле контракта называется ``json`` (псевдоним ``document``), и контрактные
     тесты по фикстурам — страж этой строки."""
-    answer = await streams.state_for(agent.node, config_version, users_seq, generation, full)
+    answer = await streams.state_for(
+        agent.node, config_version, users_seq, generation, full, agent_section_version
+    )
     if answer is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT, headers=NO_STORE)
     return Response(

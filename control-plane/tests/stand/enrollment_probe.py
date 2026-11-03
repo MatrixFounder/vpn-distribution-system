@@ -59,7 +59,7 @@ NODE_REFERENCES = (
     "node_ip_history",
     "node_billing_assignments",
 )
-STATE = {"config_version": 0, "users_seq": 0, "generation": 1}
+STATE = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "generation": 1}
 
 
 class Probe:

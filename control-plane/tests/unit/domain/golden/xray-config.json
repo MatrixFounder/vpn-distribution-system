@@ -1,0 +1,166 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "HandlerService",
+      "StatsService",
+      "RoutingService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
+    }
+  },
+  "inbounds": [
+    {
+      "tag": "vless_raw_vision",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "users": [],
+        "decryption": "none",
+        "flow": "xtls-rprx-vision"
+      },
+      "streamSettings": {
+        "method": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": [
+            "www.example.com"
+          ],
+          "privateKey": "sHJ1FTpexKQm3YlXg142qg4syIYGvl7Bi0yUspWbK1c",
+          "minClientVer": "1.8.1",
+          "shortIds": [
+            "6ba85179e30d4fc2"
+          ],
+          "limitFallbackUpload": {
+            "afterBytes": 1048576,
+            "bytesPerSec": 65536,
+            "burstBytesPerSec": 131072
+          },
+          "limitFallbackDownload": {
+            "afterBytes": 2097152,
+            "bytesPerSec": 131072,
+            "burstBytesPerSec": 262144
+          }
+        },
+        "sockopt": {
+          "trustedXForwardedFor": []
+        }
+      }
+    },
+    {
+      "tag": "vless_xhttp",
+      "port": 2087,
+      "protocol": "vless",
+      "settings": {
+        "users": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "method": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": [
+            "www.example.com"
+          ],
+          "privateKey": "IAqDYbKGJx13UqdGzynanpIfWE5SKQ2rZeAGRxb1ji8",
+          "minClientVer": "1.8.1",
+          "shortIds": [
+            "a1c3e5f70b2d4f68"
+          ],
+          "limitFallbackUpload": {
+            "afterBytes": 1048576,
+            "bytesPerSec": 65536,
+            "burstBytesPerSec": 131072
+          },
+          "limitFallbackDownload": {
+            "afterBytes": 2097152,
+            "bytesPerSec": 131072,
+            "burstBytesPerSec": 262144
+          }
+        },
+        "xhttpSettings": {
+          "path": "/9f3c1a7e",
+          "mode": "auto",
+          "xPaddingBytes": "100-1000",
+          "xPaddingObfsMode": false,
+          "xPaddingKey": "x_padding",
+          "xPaddingHeader": "X-Padding",
+          "xPaddingPlacement": "queryInHeader",
+          "xPaddingMethod": "repeat-x",
+          "uplinkHTTPMethod": "POST",
+          "sessionIDPlacement": "path",
+          "sessionIDKey": ""
+        },
+        "sockopt": {
+          "trustedXForwardedFor": []
+        }
+      }
+    },
+    {
+      "tag": "trojan_reality",
+      "port": 8443,
+      "protocol": "trojan",
+      "settings": {
+        "users": []
+      },
+      "streamSettings": {
+        "method": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "target": "www.example.com:443",
+          "xver": 0,
+          "serverNames": [
+            "www.example.com"
+          ],
+          "privateKey": "Tv4yYY4j75Z6uNzwicLF7ZJFbZwvj62SSQ-E8RY5g_k",
+          "minClientVer": "1.8.1",
+          "shortIds": [
+            "3e9b21d07c5a84f1"
+          ],
+          "limitFallbackUpload": {
+            "afterBytes": 1048576,
+            "bytesPerSec": 65536,
+            "burstBytesPerSec": 131072
+          },
+          "limitFallbackDownload": {
+            "afterBytes": 2097152,
+            "bytesPerSec": 131072,
+            "burstBytesPerSec": 262144
+          }
+        },
+        "sockopt": {
+          "trustedXForwardedFor": []
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "blackhole",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "rules": []
+  }
+}

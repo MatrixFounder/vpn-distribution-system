@@ -71,6 +71,7 @@ EXPECTED = {
     "report-interval-closed",
     "report-node-mismatch",
     "report-rejected-time",
+    "state-agent-only",
     "state-delta",
     "state-filtered",
     "state-cursor-ahead",
@@ -255,7 +256,7 @@ def test_the_recorded_enrollment_is_a_real_issuance() -> None:
     for stem in presenting:
         headers = load(CONTRACTS / f"{stem}.json")["request"]["headers"]
         assert headers.get("X-Client-Cert") == STUB_CLIENT_CERT, stem
-    assert len(presenting) == 23, presenting
+    assert len(presenting) == 24, presenting
 
 
 def test_config_checksum_is_sha256_of_the_canonical_form() -> None:
@@ -406,6 +407,55 @@ def test_a_delta_without_config_changes_is_in_the_catalogue() -> None:
     body = load(CONTRACTS / "state-users-only.json")["response"]["body"]
     assert body["config"] is None
     assert body["users"]["rows"], "состав при этом непуст"
+
+
+def test_the_agent_section_travels_beside_the_config() -> None:
+    """Раздел `agent` (001.26) — ключ ответа рядом с `config`, а не поле документа Xray: в
+    `config.json` его нет, и `config.checksum` от него не зависит. Каталог показывает обе
+    независимости курсоров: конфигурация без раздела (`state-users-only`) и раздел без
+    конфигурации (`state-agent-only`) — иначе вторая сторона обмена не узнала бы, что раздел
+    меняется без перезапуска Xray."""
+    seen = set()
+    for path in fixture_files():
+        fixture = load(path)
+        body = fixture["response"]["body"]
+        if fixture["operation"] != "state" or fixture["response"]["status"] != 200:
+            continue
+        assert "agent" in body, path.stem
+        if body["config"] is not None:
+            assert "agent" not in body["config"]["json"], path.stem
+        if body["agent"] is not None:
+            assert body["agent"]["version"] >= 1, path.stem
+            seen.add(path.stem)
+    assert seen == {
+        "state-agent-only",
+        "state-delta",
+        "state-filtered",
+        "state-provisioning",
+        "state-snapshot",
+    }, "раздел показан дельтой, снапшотом, первичной настройкой, фильтром и без конфигурации"
+    users_only = load(CONTRACTS / "state-users-only.json")["response"]["body"]
+    assert users_only["config"] is None and users_only["agent"] is None
+    agent_only = load(CONTRACTS / "state-agent-only.json")
+    body = agent_only["response"]["body"]
+    assert body["config"] is None and body["agent"] is not None
+    assert body["users"]["rows"] == [] and not body["users"]["full"]
+    query = agent_only["request"]["query"]
+    assert int(query["agent_section_version"]) < body["agent"]["version"], "нода отстала"
+    assert query["users_seq"] == str(body["users"]["seq"]), "курсор состава на месте"
+
+
+def test_every_state_request_presents_all_cursors() -> None:
+    """Курсоры обязательны в обеих формах запроса, и курсор раздела `agent` — наравне с
+    остальными: фикстура без него учила бы вторую сторону обмена запросу, который сервер
+    отвергает 422."""
+    for path in fixture_files():
+        fixture = load(path)
+        if fixture["operation"] == "state":
+            query = fixture["request"]["query"]
+            assert {"config_version", "agent_section_version", "users_seq", "generation"} <= set(
+                query
+            ), path.stem
 
 
 def test_the_recorded_commands_have_not_expired() -> None:

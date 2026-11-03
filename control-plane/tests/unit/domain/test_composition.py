@@ -113,7 +113,7 @@ async def test_the_domain_refuses_an_unapproved_node_on_its_own() -> None:
     service = CompositionService(None)
     pending = stub_node(status="pending")
     with pytest.raises(ApiError) as refused_state:
-        await service.state_for(pending, 0, 0, STUB_GENERATION, False)
+        await service.state_for(pending, 0, 0, STUB_GENERATION, False, 0)
     assert refused_state.value.status == 403
     with pytest.raises(ApiError) as refused_ack:
         await service.ack(pending, 1, 4)
@@ -122,7 +122,7 @@ async def test_the_domain_refuses_an_unapproved_node_on_its_own() -> None:
     # 403 «тебя не обслуживают», а не 409 «возьми снапшот», иначе она уйдёт в бесконечный ресинк
     # за состоянием, которого ей всё равно не выдадут.
     with pytest.raises(ApiError) as refused_first:
-        await service.state_for(pending, 0, 0, STUB_GENERATION + 1, False)
+        await service.state_for(pending, 0, 0, STUB_GENERATION + 1, False, 0)
     assert refused_first.value.status == 403
     await service.ack(stub_node(), 1, 4)  # подтверждённой ноде — без отказа
 
@@ -133,18 +133,18 @@ async def test_the_saved_resync_flag_reaches_the_agent() -> None:
     когда сам статус уже не фильтрует. Заглушка признак не хранит, поэтому добавляет к нему
     «этот ответ отфильтрован», — но взведённый в карточке обязана отдать."""
     flagged = stub_node().model_copy(update={"resync_required": True})
-    answer = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, False)
+    answer = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, False, 0)
     assert answer is not None and answer.resync_required is True
-    clean = await CompositionService(None).state_for(stub_node(), 0, 0, STUB_GENERATION, False)
+    clean = await CompositionService(None).state_for(stub_node(), 0, 0, STUB_GENERATION, False, 0)
     assert clean is not None and clean.resync_required is False, "у active своего признака нет"
     # Полный состав и есть выполненная пересинхронизация: объявить в нём «ты не синхронизирована»
     # значит послать ноду за снапшотом, который она только что получила. Условие остановки для
     # агента наблюдаемо (``users.full``), а свой статус он не знает.
-    done = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, True)
+    done = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, True, 0)
     assert done is not None and done.users.full is True
     assert done.resync_required is False, "снапшот закрывает признак, а не подтверждает его"
     filtered = await CompositionService(None).state_for(
-        stub_node(status="disabled"), 0, 0, STUB_GENERATION, True
+        stub_node(status="disabled"), 0, 0, STUB_GENERATION, True, 0
     )
     assert filtered is not None and filtered.users.full is False, "вентиль урезал — не полный"
     assert filtered.resync_required is True, "и признак остаётся: синхронизации не случилось"
@@ -166,7 +166,7 @@ async def test_a_snapshot_cursor_is_the_current_change_not_the_newest_row_sent()
         )
     )
     with mock.patch.object(composition, "stub_rows", return_value=rows):
-        answer = await CompositionService(None).state_for(node, 0, 0, STUB_GENERATION, True)
+        answer = await CompositionService(None).state_for(node, 0, 0, STUB_GENERATION, True, 0)
     assert answer is not None
     sent = [row.updated_seq for row in answer.users.rows]
     assert max(sent) < answer.users.seq == max(row.updated_seq for row in rows)
@@ -177,10 +177,10 @@ async def test_the_answer_is_built_for_the_node_that_asked() -> None:
     уникальны на пару «пользователь × нода» (§11.3), и подстановка константы в выдаче свела бы
     компенсирующий контроль на нет."""
     first = await CompositionService(None).state_for(
-        stub_node(node_id=NODE), 0, 0, STUB_GENERATION, False
+        stub_node(node_id=NODE), 0, 0, STUB_GENERATION, False, 0
     )
     second = await CompositionService(None).state_for(
-        stub_node(node_id=OTHER_NODE), 0, 0, STUB_GENERATION, False
+        stub_node(node_id=OTHER_NODE), 0, 0, STUB_GENERATION, False, 0
     )
     assert first is not None and second is not None
     keys = [

@@ -1,6 +1,6 @@
 {
   "operation": "state",
-  "summary": "Конфигурация не менялась: в дельте только состав, config — null",
+  "summary": "Конфигурация и раздел agent не менялись: в дельте только состав, config и agent — null",
   "given": {
     "node_status": "active"
   },
@@ -9,6 +9,7 @@
     "path": "/agent/v1/state",
     "query": {
       "config_version": "1",
+      "agent_section_version": "1",
       "users_seq": "0",
       "generation": "1"
     },
@@ -27,6 +28,7 @@
     },
     "body": {
       "config": null,
+      "agent": null,
       "users": {
         "seq": 4,
         "full": false,

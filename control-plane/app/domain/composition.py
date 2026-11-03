@@ -8,6 +8,13 @@ UC-01, UC-07, UC-11).
 30 с на канале Redis ``node:{id}`` и подтверждение курсоров — 001.75; конфигурация Xray и её
 версии — 001.26, 001.27.
 
+Задача 001.26: раздел ``agent`` ответа — параметры агента вне документа Xray (лимиты nftables,
+коэффициент, стратегия разрыва) со своим курсором версии. Раздел не входит в ``config.json`` и в
+``config.checksum``: его смена применяется агентом без перезапуска Xray (перезагрузка набора
+nftables, запись в хранилище агента), а перезапуск — только при смене контрольной суммы
+документа (interfaces.md §5.2). Значения заполняют 001.27 (лимиты), 001.36 (коэффициент), 001.40
+(стратегия).
+
 Что в заглушке настоящее: вентиль по статусу берётся из ``domain.statuses`` (§4.6 —
 единственный источник правил), контрольная сумма конфигурации считается от неё самой
 (``config_checksum``), тег пользователя выводится из его идентификатора (``xray_email``), а
@@ -31,6 +38,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.domain.commands import Command, CommandService
+from app.domain.multiplier import MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
 from app.domain.nodes import Node
 from app.domain.statuses import INT4_MAX, INT8_MAX, STREAM_GATE
 from app.errors import ApiError
@@ -43,6 +51,11 @@ REVOKING_STATES: frozenset[UserState] = frozenset(
 )
 
 Checksum = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+# Стратегии разрыва соединений пользователя — кандидаты PoC-1а (001.88, ОВ-22): удаление и
+# повторное добавление пользователя (``readd``) или правило ``RoutingService`` по адресам
+# (``route_block``). Перезапуск inbound только замеряется и выбран быть не может (В-9) — в
+# перечислении его нет; после выбора в перечислении останется одна стратегия (001.40, В-11).
+DisconnectStrategy = Literal["readd", "route_block"]
 
 
 def xray_email(user_id: uuid.UUID) -> str:
@@ -67,6 +80,36 @@ class StateConfig(BaseModel):
     checksum: Checksum
     document: dict[str, Any] = Field(
         alias="json", description="конфигурация Xray целиком, без credentials пользователей"
+    )
+
+
+class StateAgent(BaseModel):
+    """Раздел ``agent`` ответа состояния: параметры агента вне документа Xray (§5.2).
+
+    ``version`` — свой курсор раздела, независимый от ``config_version``: смена лимита или
+    коэффициента выпускает новую версию раздела, а не новую версию конфигурации, и Xray не
+    перезапускается (иначе каждая смена параметра рвала бы соединения всех пользователей ноды и
+    открывала новую эпоху счётчиков). Применённую версию агент присылает параметром
+    ``agent_section_version`` запроса состояния."""
+
+    version: int = Field(ge=1, le=INT4_MAX)
+    max_conn_per_ip: int = Field(
+        ge=1, le=INT4_MAX, description="одновременных соединений с одного адреса источника, Н-29"
+    )
+    new_conn_rate_per_ip: int = Field(
+        ge=1,
+        le=INT4_MAX,
+        description="новых соединений в секунду с одного адреса клиента на порты inbound (В-10)",
+    )
+    multiplier_milli: int = Field(
+        ge=0,
+        le=MULTIPLIER_MILLI_MAX,
+        multiple_of=MULTIPLIER_STEP_MILLI,
+        description="коэффициент трафика ноды в тысячных (шаг 0.1): расход гранта в единицах "
+        "списания",
+    )
+    disconnect_strategy: DisconnectStrategy = Field(
+        description="стратегия разрыва соединений при отзыве и исчерпании гранта (PoC-1а)"
     )
 
 
@@ -132,10 +175,11 @@ class Users(BaseModel):
 
 
 class StateResponse(BaseModel):
-    """Ответ ``GET /agent/v1/state``: дельты обоих потоков, поколение identity, признак
-    обязательного снапшота и команды канала (§5.2)."""
+    """Ответ ``GET /agent/v1/state``: дельты обоих потоков, раздел параметров агента, поколение
+    identity, признак обязательного снапшота и команды канала (§5.2)."""
 
     config: StateConfig | None = None
+    agent: StateAgent | None = None
     users: Users
     generation: int = Field(ge=1)
     resync_required: bool
@@ -155,6 +199,7 @@ class AckIn(BaseModel):
 # --- фиксированные значения заглушки ------------------------------------------------------------
 
 STUB_CONFIG_VERSION = 1
+STUB_AGENT_VERSION = 1
 STUB_GENERATION = 1  # первое поколение identity: ``node_identities.generation`` начинается с 1
 STUB_USERS_SEQ = 4  # текущий номер изменения состава (``current_users_seq`` по строкам ниже)
 STUB_USER_ACTIVE = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
@@ -167,9 +212,11 @@ STUB_BLOCKED_IP = ipaddress.IPv4Address("203.0.113.77")
 # ОВ-A7), и в поток состава он придёт через граф зависимостей, а не импортом.
 STUB_QUOTA_GRANT_BYTES = 1073741824
 
-# Каркас конфигурации Xray: структура без пользователей. Настоящий генератор (inbound-профили
-# §4.4, ключи REALITY, маршрутизация) — 001.26 и 001.27; здесь важно одно свойство §5.2:
-# ``clients`` пуст, credentials пользователей потоком конфигурации не передаются.
+# Каркас конфигурации Xray: структура без пользователей. Это не выдача генератора: форму
+# серверного документа в именах v26.10.21 объявляет ``XrayConfigBuilder`` (заглушка 001.26,
+# сборка 001.27), а поток конфигурации начнёт отдавать его документ из ``node_config_versions``
+# с 001.29. Здесь важно одно свойство §5.2: состав inbound пуст, credentials пользователей
+# потоком конфигурации не передаются.
 STUB_CONFIG_DOCUMENT: dict[str, Any] = {
     "log": {"loglevel": "warning"},
     "inbounds": [
@@ -265,6 +312,23 @@ def stub_rows(node_id: uuid.UUID) -> list[UserRow]:
     ]
 
 
+# Раздел ``agent`` заглушки. ``max_conn_per_ip`` равен лимиту карточки ``stub_node``;
+# ``new_conn_rate_per_ip`` — значение заглушки, не умолчание: умолчания у поля нет, оно
+# обязательно (В-10); коэффициент 1.0; стратегия — рекомендованная задачей PoC-1а, выбор — 001.88.
+STUB_AGENT = StateAgent(
+    version=STUB_AGENT_VERSION,
+    max_conn_per_ip=32,
+    new_conn_rate_per_ip=16,
+    multiplier_milli=1000,
+    disconnect_strategy="readd",
+)
+
+
+def stub_agent() -> StateAgent:
+    """Раздел ``agent`` заглушки: фиксированные значения (копия — ответ не делит объект)."""
+    return STUB_AGENT.model_copy()
+
+
 def stub_config() -> StateConfig:
     """Поток конфигурации заглушки: версия, каркас и контрольная сумма от него самого."""
     return StateConfig(
@@ -325,7 +389,13 @@ class CompositionService:
         self._commands = commands or CommandService(pool)
 
     async def state_for(
-        self, node: Node, config_version: int, users_seq: int, generation: int, full: bool
+        self,
+        node: Node,
+        config_version: int,
+        users_seq: int,
+        generation: int,
+        full: bool,
+        agent_section_version: int,
     ) -> StateResponse | None:
         """Состояние для ноды (§5.2). ``None`` — изменений нет: маршрут отвечает 204.
 
@@ -343,6 +413,12 @@ class CompositionService:
         не должно держать ни подключения из пула asyncpg (служба берёт пул, а не подключение),
         ни разделяемый клиент Redis — у него ``socket_timeout`` 2 с (``app.redis``), и наивный
         ``pubsub.listen()`` на 30 с даст 503 вместо 204.
+
+        Раздел ``agent`` (001.26) ведёт свой курсор ``agent_section_version`` по тем же правилам,
+        что ``config_version``: отставание — повод ответить, опережение — 409 ``cursor_ahead``,
+        снапшот отдаёт раздел целиком. Вентиль у раздела — вентиль потока конфигурации: это
+        параметры той же природы (структура ноды, а не состав), и нода в ``disabled`` без
+        стратегии разрыва не смогла бы применить отзывы, которые ей ещё доставляются.
         """
         gate = STREAM_GATE[node.status]
         if gate.refused:
@@ -359,7 +435,11 @@ class CompositionService:
         # из него: он присланный курсор игнорирует и сам ставит ``seq = current``. Отказывать и
         # ему значило бы оставить ноду без выхода: отказ велит взять снапшот, а снапшот отвечает
         # тем же отказом.
-        if not full and (config_version > STUB_CONFIG_VERSION or users_seq > current):
+        if not full and (
+            config_version > STUB_CONFIG_VERSION
+            or agent_section_version > STUB_AGENT_VERSION
+            or users_seq > current
+        ):
             raise cursor_ahead()
         composition_open = gate.composition != "none"
         # Полным состав считается, только когда вентиль отдаёт его целиком: снапшот в
@@ -371,11 +451,16 @@ class CompositionService:
             if gate.config and (full or config_version < STUB_CONFIG_VERSION)
             else None
         )
+        agent = (
+            stub_agent()
+            if gate.config and (full or agent_section_version < STUB_AGENT_VERSION)
+            else None
+        )
         behind = composition_open and (full or users_seq < current)
         # Взведённый признак — самостоятельный повод ответить: §5.2 требует показать его при
         # выходе из фильтрующего статуса, а нода к этому моменту уже на текущих курсорах, и
         # молчаливый 204 съел бы поручение ровно там, где оно нужно.
-        if config is None and not behind and not node.resync_required:
+        if config is None and agent is None and not behind and not node.resync_required:
             return None
         rows: list[UserRow] = []
         seq = users_seq
@@ -401,6 +486,7 @@ class CompositionService:
             )
         return StateResponse(
             config=config,
+            agent=agent,
             users=Users(seq=seq, full=complete, rows=rows),
             generation=STUB_GENERATION,
             # Признак приходит из сохранённого состояния ноды (колонка ``nodes.resync_required``,

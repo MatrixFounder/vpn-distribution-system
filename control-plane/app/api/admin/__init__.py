@@ -1,5 +1,6 @@
 """Раздел ``/api/v1/admin`` — панель администратора (interfaces.md §5.1). Подроутеры:
-``plans``, ``groups``, ``codes`` (001.18, заглушки), ``nodes`` (001.24, заглушки), далее
+``plans``, ``groups``, ``codes`` (001.18, заглушки), ``nodes`` (001.24, заглушки) и
+``inbounds`` (001.26, заглушки), далее
 ``users``, ``dashboard``, ``settings``, ``audit``, ``auth`` (001.46…). Общие зависимости
 раздела (``_common``): ``current_admin`` (сессия администратора, минимальный вид до 001.47),
 ``require_csrf`` на мутациях; разрешение операции (R-35) объявляется в OpenAPI как
@@ -12,6 +13,7 @@ from fastapi import APIRouter
 from app.api.admin._common import Admin, permission
 from app.api.admin.codes import router as codes
 from app.api.admin.groups import router as groups
+from app.api.admin.nodes import inbounds_router as inbounds
 from app.api.admin.nodes import router as nodes
 from app.api.admin.plans import router as plans
 from app.errors import not_implemented
@@ -32,3 +34,4 @@ router.include_router(plans)
 router.include_router(groups)
 router.include_router(codes)
 router.include_router(nodes)
+router.include_router(inbounds)

@@ -9,6 +9,7 @@
     "path": "/agent/v1/state",
     "query": {
       "config_version": "0",
+      "agent_section_version": "0",
       "users_seq": "0",
       "generation": "1"
     },
@@ -59,6 +60,13 @@
             }
           ]
         }
+      },
+      "agent": {
+        "version": 1,
+        "max_conn_per_ip": 32,
+        "new_conn_rate_per_ip": 16,
+        "multiplier_milli": 1000,
+        "disconnect_strategy": "readd"
       },
       "users": {
         "seq": 4,

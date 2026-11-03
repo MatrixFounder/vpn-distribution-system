@@ -45,6 +45,9 @@ from ._admin import (
 from ._auth import PASSWORD, auth_stand, cookies_of
 from ._catalog import RecordingHours, access_group, billing_group, catalog, node, unique_name
 
+# Сегмент пути, раздел разрешения которого — другой: inbound управляется правами ноды.
+SECTION_OF_SEGMENT = {"inbounds": "nodes"}
+
 
 async def test_admin_operations_in_openapi_with_one_permission_each(
     app_client: httpx.AsyncClient,
@@ -57,7 +60,9 @@ async def test_admin_operations_in_openapi_with_one_permission_each(
         for method, operation in methods.items()
     }
     expected = {(m, openapi_path(p)) for m, p, _ in ADMIN_OPERATIONS}
-    assert len(expected) == len(ADMIN_OPERATIONS) == 28, "перечень без дубликатов: 18 + 10 нод"
+    assert len(expected) == len(ADMIN_OPERATIONS) == 32, (
+        "перечень без дубликатов: 18 + 10 нод + 4 inbound"
+    )
     assert set(operations) == expected, "операции раздела /admin — ровно ADMIN_OPERATIONS"
     for (method, path), operation in operations.items():
         declared = operation.get("x-permission")
@@ -65,7 +70,9 @@ async def test_admin_operations_in_openapi_with_one_permission_each(
         section, action = declared.split(".")
         # Разрешение по смыслу: раздел — сегмент пути, действие — read для GET и write для
         # мутаций; мутация с read уехала бы в матрицу 001.46 правом на чтение (ревью, S-1).
-        assert section == path.split("/")[4], (method, path, declared)
+        # Inbound — часть ноды (§4.4, пара «нода × профиль»): его раздел — nodes (001.26).
+        segment = path.split("/")[4]
+        assert section == SECTION_OF_SEGMENT.get(segment, segment), (method, path, declared)
         assert action == ("read" if method == "GET" else "write"), (method, path, declared)
         if method in ("GET", "DELETE"):
             assert "requestBody" not in operation, (method, path)

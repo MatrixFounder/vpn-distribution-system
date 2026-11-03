@@ -20,6 +20,7 @@ GROUP_ID = "00000000-0000-7000-8000-0000000000f1"
 BATCH_ID = "00000000-0000-7000-8000-0000000000d2"
 CODE_ID = "00000000-0000-7000-8000-0000000000d1"
 NODE_ID = "00000000-0000-7000-8000-0000000000b1"
+INBOUND_ID = "00000000-0000-7000-8000-0000000000e1"
 # Идентификаторы заглушек в путях операций → параметры пути в OpenAPI.
 PATH_PARAMS = {
     PLAN_ID: "{plan_id}",
@@ -27,6 +28,7 @@ PATH_PARAMS = {
     BATCH_ID: "{batch_id}",
     CODE_ID: "{code_id}",
     NODE_ID: "{node_id}",
+    INBOUND_ID: "{inbound_id}",
 }
 VALID_NODE: dict[str, Any] = {
     "code": "JP-Tokyo-01",
@@ -80,6 +82,10 @@ ADMIN_OPERATIONS: list[tuple[str, str, dict[str, Any] | None]] = [
     ("POST", f"/api/v1/admin/nodes/{NODE_ID}/status", {"status": "maintenance"}),
     ("POST", f"/api/v1/admin/nodes/{NODE_ID}/revoke-identity", None),
     ("GET", f"/api/v1/admin/nodes/{NODE_ID}/state", None),
+    ("GET", f"/api/v1/admin/nodes/{NODE_ID}/inbounds", None),
+    ("PATCH", f"/api/v1/admin/inbounds/{INBOUND_ID}", {"enabled": False}),
+    ("POST", f"/api/v1/admin/inbounds/{INBOUND_ID}/rotate-short-ids", None),
+    ("POST", f"/api/v1/admin/inbounds/{INBOUND_ID}/rotate-keypair", None),
 ]
 MUTATIONS = [(m, p, b) for m, p, b in ADMIN_OPERATIONS if m != "GET"]
 

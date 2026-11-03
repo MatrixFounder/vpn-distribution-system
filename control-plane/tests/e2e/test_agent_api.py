@@ -1,7 +1,8 @@
 """Сквозные проверки Node API `/agent/v1` на заглушках (задача 001.28; R-04, R-05, R-07;
 UC-01 шаг 8, UC-07, UC-11): контракт в OpenAPI, состояние с дельтами и снапшотом, вентиль по
 статусу ноды §4.6 в обеих формах запроса, подтверждение курсоров, heartbeat, телеметрия и
-результат команды.
+результат команды. 001.26: раздел `agent` ответа состояния со своим курсором
+`agent_section_version` — вне `config.json` и его контрольной суммы (TC-E2E-02).
 
 Раздел не знает ни сессий, ни CSRF: нода предъявляет клиентский сертификат (его передаёт прокси)
 и токен identity (§7.1), а версию агента — заголовком. Поиск ноды по identity здесь подменён
@@ -14,6 +15,7 @@ UC-01 шаг 8, UC-07, UC-11): контракт в OpenAPI, состояние �
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
@@ -59,12 +61,14 @@ AGENT_PATHS = {
     "/agent/v1/quota/request",  # 001.33
 }
 BODY_SCHEMAS = ("AckIn", "HeartbeatIn", "NodeMetrics", "CommandResultIn")
-BEHIND = {"config_version": 0, "users_seq": 0, "generation": 1}
+BEHIND = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "generation": 1}
 CURRENT = {
     "config_version": composition.STUB_CONFIG_VERSION,
+    "agent_section_version": composition.STUB_AGENT_VERSION,
     "users_seq": composition.STUB_USERS_SEQ,
     "generation": 1,
 }
+STUB_AGENT_BODY = composition.STUB_AGENT.model_dump(mode="json")
 SNAPSHOT = {**CURRENT, "full": 1}
 VALID_HEARTBEAT: dict[str, Any] = {
     "agent_version": "0.1.0",
@@ -181,6 +185,7 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
     query = {p["name"]: p["required"] for p in state["parameters"] if p["in"] == "query"}
     assert query == {
         "config_version": True,
+        "agent_section_version": True,
         "users_seq": True,
         "generation": True,
         "full": False,
@@ -206,6 +211,7 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
 
     assert fields(schema, "StateResponse") == {
         "config",
+        "agent",
         "users",
         "generation",
         "resync_required",
@@ -216,7 +222,35 @@ async def test_agent_api_contract_in_openapi(app_client: httpx.AsyncClient) -> N
         "generation",
         "resync_required",
         "commands",
-    }, "конфигурации в ответе может не быть, остальное обязательно"
+    }, "конфигурации и раздела agent в ответе может не быть, остальное обязательно"
+    assert fields(schema, "StateAgent") == {
+        "version",
+        "max_conn_per_ip",
+        "new_conn_rate_per_ip",
+        "multiplier_milli",
+        "disconnect_strategy",
+    }
+    assert required(schema, "StateAgent") == set(fields(schema, "StateAgent")), (
+        "раздел приходит целиком: умолчание на стороне агента подменило бы лимит нулём"
+    )
+    assert enum_of(schema, "StateAgent", "disconnect_strategy") == ["readd", "route_block"], (
+        "кандидаты PoC-1а без restart_inbound (В-9)"
+    )
+    # Границы раздела литералами: лимиты nftables не меньше единицы (ноль закрыл бы ноду для
+    # всех), коэффициент — диапазон и шаг модели коэффициента (§4.9: 0…10.0 с шагом 0.1).
+    agent_props = schema["components"]["schemas"]["StateAgent"]["properties"]
+    bounds = {
+        name: {
+            k: v for k, v in agent_props[name].items() if k in ("minimum", "maximum", "multipleOf")
+        }
+        for name in ("version", "max_conn_per_ip", "new_conn_rate_per_ip", "multiplier_milli")
+    }
+    assert bounds == {
+        "version": {"minimum": 1, "maximum": 2**31 - 1},
+        "max_conn_per_ip": {"minimum": 1, "maximum": 2**31 - 1},
+        "new_conn_rate_per_ip": {"minimum": 1, "maximum": 2**31 - 1},
+        "multiplier_milli": {"minimum": 0, "maximum": 10000, "multipleOf": 100},
+    }
     assert fields(schema, "StateConfig") == {"version", "checksum", "json"}
     assert required(schema, "StateConfig") == {"version", "checksum", "json"}
     assert fields(schema, "Users") == {"seq", "full", "rows"}
@@ -310,6 +344,7 @@ async def test_state_answers_the_agent_and_needs_its_version() -> None:
         assert body["resync_required"] is False
         assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
         assert body["config"]["checksum"] == composition.STUB_CONFIG_CHECKSUM
+        assert body["agent"] == STUB_AGENT_BODY
         assert body["users"]["seq"] == composition.STUB_USERS_SEQ
         assert body["users"]["full"] is False, "дельта не полна: удалять по ней нельзя"
         assert rows_of(body) == [
@@ -488,6 +523,7 @@ async def test_status_gate_decides_what_the_node_receives(status: NodeStatus, fo
         assert response.status_code == 200, response.text
         body = response.json()
         assert (body["config"] is not None) is gate.config
+        assert (body["agent"] is not None) is gate.config, "раздел идёт вентилем конфигурации"
         if gate.composition == "none":
             assert rows_of(body) == [] and body["users"]["seq"] == BEHIND["users_seq"]
         elif gate.composition == "revocations":
@@ -545,7 +581,7 @@ async def test_snapshot_and_delta_differ_the_way_the_agent_expects() -> None:
         assert nothing.status_code == 204 and nothing.content == b""
         assert nothing.headers["cache-control"] == "no-store"
 
-        for cursor in ("config_version", "users_seq"):
+        for cursor in ("config_version", "agent_section_version", "users_seq"):
             behind = {**CURRENT, cursor: int(CURRENT[cursor]) - 1}
             response = await client.get("/agent/v1/state", params=behind, headers=HEADERS)
             assert response.status_code == 200, (cursor, response.text)
@@ -553,6 +589,43 @@ async def test_snapshot_and_delta_differ_the_way_the_agent_expects() -> None:
             assert (fresh["config"] is not None) is (cursor == "config_version"), (
                 "поток, по которому нода не отстала, в дельту не попадает"
             )
+            assert (fresh["agent"] is not None) is (cursor == "agent_section_version"), (
+                "раздел agent — свой курсор: отставание по конфигурации его не везёт, и наоборот"
+            )
+            assert bool(fresh["users"]["rows"]) is (cursor == "users_seq"), cursor
+
+
+async def test_tc_e2e_02_the_agent_section_lies_outside_the_config_checksum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TC-E2E-02: раздел `agent` — рядом с `config`, а не внутри `config.json`, и
+    `config.checksum` считается только по `config.json`. Проверяется сменой самих значений
+    раздела: другие лимиты, коэффициент и стратегия при той же версии конфигурации обязаны
+    оставить версию и сумму документа прежними — иначе смена лимита перезапускала бы Xray и
+    рвала соединения всех пользователей ноды (§5.2)."""
+    async with agent() as client:
+        before = (await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)).json()
+    changed = composition.StateAgent(
+        version=composition.STUB_AGENT_VERSION + 1,
+        max_conn_per_ip=7,
+        new_conn_rate_per_ip=3,
+        multiplier_milli=2500,
+        disconnect_strategy="route_block",
+    )
+    # Новые значения — новая версия раздела, и сервер объявляет её же своей текущей: иначе он
+    # выдавал бы версию, которую сам считает опережающей (README, «Раздел `agent`»).
+    monkeypatch.setattr(composition, "STUB_AGENT", changed)
+    monkeypatch.setattr(composition, "STUB_AGENT_VERSION", changed.version)
+    async with agent() as client:
+        after = (await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)).json()
+    assert before["agent"] == STUB_AGENT_BODY
+    assert after["agent"] == changed.model_dump(mode="json"), "раздел отдан из заглушки"
+    assert after["config"] == before["config"], "версия, сумма и документ не зависят от раздела"
+    assert after["config"]["checksum"] == composition.config_checksum(after["config"]["json"])
+    document = json.dumps(after["config"]["json"])
+    for field in ("max_conn_per_ip", "new_conn_rate_per_ip", "multiplier_milli"):
+        assert field not in document, "параметров агента нет в документе Xray"
+    assert "disconnect_strategy" not in document
 
 
 async def test_a_provisioning_node_that_applied_the_config_is_held() -> None:
@@ -562,6 +635,7 @@ async def test_a_provisioning_node_that_applied_the_config_is_held() -> None:
     async with agent("provisioning") as client:
         applied = {
             "config_version": composition.STUB_CONFIG_VERSION,
+            "agent_section_version": composition.STUB_AGENT_VERSION,
             "users_seq": 0,
             "generation": 1,
         }
@@ -584,6 +658,8 @@ async def test_a_cursor_ahead_of_the_server_is_refused_not_answered_with_204() -
             {**CURRENT, "config_version": composition.STUB_CONFIG_VERSION + 1},
             {**CURRENT, "users_seq": 2**63 - 1},
             {**CURRENT, "config_version": 2**31 - 1},
+            {**CURRENT, "agent_section_version": composition.STUB_AGENT_VERSION + 1},
+            {**CURRENT, "agent_section_version": 2**31 - 1},
         ):
             response = await client.get("/agent/v1/state", params=params, headers=HEADERS)
             assert response.status_code == 409, (params, response.text)
@@ -591,12 +667,14 @@ async def test_a_cursor_ahead_of_the_server_is_refused_not_answered_with_204() -
             assert response.headers["retry-after"] == str(composition.RETRY_AFTER_RESYNC)
 
 
-async def test_a_snapshot_is_the_way_out_of_being_ahead() -> None:
+@pytest.mark.parametrize("cursor", ["config_version", "agent_section_version", "users_seq"])
+async def test_a_snapshot_is_the_way_out_of_being_ahead(cursor: str) -> None:
     """Отказ `cursor_ahead` велит взять снапшот — значит снапшот обязан обслуживаться, иначе
     выхода нет: после восстановления Control Plane из копии впереди окажется весь парк сразу, и
-    каждая нода будет долбить отказ с `Retry-After: 1` вечно."""
+    каждая нода будет долбить отказ с `Retry-After: 1` вечно. Проверяется по каждому курсору:
+    опережение любого из трёх отклоняет дельту и не отклоняет снапшот (раунд 1 001.26, G-1)."""
     async with agent() as client:
-        ahead = {**CURRENT, "users_seq": composition.STUB_USERS_SEQ + 5}
+        ahead = {**CURRENT, cursor: int(CURRENT[cursor]) + 5}
         assert (
             await client.get("/agent/v1/state", params=ahead, headers=HEADERS)
         ).status_code == 409, "дельта по-прежнему отклоняется"
@@ -605,6 +683,11 @@ async def test_a_snapshot_is_the_way_out_of_being_ahead() -> None:
         body = snapshot.json()
         assert body["users"]["full"] is True
         assert body["users"]["seq"] == composition.STUB_USERS_SEQ, "курсор ставит сервер"
+        assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
+        assert body["agent"] == STUB_AGENT_BODY, (
+            "снапшот отдаёт раздел целиком, и нода принимает его версию, даже если она меньше "
+            "присланной"
+        )
 
 
 async def test_a_node_that_owes_a_resync_is_told_so_even_on_current_cursors() -> None:
@@ -740,6 +823,9 @@ async def test_cursors_and_bodies_are_validated() -> None:
             {**BEHIND, "config_version": 2**31},
             {**BEHIND, "users_seq": 2**63},
             {**BEHIND, "generation": 2**31},
+            {**BEHIND, "agent_section_version": -1},
+            {**BEHIND, "agent_section_version": 2**31},
+            {k: v for k, v in BEHIND.items() if k != "agent_section_version"},
         )
         for params in bad_queries:
             response = await client.get("/agent/v1/state", params=params, headers=HEADERS)
