@@ -191,7 +191,7 @@ async def onboarding(pg_dsn: str, redis_url: str) -> AsyncIterator[Onboarding]:
                 await conn.execute("delete from admin_users where email like $1", ADMIN_EMAIL)
                 admin_id: uuid.UUID = await conn.fetchval(
                     "insert into admin_users (email, password_hash, role) "
-                    "values ($1, 'не пароль', 'admin') returning id",
+                    "values ($1, 'не пароль', 'super_admin') returning id",
                     f"t25-admin-{uuid.uuid4().hex[:8]}@example.test",
                 )
                 store = SessionStore(stand.redis)

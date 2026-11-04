@@ -1,5 +1,7 @@
 """Внешний API ``/api/v1`` (interfaces.md §5.1): подроутеры ``auth`` (``api/auth.py``, 001.13),
-``me`` (``api/me.py``, 001.15), ``admin`` (``api/admin/``, 001.18).
+``me`` (``api/me.py``, 001.15), ``admin`` (``api/admin/``, 001.18) и вход администратора
+``admin/auth`` (``api/admin/auth.py``, 001.46) — отдельно от роутера панели: проверка разрешения
+панели к нему не относится.
 
 Задача 001.10 регистрирует заглушки 501 (``not_implemented``); STUB-задачи заменяют их
 фиксированными ответами, LOGIC-задачи — реализацией. Новые роутеры подключаются здесь.
@@ -10,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.admin import router as admin
+from app.api.admin.auth import router as admin_auth
 from app.api.auth import router as auth
 from app.api.me import router as me
 from app.security.deps import redis_required
@@ -20,4 +23,5 @@ router = APIRouter(prefix="/api/v1")
 # отвечают 503 (fail-closed, §9.1), проверка — до валидации тела и до поиска сессии.
 router.include_router(auth, dependencies=[Depends(redis_required)])
 router.include_router(me, dependencies=[Depends(redis_required)])
+router.include_router(admin_auth, dependencies=[Depends(redis_required)])
 router.include_router(admin, dependencies=[Depends(redis_required)])

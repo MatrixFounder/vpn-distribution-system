@@ -6,6 +6,7 @@ Redis) с TTL бездействия — чтение продлевает ср�
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -60,6 +61,13 @@ class Session:
     created_at: dt.datetime
     ttl: int
     csrf: str = ""
+
+    @property
+    def handle(self) -> str:
+        """Несекретная метка сессии для журналов: SHA-256 идентификатора, 32 hex. Сам ``id`` —
+        значение cookie ``sid``, предъявитель сессии; в журнал аудита (его читает ``audit.read``)
+        он попасть не должен — иначе чтение журнала давало бы вход чужой сессией (роаст 001.46)."""
+        return hashlib.sha256(self.id.encode()).hexdigest()[:32]
 
 
 class SessionStore:

@@ -1,8 +1,8 @@
 """``/api/v1/admin/nodes`` — парк нод (§3.2, §4.6; UC-01 шаги 1–3, 6–7, A1–A2; UC-12 шаг 1;
 R-02). Маршруты — 001.24; логика записи ноды, карточки, списка, состояния, bootstrap-токена,
 подтверждения и отзыва identity — 001.25 (``NodeService`` на базе). Изменение записи, ручной
-статус и вывод из эксплуатации отвечают 501: они не реализованы (ручные статусы — 001.30,
-изменение и вывод — владелец не назначен, отчёт 001.25). Команды ноды — 001.28.
+статус и вывод из эксплуатации отвечают 501: они не реализованы (ручные статусы — 001.30b,
+изменение и вывод — 001.87). Команды ноды — 001.28.
 
 Inbound ноды (001.26, заглушки; логика — 001.27): список ``GET /admin/nodes/{id}/inbounds`` и
 операции над одним inbound под ``/admin/inbounds/{id}`` — изменение цели с ``server_names`` и
@@ -12,7 +12,9 @@ Inbound ноды (001.26, заглушки; логика — 001.27): списо
 проверяется моделью раньше — 422.
 
 Все операции — под сессией администратора (``Admin``), мутации — под CSRF, одно разрешение на
-операцию (R-35): ``nodes.read`` для чтения, ``nodes.write`` для остального.
+операцию (R-35): ``nodes.read`` для чтения, ``nodes.write`` для остального, кроме отзыва identity
+(``nodes.revoke_identity``) и ручного статуса (``nodes.manual_status``: его выполняет и Operator —
+решение заказчика 2026-10-25, В-39; 001.46).
 """
 
 from __future__ import annotations
@@ -153,7 +155,7 @@ async def approve_node(node_id: uuid.UUID, body: ApproveIn, admin: Admin, nodes:
     summary="Ручной статус §4.6 (maintenance | disabled | suspended) или снятие; не реализовано",
     dependencies=CSRF,
     responses=NOT_IMPLEMENTED,
-    openapi_extra=permission("nodes.write"),
+    openapi_extra=permission("nodes.manual_status"),
 )
 async def set_manual_status(
     node_id: uuid.UUID, body: ManualStatusIn, admin: Admin, nodes: Nodes
@@ -166,7 +168,7 @@ async def set_manual_status(
     response_model=NodeState,
     summary="Отозвать identity ноды (Н-31; UC-12 шаг 1, UC-01 A2)",
     dependencies=CSRF,
-    openapi_extra=permission("nodes.write"),
+    openapi_extra=permission("nodes.revoke_identity"),
 )
 async def revoke_identity(node_id: uuid.UUID, admin: Admin, nodes: Nodes) -> NodeState:
     return await nodes.revoke_identity(node_id, admin.id)

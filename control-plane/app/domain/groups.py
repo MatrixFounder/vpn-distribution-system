@@ -31,11 +31,11 @@ UC-09 шаги 1–2, 6, A1…A3; R-18, R-23).
 собранная без закрытия часа, молча теряла бы A3, а это ровно тот зелёный «успех», которого не
 было.
 
-Audit Log (§4.16, UC-09 шаг 7) требует записывать прежнее и новое значение коэффициента.
-Писать некуда: ``app/security/audit.py::record`` вводит 001.46, и 001.19 от неё не зависит.
-Обе операции истории возвращают прежнее и новое значение вызывающему (прежнее — из закрытой
-строки истории, 001.23), чтобы маршруту было что передать в журнал, когда заглушка появится
-(передано в примечания 001.46).
+Audit Log (§4.16, UC-09 шаг 7) требует записывать прежнее и новое значение коэффициента. С 001.46
+обе операции истории сами вызывают ``audit.record`` на подключении своей транзакции (прежнее
+значение — из закрытой строки истории, 001.23): изменение и его запись атомарны. Коэффициенты в
+записи — десятичной строкой, как в API (``"2.0"``), действия — «раздел.действие», как имена
+разрешений.
 """
 
 from __future__ import annotations
@@ -49,8 +49,15 @@ import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.db.pool import transaction
-from app.domain.multiplier import MILLI_PER_UNIT, MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
+from app.domain.multiplier import (
+    DEFAULT_MULTIPLIER_MILLI,
+    MILLI_PER_UNIT,
+    MULTIPLIER_MILLI_MAX,
+    MULTIPLIER_STEP_MILLI,
+)
 from app.errors import ApiError
+from app.security import audit
+from app.security.audit import AuditContext
 
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
@@ -138,6 +145,11 @@ class Assignment(NamedTuple):
     valid_from: dt.datetime
 
 
+def _decimal_text(milli: int | None) -> str | None:
+    """Коэффициент для журнала — десятичной строкой (``"1.5"``), как в API; ``None`` — нет."""
+    return None if milli is None else str(from_milli(milli))
+
+
 def validate_multiplier(milli: int) -> int:
     """Коэффициент в тысячных: 0…10000 кратно 100 (§4.9 «0.0–10.0 с шагом 0.1»; UC-09 A2).
     Те же границы стоят ``CHECK`` на четырёх колонках §4.2.2 и §4.2.5 — здесь они проверяются
@@ -192,6 +204,22 @@ _OPEN_AHEAD_ASSIGNMENT = (
     "select valid_from from node_billing_assignments "
     "where node_id = $1 and valid_to is null and valid_from >= $2"
 )
+# Коэффициент группы, действующий в момент ``$2``.
+_GROUP_MULTIPLIER_AT = (
+    "select multiplier_milli from billing_group_multipliers "
+    "where billing_group_id = $1 and tstzrange(valid_from, valid_to) @> $2::timestamptz"
+)
+
+
+async def _effective_milli(
+    conn: asyncpg.Connection, group_id: uuid.UUID, override_milli: int | None, at: dt.datetime
+) -> int:
+    """Коэффициент ноды при назначении (группа, переопределение) в момент ``at`` — тем же
+    порядком, что ``multiplier.resolve``: переопределение, иначе коэффициент группы, иначе 1.0."""
+    if override_milli is not None:
+        return override_milli
+    milli = await conn.fetchval(_GROUP_MULTIPLIER_AT, group_id, at)
+    return DEFAULT_MULTIPLIER_MILLI if milli is None else int(milli)
 
 
 def _conflict(message: str) -> ApiError:
@@ -360,15 +388,20 @@ class GroupService:
 
     # --- история коэффициента и назначения -----------------------------------------------------
 
-    async def add_multiplier(self, group_id: uuid.UUID, data: MultiplierIn) -> Multiplier:
+    async def add_multiplier(
+        self, group_id: uuid.UUID, data: MultiplierIn, ctx: AuditContext
+    ) -> Multiplier:
         """Маршрут панели: десятичный коэффициент запроса → тысячные хранения (§4.2.2)."""
-        return await self.set_group_multiplier(group_id, to_milli(data.multiplier))
+        return await self.set_group_multiplier(group_id, to_milli(data.multiplier), ctx=ctx)
 
-    async def set_group_multiplier(self, group_id: uuid.UUID, milli: int) -> Multiplier:
+    async def set_group_multiplier(
+        self, group_id: uuid.UUID, milli: int, *, ctx: AuditContext
+    ) -> Multiplier:
         """Новый интервал коэффициента группы (§4.9; UC-09 шаг 1, A2, A3): действующий интервал
         закрывается моментом, которым открывается новый, поэтому история не рвётся и не
         перекрывается. Для каждой ноды группы, которая берёт коэффициент отсюда (то есть без
-        собственного переопределения), час учёта закрывается в этой же транзакции.
+        собственного переопределения), час учёта закрывается в этой же транзакции. В ней же —
+        запись журнала с прежним и новым значением (§4.16, UC-09 шаг 7, R-23; 001.46).
 
         Момент смены — ``now()`` транзакции (``_now``): ни задним числом, ни на будущее.
         Действующий интервал, начатый не раньше этого момента, — 409 с моментом его начала
@@ -402,6 +435,17 @@ class GroupService:
             except asyncpg.ExclusionViolationError as exc:
                 raise _conflict("интервал коэффициента пересекается с уже записанным") from exc
             await self._close_hours(conn, group_id, at)
+            await audit.record(
+                conn,
+                ctx,
+                action="billing_groups.multiplier",
+                entity=("billing_group", str(group_id)),
+                old=None
+                if previous_milli is None
+                else {"multiplier": str(from_milli(previous_milli))},
+                new={"multiplier": str(from_milli(milli))},
+                result="success",
+            )
         return Multiplier(
             id=row["id"],
             billing_group_id=row["billing_group_id"],
@@ -416,11 +460,16 @@ class GroupService:
         node_id: uuid.UUID,
         group_id: uuid.UUID,
         override_milli: int | None = None,
+        *,
+        ctx: AuditContext,
     ) -> Assignment:
         """Назначить ноде тарифицируемую группу и, необязательно, собственный коэффициент
         (UC-09 шаг 6). Действующее назначение закрывается, открывается новое, денормализация
         ``nodes.billing_group_id``/``nodes.multiplier_milli`` приводится к нему, час учёта
-        закрывается — всё в одной транзакции.
+        закрывается, журнал получает прежние и новые группу, переопределение и действующий
+        коэффициент ноды (§4.16; 001.46) — всё в одной транзакции. Действующий коэффициент —
+        переопределение, иначе коэффициент группы в момент смены, иначе 1.0: смена группы без
+        переопределения меняет списание, и журнал показывает, на сколько.
 
         Ровно одна группа на ноду (R-18) держится не проверкой, а ``EXCLUDE`` по
         ``(node_id, [valid_from, valid_to))``: две одновременные попытки назначить разные группы
@@ -479,6 +528,34 @@ class GroupService:
                 override_milli,
             )
             await self._accounting.close_hour(conn, node_id, at)
+            await audit.record(
+                conn,
+                ctx,
+                action="nodes.billing_group",
+                entity=("node", str(node_id)),
+                old=None
+                if closed is None
+                else {
+                    "billing_group_id": str(closed["billing_group_id"]),
+                    "multiplier_override": _decimal_text(closed["multiplier_override_milli"]),
+                    "multiplier": _decimal_text(
+                        await _effective_milli(
+                            conn,
+                            closed["billing_group_id"],
+                            closed["multiplier_override_milli"],
+                            at,
+                        )
+                    ),
+                },
+                new={
+                    "billing_group_id": str(group_id),
+                    "multiplier_override": _decimal_text(override_milli),
+                    "multiplier": _decimal_text(
+                        await _effective_milli(conn, group_id, override_milli, at)
+                    ),
+                },
+                result="success",
+            )
         return Assignment(
             node_id=node_id,
             billing_group_id=group_id,

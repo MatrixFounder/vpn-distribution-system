@@ -103,6 +103,7 @@ class AdminStand:
     client: httpx.AsyncClient
     admin_id: uuid.UUID
     csrf: str
+    role: str
 
     @property
     def headers(self) -> dict[str, str]:
@@ -110,15 +111,27 @@ class AdminStand:
 
 
 @asynccontextmanager
-async def admin_stand(pg_dsn: str, redis_url: str) -> AsyncIterator[AdminStand]:
-    """Стенд с сессией администратора (вид ``admin``, субъект — случайный UUID)."""
+async def admin_stand(
+    pg_dsn: str, redis_url: str, role: str = "super_admin"
+) -> AsyncIterator[AdminStand]:
+    """Стенд с сессией администратора (вид ``admin``) и его строкой ``admin_users`` в роли
+    ``role``: с 001.46 роль и статус читаются из базы на каждом запросе, и сессия без строки —
+    401. По умолчанию ``super_admin`` — у него все разрешения заглушечной матрицы (001.48 —
+    настоящая). Язык панели — ``ru``, не умолчание колонки: ответ сессии обязан брать его из
+    строки. Строка удаляется на выходе."""
     async with auth_stand(pg_dsn, redis_url) as stand:
         store = SessionStore(stand.redis)
-        admin_id = uuid.uuid4()
+        admin_id: uuid.UUID = await stand.pool.fetchval(
+            "insert into admin_users (email, password_hash, role, language) "
+            "values ($1, 'не пароль', $2, 'ru') returning id",
+            f"t46-admin-{uuid.uuid4().hex[:10]}@example.test",
+            role,
+        )
         session = await store.create("admin", str(admin_id), "203.0.113.200", "test", 600)
         try:
             async with stand.client("203.0.113.200") as client:
                 client.cookies.set("sid", session.id)
-                yield AdminStand(stand, client, admin_id, session.csrf)
+                yield AdminStand(stand, client, admin_id, session.csrf, role)
         finally:
             await store.revoke_all(str(admin_id))
+            await stand.pool.execute("delete from admin_users where id = $1", admin_id)

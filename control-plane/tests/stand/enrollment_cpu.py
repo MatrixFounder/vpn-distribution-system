@@ -187,8 +187,8 @@ async def main() -> None:
     try:
         async with pool.acquire() as conn:
             admin = await conn.fetchval(
-                "insert into admin_users (email, password_hash, role) values ($1, 'x', 'admin') "
-                "returning id",
+                "insert into admin_users (email, password_hash, role) "
+                "values ($1, 'x', 'super_admin') returning id",
                 f"{PREFIX}admin@example.test",
             )
             billing = await conn.fetchval(

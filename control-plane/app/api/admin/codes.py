@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 
-from app.api.admin._common import CSRF, Admin, db_pool, permission
+from app.api.admin._common import CSRF, Admin, Audit, db_pool, permission
 from app.domain.codes import Code, CodeService, CodeSpec, Redemption
 
 router = APIRouter(prefix="/codes")
@@ -65,11 +65,12 @@ async def create_batch(body: BatchIn, admin: Admin, codes: Codes) -> BatchOut:
     summary="Экспорт партии — CSV (UC-09 шаг 5)",
     response_class=Response,
     responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}},
-    openapi_extra=permission("codes.read"),
+    openapi_extra=permission("codes.export"),
 )
-async def export_batch(batch_id: uuid.UUID, admin: Admin, codes: Codes) -> Response:
-    """Коды партии в открытом виде — вложение, без кэширования (секреты в ответе)."""
-    lines = await codes.export(batch_id)
+async def export_batch(batch_id: uuid.UUID, admin: Admin, codes: Codes, ctx: Audit) -> Response:
+    """Коды партии в открытом виде — вложение, без кэширования (секреты в ответе). Экспорт —
+    отдельное разрешение и запись в журнал (001.46): выгрузка кодов — выдача ценностей."""
+    lines = await codes.export(batch_id, ctx)
     return Response(
         "\r\n".join(lines) + "\r\n",
         media_type="text/csv; charset=utf-8",

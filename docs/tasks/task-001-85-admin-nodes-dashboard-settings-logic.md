@@ -59,7 +59,8 @@ inbound с `error_state`), дашборд §4.15, настройки с вали
 
 ### Интеграция компонентов
 
-Все действия проходят `require_permission` и `audit.record`.
+Все действия проходят проверку разрешения роутера панели (`declared_permission`, 001.46) и
+`audit.record`.
 
 Обращение C-01 к API Alertmanager C-10 — только для окна обслуживания
 (`docs/architectures/system-architecture.md`, C-01; reliability.md §9.3); доступ контейнера `api`

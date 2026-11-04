@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from app.accounting.service import AccountingService
-from app.api.admin._common import CSRF, Admin, db_pool, permission
+from app.api.admin._common import CSRF, Admin, Audit, db_pool, permission
 from app.domain.groups import (
     AccessGroup,
     AccessGroupIn,
@@ -139,6 +139,8 @@ async def delete_billing_group(group_id: uuid.UUID, admin: Admin, groups: Groups
     openapi_extra=permission("groups.write"),
 )
 async def add_multiplier(
-    group_id: uuid.UUID, body: MultiplierIn, admin: Admin, groups: Groups
+    group_id: uuid.UUID, body: MultiplierIn, admin: Admin, groups: Groups, ctx: Audit
 ) -> Multiplier:
-    return await groups.add_multiplier(group_id, body)
+    """Смена коэффициента пишется в журнал с прежним и новым значением в транзакции смены
+    (§4.16, UC-09 шаг 7; 001.46)."""
+    return await groups.add_multiplier(group_id, body, ctx)

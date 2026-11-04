@@ -109,12 +109,14 @@ async def test_fail_closed_is_bounded_when_redis_accepts_but_never_answers(
         await server.wait_closed()
 
 
-async def test_current_user_and_admin_active_permission_stubbed() -> None:
-    """``current_user`` действует с 001.15, ``current_admin`` — с 001.18 (минимальный вид: сессия
-    вида ``admin``): без cookie — 401 до обращения к Redis; разрешения — заглушка до 001.46."""
+async def test_current_user_and_admin_need_a_session() -> None:
+    """``current_user`` действует с 001.15, ``current_admin`` — с 001.18: без cookie — 401 до
+    обращения к Redis и к базе. ``require_permission`` (001.46) отвергает имя, которого нет в
+    реестре, при объявлении зависимости, а не при запросе: опечатка не открывает операцию."""
     for dependency in (deps.current_user, deps.current_admin):
         with pytest.raises(ApiError) as denied:
             await dependency(_request("GET"))
         assert (denied.value.status, denied.value.code) == (401, "unauthenticated")
-    with pytest.raises(NotImplementedError, match="users.read"):
-        await deps.require_permission("users.read")(_request("GET"))
+    with pytest.raises(ValueError, match="users.reed"):
+        deps.require_permission("users.reed")
+    assert callable(deps.require_permission("users.read"))

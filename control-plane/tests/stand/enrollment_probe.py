@@ -266,7 +266,7 @@ async def main() -> None:
         await cleanup(conn)
         stack.push_async_callback(cleanup, conn)
         admin_id = await conn.fetchval(
-            "insert into admin_users (email, password_hash, role) values ($1, 'x', 'admin') "
+            "insert into admin_users (email, password_hash, role) values ($1, 'x', 'super_admin') "
             "returning id",
             f"{PREFIX}admin@example.test",
         )

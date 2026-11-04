@@ -33,6 +33,8 @@ from app.domain import codes, multiplier
 from app.domain import groups as groups_module
 from app.domain.groups import Assignment, GroupService
 from app.errors import ApiError
+from app.security.audit import AuditContext
+from app.security.rbac import PERMISSIONS
 from app.security.sessions import SessionStore
 
 from ._admin import (
@@ -45,8 +47,32 @@ from ._admin import (
 from ._auth import PASSWORD, auth_stand, cookies_of
 from ._catalog import RecordingHours, access_group, billing_group, catalog, node, unique_name
 
+# Контекст журнала для прямых вызовов писателей истории (001.46): журнал — заглушка без записи.
+CTX = AuditContext(
+    actor_type="admin",
+    actor_id=uuid.UUID("00000000-0000-7000-8000-00000000ad01"),
+    actor_role="super_admin",
+    session_id="test-session",
+    ip="203.0.113.200",
+    user_agent="test",
+)
 # Сегмент пути, раздел разрешения которого — другой: inbound управляется правами ноды.
 SECTION_OF_SEGMENT = {"inbounds": "nodes"}
+# Операции с отдельным разрешением вместо read/write своего раздела (001.46): экспорт кодов —
+# выдача ценностей, отзыв identity — только Admin и выше, ручной статус — и Operator (В-39).
+DEDICATED_PERMISSIONS = {
+    ("GET", "/api/v1/admin/codes/batch/{batch_id}/export"): "codes.export",
+    ("POST", "/api/v1/admin/nodes/{node_id}/revoke-identity"): "nodes.revoke_identity",
+    ("POST", "/api/v1/admin/nodes/{node_id}/status"): "nodes.manual_status",
+}
+# Вход администратора (001.46): до сессии и под сессией любой роли — без разрешения.
+ADMIN_AUTH_OPERATIONS = {
+    ("POST", "/api/v1/admin/auth/login"),
+    ("POST", "/api/v1/admin/auth/totp"),
+    ("POST", "/api/v1/admin/auth/recovery"),
+    ("POST", "/api/v1/admin/auth/logout"),
+    ("GET", "/api/v1/admin/auth/session"),
+}
 
 
 async def test_admin_operations_in_openapi_with_one_permission_each(
@@ -56,9 +82,18 @@ async def test_admin_operations_in_openapi_with_one_permission_each(
     operations = {
         (method.upper(), path): operation
         for path, methods in schema["paths"].items()
-        if path.startswith("/api/v1/admin")
+        if path.startswith("/api/v1/admin") and not path.startswith("/api/v1/admin/auth/")
         for method, operation in methods.items()
     }
+    auth = {
+        (method.upper(), path): operation
+        for path, methods in schema["paths"].items()
+        if path.startswith("/api/v1/admin/auth/")
+        for method, operation in methods.items()
+    }
+    assert set(auth) == ADMIN_AUTH_OPERATIONS
+    for key, operation in auth.items():
+        assert "x-permission" not in operation, (key, "вход идёт до сессии и до разрешений")
     expected = {(m, openapi_path(p)) for m, p, _ in ADMIN_OPERATIONS}
     assert len(expected) == len(ADMIN_OPERATIONS) == 32, (
         "перечень без дубликатов: 18 + 10 нод + 4 inbound"
@@ -67,13 +102,17 @@ async def test_admin_operations_in_openapi_with_one_permission_each(
     for (method, path), operation in operations.items():
         declared = operation.get("x-permission")
         assert declared, f"{(method, path)}: операция без разрешения (R-35)"
-        section, action = declared.split(".")
-        # Разрешение по смыслу: раздел — сегмент пути, действие — read для GET и write для
-        # мутаций; мутация с read уехала бы в матрицу 001.46 правом на чтение (ревью, S-1).
-        # Inbound — часть ноды (§4.4, пара «нода × профиль»): его раздел — nodes (001.26).
-        segment = path.split("/")[4]
-        assert section == SECTION_OF_SEGMENT.get(segment, segment), (method, path, declared)
-        assert action == ("read" if method == "GET" else "write"), (method, path, declared)
+        assert declared in PERMISSIONS, (method, path, declared, "имени нет в реестре 001.46")
+        if (method, path) in DEDICATED_PERMISSIONS:
+            assert declared == DEDICATED_PERMISSIONS[(method, path)], (method, path, declared)
+        else:
+            section, action = declared.split(".")
+            # Разрешение по смыслу: раздел — сегмент пути, действие — read для GET и write для
+            # мутаций; мутация с read уехала бы в матрицу 001.46 правом на чтение (ревью, S-1).
+            # Inbound — часть ноды (§4.4, пара «нода × профиль»): его раздел — nodes (001.26).
+            segment = path.split("/")[4]
+            assert section == SECTION_OF_SEGMENT.get(segment, segment), (method, path, declared)
+            assert action == ("read" if method == "GET" else "write"), (method, path, declared)
         if method in ("GET", "DELETE"):
             assert "requestBody" not in operation, (method, path)
         assert operation["tags"] == ["admin"], (method, path, operation["tags"])
@@ -378,8 +417,8 @@ async def test_uc09_a1_second_billing_group_of_a_node_is_rejected(pg_dsn: str) -
             hours = RecordingHours()
             service = GroupService(pool, hours)
             outcomes = await asyncio.gather(
-                service.set_billing_group(node_id, first),
-                service.set_billing_group(node_id, second),
+                service.set_billing_group(node_id, first, ctx=CTX),
+                service.set_billing_group(node_id, second, ctx=CTX),
                 return_exceptions=True,
             )
         finally:
@@ -413,8 +452,8 @@ async def test_uc09_a3_multiplier_history_has_no_overlap(pg_dsn: str) -> None:
         try:
             hours = RecordingHours()
             service = GroupService(pool, hours)
-            first = await service.set_group_multiplier(group, 2000)
-            second = await service.set_group_multiplier(group, 3000)
+            first = await service.set_group_multiplier(group, 2000, ctx=CTX)
+            second = await service.set_group_multiplier(group, 3000, ctx=CTX)
         finally:
             await pool.close()
 
@@ -453,11 +492,11 @@ async def test_uc04_a7_late_report_gets_the_multiplier_of_its_period(pg_dsn: str
         assert pool is not None
         try:
             service = GroupService(pool, RecordingHours())
-            await service.set_billing_group(node_id, group)
-            two = await service.set_group_multiplier(group, 2000)
+            await service.set_billing_group(node_id, group, ctx=CTX)
+            two = await service.set_group_multiplier(group, 2000, ctx=CTX)
             period_start = two.valid_from + dt.timedelta(microseconds=1)
             before_change = await multiplier.resolve(conn, node_id, period_start)
-            three = await service.set_group_multiplier(group, 3000)
+            three = await service.set_group_multiplier(group, 3000, ctx=CTX)
         finally:
             await pool.close()
 
@@ -537,16 +576,16 @@ async def test_history_writers_take_effect_now_and_resolve_reads_them(
             hours = RecordingHours()
             service = GroupService(pool, hours)
             before: dt.datetime = await conn.fetchval("select now()")
-            assigned = await service.set_billing_group(node_id, group, 3000)
-            changed = await service.set_group_multiplier(group, 2000)
-            changed_again = await service.set_group_multiplier(group, 2500)
+            assigned = await service.set_billing_group(node_id, group, 3000, ctx=CTX)
+            changed = await service.set_group_multiplier(group, 2000, ctx=CTX)
+            changed_again = await service.set_group_multiplier(group, 2500, ctx=CTX)
             after: dt.datetime = await conn.fetchval("select now()")
             refusals = []
             with pytest.raises(ApiError) as refused:
-                await service.set_group_multiplier(ahead_group, 2000)
+                await service.set_group_multiplier(ahead_group, 2000, ctx=CTX)
             refusals.append((refused.value.status, refused.value.code, refused.value.details))
             with pytest.raises(ApiError) as refused:
-                await service.set_billing_group(ahead_node, ahead_group)
+                await service.set_billing_group(ahead_node, ahead_group, ctx=CTX)
             refusals.append((refused.value.status, refused.value.code, refused.value.details))
             # Интервал, записанный между проверкой и закрытием (гонка), проверка не видит: её
             # запрос подменён на пустой, и закрытие упирается в ``CHECK`` — тоже 409, без момента.
@@ -557,10 +596,10 @@ async def test_history_writers_take_effect_now_and_resolve_reads_them(
             monkeypatch.setattr(groups_module, "_OPEN_AHEAD_MULTIPLIER", missed)
             monkeypatch.setattr(groups_module, "_OPEN_AHEAD_ASSIGNMENT", missed)
             with pytest.raises(ApiError) as refused:
-                await service.set_group_multiplier(ahead_group, 2000)
+                await service.set_group_multiplier(ahead_group, 2000, ctx=CTX)
             refusals.append((refused.value.status, refused.value.code, refused.value.details))
             with pytest.raises(ApiError) as refused:
-                await service.set_billing_group(ahead_node, ahead_group)
+                await service.set_billing_group(ahead_node, ahead_group, ctx=CTX)
             refusals.append((refused.value.status, refused.value.code, refused.value.details))
         finally:
             await pool.close()

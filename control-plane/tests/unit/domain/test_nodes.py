@@ -116,7 +116,9 @@ async def test_manual_status_reason_reaches_the_domain() -> None:
             return nodes.stub_node(status=status or "active", node_id=node_id)
 
     node_id, admin_id = uuid.uuid4(), uuid.uuid4()
-    admin = CurrentAdmin(id=admin_id, session=cast(Session, None))
+    admin = CurrentAdmin(
+        id=admin_id, session=cast(Session, None), role="super_admin", language="en"
+    )
     body = nodes.ManualStatusIn(status="maintenance", reason="замена диска")
     answer = await set_manual_status(node_id, body, admin, RecordingNodes(pool=None))
     assert seen == {

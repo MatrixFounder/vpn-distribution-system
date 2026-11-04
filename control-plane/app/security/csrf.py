@@ -13,7 +13,7 @@ from fastapi import Request, Response
 
 from app.errors import ApiError
 from app.redis import get_redis
-from app.security.sessions import SESSION_COOKIE, SessionStore
+from app.security.sessions import SESSION_COOKIE, Session, SessionStore
 
 CSRF_HEADER = "X-CSRF-Token"
 CSRF_COOKIE = "csrf"
@@ -42,6 +42,14 @@ async def require_csrf(request: Request) -> None:
     session = await SessionStore(await get_redis()).get(sid)
     if session is None:
         return  # сессии нет — защищать нечего; аутентификация решит сама
+    check_csrf(request, session)
+
+
+def check_csrf(request: Request, session: Session) -> None:
+    """Изменяющий запрос несёт заголовок ``X-CSRF-Token``, равный токену уже прочитанной сессии
+    (проверка разрешения панели, 001.46: сессию второй раз из Redis не читает)."""
+    if request.method in SAFE_METHODS:
+        return
     header = request.headers.get(CSRF_HEADER, "")
     if not header or not hmac.compare_digest(header, session.csrf):
         raise ApiError("csrf_failed", "нет или неверен заголовок X-CSRF-Token", status=403)

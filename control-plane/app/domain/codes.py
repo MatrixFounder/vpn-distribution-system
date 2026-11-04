@@ -28,6 +28,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.errors import ApiError
+from app.security import audit
+from app.security.audit import AuditContext
 
 ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # 32 символа без I, O, 0, 1
 PREFIX = "VPN"
@@ -191,11 +193,24 @@ class CodeService:
         """Партия из ``n`` кодов с общими свойствами; заглушка — фиксированный id партии."""
         return STUB_BATCH_ID
 
-    async def export(self, batch_id: uuid.UUID) -> Iterable[str]:
+    async def export(self, batch_id: uuid.UUID, ctx: AuditContext) -> Iterable[str]:
         """Строки CSV партии: заголовок ``code,expires_at,plan`` и по строке на код (UC-09 шаг
         5; экспорт содержит все коды партии). Заглушка — три сгенерированных кода; строки
-        собирает ``csv_rows`` (RFC 4180: кавычки и экранирование, без переводов строк)."""
+        собирает ``csv_rows`` (RFC 4180: кавычки и экранирование, без переводов строк).
+
+        Экспорт пишется в журнал (``codes.export``, 001.46): у заглушки нет транзакции, и
+        ``audit.record`` получает ``None`` вместо подключения; чтение партии и запись журнала в
+        одной транзакции — 001.20, строка ``audit_log`` — 001.48."""
         rows = [(generate_code(), STUB_EXPIRES_AT.isoformat(), str(STUB_PLAN_ID)) for _ in range(3)]
+        await audit.record(
+            None,
+            ctx,
+            action="codes.export",
+            entity=("code_batch", str(batch_id)),
+            old=None,
+            new={"count": len(rows)},
+            result="success",
+        )
         return csv_rows(rows)
 
     async def redemptions(self, code_id: uuid.UUID) -> list[Redemption]:
