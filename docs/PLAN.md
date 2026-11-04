@@ -84,11 +84,12 @@
 Критический путь до задачи 001.73 по оставшейся работе (принятые задачи не входят) — 36 ч по
 оценкам, задач в цепочке — 9: 29 → 42 → 48 → 30b → 67 → 68 → 85 → 64 → 73.
 
-Диаграмма — Гант оставшейся работы без календаря: горизонталь — часы оценки от текущего состояния,
-принятые задачи не показаны, полоса задачи начинается после всех её непринятых зависимостей и длится
-её оценку; секции — этапы. Заливка — состояние (жёлтая — готова к началу или в работе, белая — ждёт
-зависимостей), красная рамка — критический путь. Полные названия — в разделе «Последовательность
-выполнения задач».
+Диаграмма — Гант без календаря: горизонталь — часы оценки от старта, секции — этапы. Слева от
+отметки «сейчас» — принятые задачи (зелёные): полоса начинается после принятых зависимостей и длится
+оценку, отметка стоит в конце самой длинной цепочки принятых. Справа — оставшаяся работа: полоса
+начинается после отметки и всех непринятых зависимостей; заливка — состояние (жёлтая — готова к
+началу или в работе, белая — ждёт зависимостей), красная рамка — критический путь оставшейся работы.
+Полные названия — в разделе «Последовательность выполнения задач».
 
 ```mermaid
 %%{init: {
@@ -101,6 +102,8 @@
     "taskTextOutsideColor": "#212121",
     "taskTextDarkColor": "#212121",
     "taskTextLightColor": "#212121",
+    "doneTaskBkgColor": "#c8e6c9",
+    "doneTaskBorderColor": "#2e7d32",
     "activeTaskBkgColor": "#fff3c4",
     "activeTaskBorderColor": "#f9a825",
     "critBkgColor": "#ffffff",
@@ -125,14 +128,44 @@
   }
 }}%%
 gantt
-  title Оставшаяся работа по графу зависимостей — часы оценки, не календарь
+  title Порядок задач по графу зависимостей — часы оценки, не календарь
   dateFormat x
   todayMarker off
+  section Состояние
+    Сейчас — 43 ч, принято 29 из 106 :milestone, tnow, 43, 0ms
+  section Этап 0 — репозиторий и стенд
+    01 Каркас репозитория :done, t01, 0, 3ms
+    02 Compose стенда :done, t02, after t01, 4ms
+    03 Миграции и роли :done, t03, after t02, 3ms
+  section Этап 1 — схема данных и каркас Control Plane
+    04 Схема — аккаунты :done, t04, after t03, 3ms
+    05 Схема — тарифы :done, t05, after t03, 3ms
+    06 Схема — ноды :done, t06, after t05, 4ms
+    07 Схема — подписки :done, t07, after t05, 3ms
+    08 Схема — учёт трафика :done, t08, after t06 t07, 4ms
+    09 Схема — события, очередь :done, t09, after t04, 3ms
+    10 Каркас FastAPI :done, t10, after t09, 4ms
+    11 Очередь — заглушки :done, t11, after t10, 3ms
+    12 Безопасность — заглушки :done, t12, after t10, 3ms
+    74 Очередь — повторы, DLQ :done, t74, after t11, 3ms
+  section Этап 2 — пользователи и кабинет
+    13 Auth API — заглушки :done, t13, after t12, 3ms
+    14 Auth API — логика :done, t14, after t13 t04, 4ms
+    15 /me — заглушки :done, t15, after t13, 3ms
+    84 Сессии, CSRF, лимиты входа :done, t84, after t14, 4ms
   section Этап 3 — тарифы, подписки, коды
+    18 Admin-каталог — заглушки :done, t18, after t12 t05, 3ms
+    19 Тарифы и группы :done, t19, after t18, 4ms
+    21 Подписки — заглушки :done, t21, after t07 t11, 2ms
+    22 Подписки — логика :done, t22, after t21 t19, 4ms
     20 Коды — логика :t20, after t51 t42 t29, 5ms
     83 Истечение подписок :t83, after t51, 2ms
   section Этап 4 — парк нод и Node API
-    29 Поток состава :active, crit, t29, 0, 4ms
+    24 Nodes API — заглушки :done, t24, after t06 t12, 3ms
+    25 Enrollment, identity :done, t25, after t24, 4ms
+    26 Inbound, Xray — заглушки :done, t26, after t24, 3ms
+    28 Node API — заглушки :done, t28, after t24 t11, 3ms
+    29 Поток состава :active, crit, t29, after tnow, 4ms
     27 Inbound, Xray — логика :t27, after t29 t51, 4ms
     75b Снапшот, state_generation :t75b, after t29, 2ms
     75 Подтверждение курсоров :t75, after t29 t75b, 2ms
@@ -143,24 +176,27 @@ gantt
     31 Версии, update_agent :t31, after t29 t76, 4ms
     32 Внешние пробы :t32, after t44 t49 t30, 3ms
     75c Long-poll :t75c, after t75 t75b t76, 3ms
-    66d Офлайн-CA агентских портов :active, t66d, 0, 3ms
+    66d Офлайн-CA агентских портов :active, t66d, after tnow, 3ms
     87 Изменение и вывод ноды :t87, after t27 t29 t48 t51 t77b t67 t36, 4ms
   section Этап 5 — учёт трафика и лимиты
-    88 PoC-1а — разрыв :active, t88, 0, 4ms
-    77 Приём отчёта — факты :active, t77, 0, 3ms
+    33 Отчёты, учёт — заглушки :done, t33, after t28 t08, 4ms
+    23 Коэффициент по дате :done, t23, after t19 t33, 2ms
+    34 Приём отчёта — проверки :done, t34, after t33 t23 t22, 8ms
+    88 PoC-1а — разрыв :active, t88, after tnow, 4ms
+    77 Приём отчёта — факты :active, t77, after tnow, 3ms
     77b Накопление часа, поздний :t77b, after t77, 2ms
     77c Баланс периода, limits.check :t77c, after t77, 3ms
     35 Лимиты 80/95/100 :t35, after t29 t51 t77c, 5ms
     36 Гранты квоты :t36, after t35 t88, 4ms
     37 Партиции, сроки хранения :t37, after t77, 3ms
-    37b Закрытие молчащих интервалов :active, t37b, 0, 1ms
+    37b Закрытие молчащих интервалов :active, t37b, after tnow, 1ms
     37c Суточная агрегация :t37c, after t37 t77b, 1ms
     37d Три сверки, разрывы :t37d, after t37 t37b t77b t77c t51, 3ms
     38 Лимит адресов :t38, after t29 t77c, 3ms
     39 Признаки перепродажи :t39, after t38 t86 t50 t59, 2ms
     40 Стратегия разрыва :t40, after t35 t31 t88, 1ms
   section Этап 6 — subscription-эндпоинт и логика кабинета
-    41 /s/token — заглушки :active, t41, 0, 3ms
+    41 /s/token — заглушки :active, t41, after tnow, 3ms
     42 Токен подписки :crit, t42, after t41 t29, 4ms
     16 /me — логика :t16, after t42 t38 t65 t77b t77c t51, 5ms
     17 Удаление аккаунта :t17, after t16 t29 t78, 2ms
@@ -168,19 +204,20 @@ gantt
     44 Состав серверов :t44, after t43 t30, 3ms
     45 Два домена подписки :t45, after t42 t16 t65 t66, 2ms
   section Этап 7 — администрирование, RBAC, аудит, поддержка
+    46 Admin auth, RBAC — заглушки :done, t46, after t12 t09, 3ms
     47 TOTP, сессии админов :t47, after t51, 5ms
-    49 API панели — заглушки :active, t49, 0, 3ms
+    49 API панели — заглушки :active, t49, after tnow, 3ms
     48 RBAC, Audit Log :crit, t48, after t47 t42 t49, 5ms
     50 API панели — пользователи :t50, after t48 t49 t51 t30b t77b t20 t16, 5ms
     85 API панели — ноды, дашборд :crit, t85, after t49 t48 t30 t68, 4ms
     89 Учётные записи админов :t89, after t47 t48 t49, 4ms
   section Этап 8 — уведомления и почта
-    51 События, почта — заглушки :active, t51, 0, 2ms
+    51 События, почта — заглушки :active, t51, after tnow, 2ms
     52 Уведомления :t52, after t51 t65, 3ms
     78 Доставка почты :t78, after t52 t65 t49, 3ms
     79 Доставка webhook :t79, after t52, 3ms
   section Этап 9 — Node Agent (Go)
-    53 Agent — каркас :active, t53, 0, 4ms
+    53 Agent — каркас :active, t53, after tnow, 4ms
     54 Agent — enrollment :t54, after t53 t66d, 4ms
     55 Agent — long-poll :t55, after t54 t29 t75b t75c, 4ms
     56 Agent — счётчики, отчёты :t56, after t53 t54 t77b t77c, 4ms
@@ -194,13 +231,13 @@ gantt
     82 Agent — route_block :t82, after t60 t58 t88, 2ms
     86 Agent — nftables :t86, after t58 t27, 4ms
   section Этап 10 — интерфейсы web
-    62 Web — каркасы :active, t62, 0, 4ms
-    65 Серверная локализация :active, t65, 0, 2ms
+    62 Web — каркасы :active, t62, after tnow, 4ms
+    65 Серверная локализация :active, t65, after tnow, 2ms
     65b Web-локализация :t65b, after t62 t65, 2ms
     63 Web — кабинет :t63, after t62 t16 t69 t65b t20, 4ms
     64 Web — панель :crit, t64, after t50 t62 t85 t61 t65b t87 t89, 4ms
   section Этап 11 — эксплуатация
-    66 Compose prod, секреты :active, t66, 0, 3ms
+    66 Compose prod, секреты :active, t66, after tnow, 3ms
     66b Публичный server nginx :t66b, after t66 t75b t62, 3ms
     66c Отказ отозванному листу :t66c, after t66, 2ms
     66e DNS, домен писем :t66e, after t66, 1ms

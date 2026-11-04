@@ -5,8 +5,9 @@
 ``Зависимости:`` задают рёбра графа, строки ``Статус:`` — состояние. Скрипт собирает из них блок
 между маркерами ``<!-- generated:plan-status start -->`` и ``<!-- generated:plan-status end -->``
 (таблица прогресса по этапам, задачи, готовые к началу, критический путь, диаграмма Mermaid)
-и отмечает пункты чек-листа RTM, все задачи которых приняты. Критический путь и диаграмма считают
-только оставшуюся работу: принятая задача весит 0 ч и на диаграмме не рисуется.
+и отмечает пункты чек-листа RTM, все задачи которых приняты. Критический путь считает только
+оставшуюся работу: принятая задача весит 0 ч. Диаграмма показывает обе части: принятые задачи — до
+отметки «сейчас», оставшуюся работу — после неё.
 
 Словарь статусов (строка ``  - Статус:`` в записи задачи):
 
@@ -49,12 +50,14 @@ KINDS = {
     "STUB CREATION": "заглушки",
     "LOGIC IMPLEMENTATION": "логика",
 }
-# Диаграмма Ганта без календаря: единица оси — час оценки оставшейся работы, задача стартует после
-# всех своих непринятых зависимостей (``after``). Mermaid gantt умеет только даты, поэтому час
-# оценки кодируется миллисекундой от эпохи (``dateFormat x``, длительность ``Nms``), а ось
-# подписана ``%-L`` — миллисекундами, то есть часами от текущего состояния. Подпись справа от
-# полосы, если правый отступ не меньше ширины подписи плюс половины левого — иначе mermaid
-# переносит её влево.
+# Диаграмма Ганта без календаря: единица оси — час оценки. Принятая задача стартует после своих
+# принятых зависимостей, отметка «сейчас» — в конце самой длинной цепочки принятых; непринятая
+# задача стартует после отметки и всех своих непринятых зависимостей (``after``), поэтому
+# красная цепочка оставшегося пути заканчивается правее всех. Mermaid gantt умеет только даты,
+# поэтому час оценки кодируется миллисекундой от эпохи (``dateFormat x``, длительность ``Nms``),
+# а ось подписана ``%-L`` — миллисекундами, то есть часами от старта. Подпись справа от полосы,
+# если правый отступ не меньше ширины подписи плюс половины левого — иначе mermaid переносит её
+# влево.
 GANTT_INIT = {
     "theme": "base",
     "themeVariables": {
@@ -65,6 +68,8 @@ GANTT_INIT = {
         "taskTextOutsideColor": "#212121",
         "taskTextDarkColor": "#212121",
         "taskTextLightColor": "#212121",
+        "doneTaskBkgColor": "#c8e6c9",
+        "doneTaskBorderColor": "#2e7d32",
         "activeTaskBkgColor": "#fff3c4",
         "activeTaskBorderColor": "#f9a825",
         "critBkgColor": "#ffffff",
@@ -341,6 +346,22 @@ def critical_path(plan: Plan, target: str) -> tuple[int, list[str]]:
     return longest(target)
 
 
+def accepted_hours(plan: Plan) -> int:
+    """Положение отметки «сейчас»: самая длинная по оценке цепочка принятых задач (часы)."""
+    accepted = plan.accepted
+    memo: dict[str, int] = {}
+
+    def finish(tid: str) -> int:
+        if tid not in memo:
+            task = plan.tasks[tid]
+            memo[tid] = task.estimate + max(
+                (finish(d) for d in task.deps if d in accepted), default=0
+            )
+        return memo[tid]
+
+    return max((finish(t) for t in accepted), default=0)
+
+
 def render(plan: Plan) -> str:
     tasks = plan.tasks
     accepted = plan.accepted
@@ -408,43 +429,53 @@ def render(plan: Plan) -> str:
         )
     else:
         lines.append(f"Критический путь до задачи {final}: вся работа принята.")
-    remaining = [t for t in plan.order if t not in accepted]
-    if not remaining:
-        lines += ["", END]
-        return "\n".join(lines)
+    now = accepted_hours(plan)
     lines += [
         "",
         wrap(
-            "Диаграмма — Гант оставшейся работы без календаря: горизонталь — часы оценки от "
-            "текущего состояния, принятые задачи не показаны, полоса задачи начинается после всех "
-            "её непринятых зависимостей и длится её оценку; секции — этапы. Заливка — состояние "
-            "(жёлтая — готова к началу или в работе, белая — ждёт зависимостей), красная рамка — "
-            "критический путь. Полные названия — в разделе «Последовательность выполнения задач»."
+            "Диаграмма — Гант без календаря: горизонталь — часы оценки от старта, секции — этапы. "
+            "Слева от отметки «сейчас» — принятые задачи (зелёные): полоса начинается после "
+            "принятых зависимостей и длится оценку, отметка стоит в конце самой длинной цепочки "
+            "принятых. Справа — оставшаяся работа: полоса начинается после отметки и всех "
+            "непринятых зависимостей; заливка — состояние (жёлтая — готова к началу или в работе, "
+            "белая — ждёт зависимостей), красная рамка — критический путь оставшейся работы. "
+            "Полные названия — в разделе «Последовательность выполнения задач»."
         ),
         "",
         "```mermaid",
         "%%{init: " + json.dumps(GANTT_INIT, ensure_ascii=False, indent=2) + "}%%",
         "gantt",
-        "  title Оставшаяся работа по графу зависимостей — часы оценки, не календарь",
+        "  title Порядок задач по графу зависимостей — часы оценки, не календарь",
         "  dateFormat x",
         "  todayMarker off",
     ]
+    if accepted:
+        lines += [
+            "  section Состояние",
+            f"    Сейчас — {now} ч, принято {len(accepted)} из {len(tasks)} "
+            f":milestone, tnow, {now}, 0ms",
+        ]
     for stage in sorted(plan.stages):
-        in_stage = [t for t in remaining if tasks[t].stage == stage]
-        if not in_stage:
-            continue
         lines.append(f"  section {plan.stages[stage]}")
-        for t in in_stage:
+        for t in plan.order:
             task = tasks[t]
+            if task.stage != stage:
+                continue
             label = LABELS.get(task.nn) or task.title[:24] + "…"
             label = label.replace(":", " —")
             state = plan.state(task)
-            tags = ["active"] if state != "ждёт" else []
-            if t in cp:
-                tags.append("crit")
+            if t in accepted:
+                tags = ["done"]
+                waits = [d for d in task.deps if d in accepted]
+                first = "0"
+            else:
+                tags = ["active"] if state != "ждёт" else []
+                if t in cp:
+                    tags.append("crit")
+                waits = [d for d in task.deps if d not in accepted]
+                first = "after tnow" if accepted else "0"
             suffix = " · в работе" if state == "в работе" else ""
-            waits = [d for d in task.deps if d not in accepted]
-            start = f"after {' '.join('t' + tasks[d].nn for d in waits)}" if waits else "0"
+            start = f"after {' '.join('t' + tasks[d].nn for d in waits)}" if waits else first
             meta = ", ".join([*tags, f"t{task.nn}", start, f"{task.estimate}ms"])
             lines.append(f"    {task.nn} {label}{suffix} :{meta}")
     lines += ["```", "", END]
