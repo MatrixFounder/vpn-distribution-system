@@ -49,7 +49,7 @@
 
 - `issue`: 32 случайных байта, base64url; запись `token_hash` (поиск) и `token_enc` (показ в кабинете, поддержке и письме); `resolve` ищет по `token_hash`
 - `ensure_token(user_id, conn=None) -> str` (сигнатура заглушки 001.41): выпуск при первой активации, идемпотентно (частичный UNIQUE `subscription_tokens_active_user_idx` не даёт второго действующего токена); возвращает действующий токен — прежний (расшифровка `token_enc`) или выпущенный; вызывается в транзакции `SubscriptionService.activate` и из `GET /me/subscription` (001.16), если действующего токена нет
-- `reissue(user_id, ctx)` — единственное место перевыпуска: в одной транзакции `revoked_at` прежнего, новый токен, `CompositionService.rotate_user_credentials(conn, user_id)` (001.29) и `audit.record` на подключении этой транзакции (событие «Перевыпуск subscription-токена» таблицы 001.48): `ctx` — `AuditContext` сессии пользователя (001.46), `actor_type = user`, `ip` и `user_agent` не заполняются, значения токенов в `old_value` и `new_value` не пишутся; параметр `ctx` к сигнатуре заглушки 001.41 добавляет эта задача
+- `reissue(user_id, ctx)` — единственное место перевыпуска: в одной транзакции `revoked_at` прежнего, новый токен, `CompositionService.rotate_user_credentials(conn, user_id)` (001.29d) и `audit.record` на подключении этой транзакции (событие «Перевыпуск subscription-токена» таблицы 001.48): `ctx` — `AuditContext` сессии пользователя (001.46), `actor_type = user`, `ip` и `user_agent` не заполняются, значения токенов в `old_value` и `new_value` не пишутся; параметр `ctx` к сигнатуре заглушки 001.41 добавляет эта задача
 
 #### Файл: `control-plane/app/accounting/stats.py`
 
@@ -74,8 +74,8 @@
 Соответствие `User-Agent → формат` — в `settings`; домены подписки — окружение
 `SUBSCRIPTION_DOMAINS` (`Settings.subscription_domains`, как в 001.15): панель показывает их только
 для чтения, замена домена — процедура развёртывания (решение заказчика 2026-10-25, В-27).
-Ротация credentials — `CompositionService.rotate_user_credentials` (001.29, зависимость 001.42 →
-001.29); имя `rotate_credentials` занято командой ротации identity ноды (001.31). Запись журнала
+Ротация credentials — `CompositionService.rotate_user_credentials` (001.29d, зависимость 001.42 →
+001.29d); имя `rotate_credentials` занято командой ротации identity ноды (001.31). Запись журнала
 перевыпуска — `audit.record` и `AuditContext` (001.46, зависимость 001.42 → 001.46); контекст
 передаёт маршрут кабинета (001.16); строку `audit_log` проверяет эта задача (001.48). Страница
 подписки — 001.45.
@@ -156,5 +156,5 @@
 
 `tdd-strict` для `tokens.py`.
 
-Зависимости: 001.14, 001.22, 001.41, 001.84, 001.29, 001.46. Приоритет: Critical. Оценка: 4 ч. Этап:
+Зависимости: 001.14, 001.22, 001.41, 001.84, 001.29d, 001.46. Приоритет: Critical. Оценка: 4 ч. Этап:
 6 — subscription-эндпоинт и логика кабинета.

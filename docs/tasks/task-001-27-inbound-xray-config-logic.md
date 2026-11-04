@@ -45,7 +45,8 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 
 #### Файл: `control-plane/app/domain/xray_config.py`
 
-- полная сборка по профилям; `limitFallbackUpload`/`limitFallbackDownload` — объекты из `inbounds.params`; `config_version` увеличивается через `CompositionService.publish_config(conn, node_id)` (001.29) в транзакции изменения
+- полная сборка по профилям; `limitFallbackUpload`/`limitFallbackDownload` — объекты из `inbounds.params`; `config_version` увеличивается через `CompositionService.publish_config(conn, node_id)` (001.29c) в транзакции изменения
+- источник закрытого ключа при выдаче и при расчёте `config.checksum` (001.29c) — расшифровка `inbound_secrets.private_key_enc` inbound ноды вместо ключа заглушки, выводимого из `node_id` и профиля; смена ключевой пары выпускает новую версию конфигурации в той же транзакции — иначе контрольная сумма строки не сойдётся с выдачей (решение заказчика 2026-11-04, 001.29c)
 
 #### Файл: `control-plane/app/domain/composition.py`
 
@@ -65,12 +66,12 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 
 #### Файл: `control-plane/app/jobs/handlers/composition.py`
 
-- дополнить (обработчик заводит 001.29): `composition.rotate_node_credentials` вызывает `rotate_keypair(reason=compromise)` для всех inbound ноды в одной транзакции: одна версия конфигурации, одно событие на пользователя (В-41)
+- дополнить (обработчик заводит 001.29d): `composition.rotate_node_credentials` вызывает `rotate_keypair(reason=compromise)` для всех inbound ноды в одной транзакции: одна версия конфигурации, одно событие на пользователя (В-41)
 
 ### Интеграция компонентов
 
 Перевыпуск конфигурации → новая строка `node_config_versions` и `NOTIFY`/`PUBLISH` для long-poll
-(001.29). Доступность цели проверяет агент раз в час и при вводе ноды (`docs/idea.md` §4.7,
+(001.29c). Доступность цели проверяет агент раз в час и при вводе ноды (`docs/idea.md` §4.7,
 001.59) и присылает результат в теле метрик (раздел `targets`, контракт и приём — 001.30, который
 вызывает `record_target_check`). Статус ноды по `error_state` выбирает `StatusService` (001.30):
 нода в `provisioning` с inbound в ошибке становится `active` по §4.6, затем `degraded`. Inbound в
@@ -133,9 +134,10 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 
 Найдено при 001.26 (заглушки) — решения, которые эта задача учитывает:
 
-- хранение закрытого ключа REALITY в `node_config_versions` и колонка версии раздела `agent`
-  решаются в 001.29 (её блок «Найдено при 001.26»): 001.29 пишет `config_json` и предшествует
-  этой задаче, 001.36 и 001.40;
+- хранение закрытого ключа REALITY в `node_config_versions` решено заказчиком 2026-11-04
+  (001.29c): строка хранит документ без ключа, C-01 вставляет ключ при выдаче ноде из identity,
+  `config.checksum` — по документу с ключом; колонку версии раздела `agent` заводит 001.29c — она
+  предшествует этой задаче, 001.36 и 001.40;
 - колонка `inbounds.trusted_x_forwarded_for` — `inet[]` (миграция 060), а
   `sockopt.trustedXForwardedFor` Xray v26.10.31 — имена заголовков (`SocketConfig
   .TrustedXForwardedFor []string`; `X-Forwarded-For` принимается, только если в запросе есть
@@ -152,5 +154,5 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 - документ несёт `routing` (пустой набор правил) и первым outbound — `direct` (эталон 001.26):
   сборка обязана их сохранить — без `routing` ядро не принимает правил `RoutingService`.
 
-Зависимости: 001.26, 001.29, 001.51. Приоритет: Critical. Оценка: 4 ч. Этап: 4 — парк нод и Node
+Зависимости: 001.26, 001.29c, 001.29d, 001.51. Приоритет: Critical. Оценка: 4 ч. Этап: 4 — парк нод и Node
 API.

@@ -32,7 +32,7 @@
 
 - `delete_account(user_id, ctx)`, одна транзакция: `users.status = 'deleted'`; `email` = `deleted+{id}@invalid` (уникальная заглушка: колонка `NOT NULL UNIQUE`); `password_hash` — непроверяемая заглушка (`NOT NULL`); `timezone = 'UTC'`; `deleted_at = now()`; `subscription_tokens.revoked_at`
 - в той же транзакции — удаление строк пользователя по перечню §7.2: `email_tokens`, `auth_events`, `subscription_access_log`, `user_online_ips`, `held_online_ips`, `user_blocked_ips`; `email_deliveries` — по `events.user_id`, служебные письма (`event_id IS NULL`, 001.78) — по `email_token_id` токенов пользователя и по `recipient` = прежнему `users.email`, до удаления `email_tokens` и замены адреса заглушкой
-- отзыв credentials — в той же транзакции `CompositionService.remove_user(conn, user_id)` (001.29): постановка задачи `composition.publish_user`; её исполнитель переводит строки `node_user_state` всех нод в `removed` с пустым `blocked_ips`, `updated_seq` по правилу M-2 (data-model §4.4); прямой записи `node_user_state` здесь нет
+- отзыв credentials — в той же транзакции `CompositionService.remove_user(conn, user_id)` (001.29b): постановка задачи `composition.publish_user`; её исполнитель переводит строки `node_user_state` всех нод в `removed` с пустым `blocked_ips`, `updated_seq` по правилу M-2 (data-model §4.4); прямой записи `node_user_state` здесь нет
 - в той же транзакции — `audit.record` на её подключении (событие «Удаление пользователя» таблицы 001.48): `ctx` — `AuditContext` сессии пользователя (001.46), `actor_type = user`, `entity_id` — `user_id`; `ip` и `user_agent` не заполняются, адреса почты в `old_value` и `new_value` нет (security.md §7.2)
 - после коммита — `SessionStore.revoke_all`
 - `PII_TABLES` — перечень §7.2, включая `user_online_ips`, `held_online_ips` и `user_blocked_ips`
@@ -43,9 +43,9 @@
 
 ### Интеграция компонентов
 
-Отзыв credentials на нодах — через `CompositionService.remove_user` (001.29); ноды без связи
+Отзыв credentials на нодах — через `CompositionService.remove_user` (001.29b); ноды без связи
 получают изменение при первом обмене. Для `users.status = 'deleted'` `publish_user` публикует
-только `removed` (001.29), поэтому начисление, продление и истечение удалённому доступа не
+только `removed` (001.29b), поэтому начисление, продление и истечение удалённому доступа не
 возвращают. Операции панели над удалённым пользователем отвечают 409 (001.50). Служебные письма
 (`event_id IS NULL`, колонка `email_token_id`) появляются с миграцией 001.78 (зависимость 001.17
 → 001.78). Таблицу `held_online_ips` заводит 001.77 (зависимость через 001.16 → 001.77b →
@@ -95,5 +95,5 @@
 
 Ограничения и допущения — `docs/idea.md` §9; архитектура — `docs/ARCHITECTURE.md`.
 
-Зависимости: 001.16, 001.29, 001.78, 001.46. Приоритет: Medium. Оценка: 2 ч. Этап: 6 —
+Зависимости: 001.16, 001.29b, 001.78, 001.46. Приоритет: Medium. Оценка: 2 ч. Этап: 6 —
 subscription-эндпоинт и логика кабинета.
