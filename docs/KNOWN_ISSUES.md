@@ -85,7 +85,7 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 ## logic
 
 - **L-1** [Писатели истории: группа удалена между проверкой и вставкой — 500 вместо 404](issues/l-1-history-writers-fk-race.md) — severity `LOW`, status `open`, opened 2026-10-02
-- **L-2** [CSRF: не-ASCII символ в X-CSRF-Token — 500 вместо 403](issues/l-2-csrf-non-ascii-header-500.md) — severity `LOW`, status `open`, opened 2026-11-04
+- **L-2** [CSRF: не-ASCII символ в X-CSRF-Token — 500 вместо 403](issues/l-2-csrf-non-ascii-header-500.md) — severity `LOW`, status `fixed`, opened 2026-11-04, resolved 2026-11-04
 
 
 ## test-flake
