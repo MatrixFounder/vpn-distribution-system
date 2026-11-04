@@ -826,6 +826,12 @@ async def test_logout_requires_csrf_and_revokes_sessions(pg_dsn: str, redis_url:
                 assert missing.json()["error"]["code"] == "csrf_failed"
                 forged = await client.post(path, headers={"X-CSRF-Token": "x" * 43})
                 assert forged.status_code == 403, path
+                # байт вне ASCII: Starlette декодирует заголовок как latin-1 (L-2)
+                non_ascii = await client.post(
+                    path, headers={b"X-CSRF-Token": "tok\xe9n".encode("latin-1")}
+                )
+                assert non_ascii.status_code == 403, (path, non_ascii.text)
+                assert non_ascii.json()["error"]["code"] == "csrf_failed"
                 assert await store.get(sid) is not None, f"{path}: сессия цела после отказов CSRF"
                 assert await store.get(other_sid) is not None, f"{path}: чужая сессия цела"
 

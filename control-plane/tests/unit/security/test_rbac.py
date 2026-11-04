@@ -134,6 +134,14 @@ class _Session:
     csrf = "csrf-token"
 
 
+# Без маркера, с чужим и с байтом вне ASCII (Starlette декодирует его как latin-1; L-2).
+FORGED: tuple[dict[bytes, bytes], ...] = (
+    {},
+    {b"X-CSRF-Token": b"other-token"},
+    {b"X-CSRF-Token": "tok\xe9n".encode("latin-1")},
+)
+
+
 @pytest.mark.parametrize(
     ("role", "path", "status", "permission"),
     [
@@ -177,7 +185,7 @@ async def test_csrf_comes_before_the_permission_on_both_checks(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://t"
     ) as client:
-        for headers in ({}, {"X-CSRF-Token": "other-token"}):
+        for headers in FORGED:
             forged = await client.post(path, headers=headers)
             assert forged.status_code == 403, forged.text
             assert forged.json()["error"]["code"] == "csrf_failed"
@@ -189,7 +197,7 @@ async def test_csrf_comes_before_the_permission_on_both_checks(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://t"
     ) as client:
-        for headers in ({}, {"X-CSRF-Token": "other-token"}):
+        for headers in FORGED:
             forged = await client.post(path, headers=headers)
             assert forged.status_code == 403, forged.text
             assert forged.json()["error"]["code"] == "csrf_failed"

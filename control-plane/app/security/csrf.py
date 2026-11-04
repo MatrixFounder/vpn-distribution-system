@@ -47,9 +47,11 @@ async def require_csrf(request: Request) -> None:
 
 def check_csrf(request: Request, session: Session) -> None:
     """Изменяющий запрос несёт заголовок ``X-CSRF-Token``, равный токену уже прочитанной сессии
-    (проверка разрешения панели, 001.46: сессию второй раз из Redis не читает)."""
+    (проверка разрешения панели, 001.46: сессию второй раз из Redis не читает). Сравниваются
+    байты: Starlette декодирует заголовки как latin-1, а строку с не-ASCII символом
+    ``compare_digest`` не принимает — 500 вместо 403 (L-2)."""
     if request.method in SAFE_METHODS:
         return
     header = request.headers.get(CSRF_HEADER, "")
-    if not header or not hmac.compare_digest(header, session.csrf):
+    if not header or not hmac.compare_digest(header.encode("latin-1"), session.csrf.encode()):
         raise ApiError("csrf_failed", "нет или неверен заголовок X-CSRF-Token", status=403)
