@@ -161,6 +161,15 @@ async def _purge_lines(owner: asyncpg.Connection) -> None:
     )
 
 
+async def _purge_user_rows(owner: asyncpg.Connection) -> None:
+    """Строки пользователей стенда без внешнего ключа на ``users`` (заблокированные адреса,
+    001.29): удаление пользователя их не снимает."""
+    await owner.execute(
+        "delete from user_blocked_ips where user_id in (select id from users where email like $1)",
+        USER_EMAIL,
+    )
+
+
 async def insert_identity(
     conn: asyncpg.Connection,
     node_id: uuid.UUID,
@@ -225,6 +234,7 @@ async def reporting(
     try:
         await _purge_lines(owner)
         async with catalog(pg_dsn, migrate_env) as conn:
+            await _purge_user_rows(owner)
             await owner.execute("delete from users where email like $1", USER_EMAIL)
             try:
                 yield await _stand(
@@ -232,6 +242,7 @@ async def reporting(
                 )
             finally:
                 await _purge_lines(owner)
+        await _purge_user_rows(owner)
         await owner.execute("delete from users where email like $1", USER_EMAIL)
     finally:
         await owner.close()

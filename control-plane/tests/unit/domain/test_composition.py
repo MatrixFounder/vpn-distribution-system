@@ -1,32 +1,45 @@
-"""Потоки конфигурации и состава: правила, которые в заглушке настоящие (задача 001.28)."""
+"""Потоки конфигурации и состава: правила выдачи на раскладке фикстур без базы (задачи 001.28,
+001.29) и выделение номера изменения на живой базе (TC-UNIT-01 001.29)."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
-from unittest import mock
+from typing import Any
 
+import asyncpg
 import pytest
-from app.domain import composition
 from app.domain.composition import (
     REVOKING_STATES,
     STUB_CONFIG_CHECKSUM,
     STUB_CONFIG_DOCUMENT,
     STUB_GENERATION,
-    STUB_USER_ACTIVE,
-    STUB_USERS_SEQ,
     CompositionService,
+    NodeComposition,
+    RowsRead,
+    StoredRow,
     UserRow,
     config_checksum,
+    next_users_seq,
     stub_config,
-    stub_credentials,
-    stub_rows,
     xray_email,
 )
 from app.domain.nodes import stub_node
 from app.errors import ApiError
 from pydantic import ValidationError
+
+from tests._agent import (
+    LAYOUT,
+    LAYOUT_SEQ,
+    USER_ACTIVE,
+    RecordedComposition,
+    layout_credentials,
+)
+from tests.e2e._catalog import billing_group, catalog
+from tests.e2e._catalog import node as catalog_node
+from tests.e2e._reporting import wait_blocked_by
 
 # Обе ноды намеренно отличны от ``nodes.STUB_NODE_ID``: страж, у которого «произвольная нода»
 # побайтово равна фиксированной, не отличит выдачу по запрошенной ноде от выдачи по константе.
@@ -64,28 +77,20 @@ def test_xray_email_is_the_stable_tag_of_the_user() -> None:
     assert xray_email(user_id) == f"u{user_id}"
 
 
-def test_credentials_belong_to_the_pair_of_user_and_node() -> None:
-    """§11.3: credentials уникальны на пару «пользователь × нода» — это компенсирующий контроль
-    для недоверенной ноды. Значит: разные у разных пользователей, разные у одного пользователя
-    на разных нодах, и не равные идентификатору пользователя (иначе они предсказуемы)."""
-    first, second = uuid.uuid4(), uuid.uuid4()
-    left, right = stub_credentials(NODE, first), stub_credentials(NODE, second)
-    assert left.vless_uuid != right.vless_uuid
-    assert left.trojan_password != right.trojan_password
-    assert left.vless_uuid != first and right.vless_uuid != second
-    elsewhere = stub_credentials(OTHER_NODE, first)
-    assert elsewhere.vless_uuid != left.vless_uuid, "одна пара — одни credentials, другая — другие"
-
-
-def test_only_rows_that_grant_access_carry_credentials() -> None:
+async def test_only_rows_that_grant_access_carry_credentials() -> None:
     """Ключ нужен, чтобы добавить пользователя в inbound, — значит его несёт только строка,
     выдающая доступ (`active`). Снять доступ нода умеет по тегу, поэтому отзывные строки идут
     без ключей: иначе отфильтрованный поток `disabled`/`suspended` (§4.6 «Только отзывы») вёз бы
-    живые ключи пар на ноду, которую администратор отключил или провайдер приостановил."""
+    живые ключи пар на ноду, которую администратор отключил или провайдер приостановил. Запись
+    credentials у снятой пары в раскладке есть (`suspended_quota`) — в ответ она не идёт."""
     assert REVOKING_STATES == {"suspended_quota", "suspended_admin", "expired", "removed"}
-    rows = stub_rows(NODE)
+    answer = await RecordedComposition().state_for(
+        stub_node(node_id=NODE), 0, 0, STUB_GENERATION, False, 0
+    )
+    assert answer is not None
+    rows = answer.users.rows
     assert [row.updated_seq for row in rows] == [1, 2, 3, 4], "номера изменений возрастают"
-    assert max(row.updated_seq for row in rows) == STUB_USERS_SEQ, "курсор = последнее изменение"
+    assert max(row.updated_seq for row in rows) == LAYOUT_SEQ, "курсор = последнее изменение"
     assert len({row.user_id for row in rows}) == len(rows), "строки о разных пользователях"
     assert [row.state for row in rows if row.credentials is None] == ["suspended_quota", "removed"]
     for row in rows:
@@ -96,14 +101,13 @@ def test_only_rows_that_grant_access_carry_credentials() -> None:
 
 
 def test_the_newest_change_does_not_remove_access() -> None:
-    """Свойство фиксированных данных, без которого правило «курсор идёт по выборке до фильтра»
-    не проверяется ничем: в фильтрующем статусе курсор (4) и наибольший номер среди выданных
+    """Свойство раскладки, без которого правило «курсор идёт по выборке до фильтра» не
+    проверяется ничем: в фильтрующем статусе курсор (4) и наибольший номер среди выданных
     строк (3) обязаны расходиться."""
-    rows = stub_rows(NODE)
-    newest = max(rows, key=lambda row: row.updated_seq)
-    assert newest.state not in REVOKING_STATES
-    revoking = [row.updated_seq for row in rows if row.state in REVOKING_STATES]
-    assert revoking and max(revoking) < newest.updated_seq
+    _, newest_state, newest_seq, _ = max(LAYOUT, key=lambda row: row[2])
+    assert newest_state not in REVOKING_STATES and newest_seq == LAYOUT_SEQ
+    revoking = [seq for _, state, seq, _ in LAYOUT if state in REVOKING_STATES]
+    assert revoking and max(revoking) < newest_seq
 
 
 async def test_the_domain_refuses_an_unapproved_node_on_its_own() -> None:
@@ -130,56 +134,69 @@ async def test_the_domain_refuses_an_unapproved_node_on_its_own() -> None:
 async def test_the_saved_resync_flag_reaches_the_agent() -> None:
     """`resync_required` в ответе — сохранённый признак ноды (`nodes.resync_required` §4.2.3), а
     не производная от статуса: §5.2 требует показать его **при выходе** из фильтрующего статуса,
-    когда сам статус уже не фильтрует. Заглушка признак не хранит, поэтому добавляет к нему
-    «этот ответ отфильтрован», — но взведённый в карточке обязана отдать."""
-    flagged = stub_node().model_copy(update={"resync_required": True})
-    answer = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, False, 0)
+    когда сам статус уже не фильтрует. Урезанный вентилем ответ признак взводит."""
+    flagged = RecordedComposition(resync_required=True)
+    answer = await flagged.state_for(stub_node(), 0, 0, STUB_GENERATION, False, 0)
     assert answer is not None and answer.resync_required is True
-    clean = await CompositionService(None).state_for(stub_node(), 0, 0, STUB_GENERATION, False, 0)
+    clean = await RecordedComposition().state_for(stub_node(), 0, 0, STUB_GENERATION, False, 0)
     assert clean is not None and clean.resync_required is False, "у active своего признака нет"
     # Полный состав и есть выполненная пересинхронизация: объявить в нём «ты не синхронизирована»
     # значит послать ноду за снапшотом, который она только что получила. Условие остановки для
     # агента наблюдаемо (``users.full``), а свой статус он не знает.
-    done = await CompositionService(None).state_for(flagged, 0, 0, STUB_GENERATION, True, 0)
+    done = await flagged.state_for(stub_node(), 0, 0, STUB_GENERATION, True, 0)
     assert done is not None and done.users.full is True
     assert done.resync_required is False, "снапшот закрывает признак, а не подтверждает его"
-    filtered = await CompositionService(None).state_for(
+    disabled = RecordedComposition()
+    filtered = await disabled.state_for(
         stub_node(status="disabled"), 0, 0, STUB_GENERATION, True, 0
     )
     assert filtered is not None and filtered.users.full is False, "вентиль урезал — не полный"
     assert filtered.resync_required is True, "и признак остаётся: синхронизации не случилось"
+    assert disabled.resync_required is True, "признак взведён в хранилище ноды, не только в ответе"
+    assert [(row.updated_seq, row.state) for row in filtered.users.rows] == [
+        (2, "suspended_quota"),
+        (3, "removed"),
+    ], "урезанный «снапшот» читается дельтой и везёт удаление строкой"
+
+
+class TrailingRemoval(RecordedComposition):
+    """Раскладка, где самое свежее изменение (5) — удаление пары."""
+
+    async def _read(self, node_id: uuid.UUID, users_seq: int, rows: RowsRead) -> NodeComposition:
+        base = await super()._read(node_id, users_seq, rows)
+        removed = StoredRow(
+            user_id=uuid.UUID("00000000-0000-7000-8000-0000000000a5"),
+            state="removed",
+            quota_grant_bytes=0,
+            blocked_ips=[],
+            updated_seq=LAYOUT_SEQ + 1,
+            vless_uuid_enc=None,
+            trojan_password_enc=None,
+            credentials_version=None,
+        )
+        extra = [removed] if rows == "delta" else []
+        return NodeComposition(
+            users_seq=LAYOUT_SEQ + 1, resync_required=False, rows=[*base.rows, *extra]
+        )
 
 
 async def test_a_snapshot_cursor_is_the_current_change_not_the_newest_row_sent() -> None:
     """Если самое свежее изменение — удаление пары, оно в снапшот не попадает, а курсор обязан
     уйти за него: иначе номер удалённой пары придёт ноде ещё раз следующей же дельтой."""
-    node = stub_node()
-    rows = stub_rows(node.id)
-    rows.append(
-        UserRow(
-            user_id=uuid.UUID("00000000-0000-7000-8000-0000000000a5"),
-            state="removed",
-            xray_email=xray_email(uuid.UUID("00000000-0000-7000-8000-0000000000a5")),
-            quota_grant_bytes=0,
-            blocked_ips=[],
-            updated_seq=max(row.updated_seq for row in rows) + 1,
-        )
-    )
-    with mock.patch.object(composition, "stub_rows", return_value=rows):
-        answer = await CompositionService(None).state_for(node, 0, 0, STUB_GENERATION, True, 0)
+    answer = await TrailingRemoval().state_for(stub_node(), 0, 0, STUB_GENERATION, True, 0)
     assert answer is not None
     sent = [row.updated_seq for row in answer.users.rows]
-    assert max(sent) < answer.users.seq == max(row.updated_seq for row in rows)
+    assert max(sent) < answer.users.seq == LAYOUT_SEQ + 1
 
 
 async def test_the_answer_is_built_for_the_node_that_asked() -> None:
     """Состав и его ключи выдаются по запрошенной ноде, а не по фиксированной: credentials
     уникальны на пару «пользователь × нода» (§11.3), и подстановка константы в выдаче свела бы
     компенсирующий контроль на нет."""
-    first = await CompositionService(None).state_for(
+    first = await RecordedComposition().state_for(
         stub_node(node_id=NODE), 0, 0, STUB_GENERATION, False, 0
     )
-    second = await CompositionService(None).state_for(
+    second = await RecordedComposition().state_for(
         stub_node(node_id=OTHER_NODE), 0, 0, STUB_GENERATION, False, 0
     )
     assert first is not None and second is not None
@@ -196,19 +213,24 @@ async def test_the_answer_is_built_for_the_node_that_asked() -> None:
     assert keys, "в дельте есть строки, выдающие доступ"
     assert not others & set(keys), "у другой ноды — другие ключи для тех же пользователей"
     assert {user for user, _ in keys} == {user for user, _ in others}, "пользователи те же"
+    assert keys == [
+        (user_id, layout_credentials(NODE, user_id).vless_uuid)
+        for user_id, state, _, _ in LAYOUT
+        if state == "active"
+    ], "ключ — расшифрованный ключ своей пары"
 
 
 def test_the_row_model_refuses_keys_where_access_is_not_granted() -> None:
     """Инвариант «ключи ровно у выдающей доступ строки» держит модель, а не подбор фиксированных
     строк: в 001.29 строки соберёт JOIN, и джойн, вернувший ключ на приостановленную строку,
     молча отправил бы живые ключи на отключённую ноду."""
-    keys = stub_credentials(NODE, STUB_USER_ACTIVE)
+    keys = layout_credentials(NODE, USER_ACTIVE)
     for state in sorted(REVOKING_STATES):
         with pytest.raises(ValidationError):
             UserRow(
-                user_id=STUB_USER_ACTIVE,
+                user_id=USER_ACTIVE,
                 state=state,
-                xray_email=xray_email(STUB_USER_ACTIVE),
+                xray_email=xray_email(USER_ACTIVE),
                 quota_grant_bytes=0,
                 blocked_ips=[],
                 updated_seq=1,
@@ -216,11 +238,60 @@ def test_the_row_model_refuses_keys_where_access_is_not_granted() -> None:
             )
     with pytest.raises(ValidationError):
         UserRow(
-            user_id=STUB_USER_ACTIVE,
+            user_id=USER_ACTIVE,
             state="active",
-            xray_email=xray_email(STUB_USER_ACTIVE),
+            xray_email=xray_email(USER_ACTIVE),
             quota_grant_bytes=0,
             blocked_ips=[],
             updated_seq=1,
             credentials=None,
         )
+
+
+async def test_tc_unit_01_users_seq_is_issued_in_commit_order(pg_dsn: str) -> None:
+    """``next_users_seq``: номер выделяет ``UPDATE nodes … RETURNING`` под блокировкой строки
+    ноды, поэтому вторая транзакция ждёт коммита первой и номера идут в порядке коммитов
+    (data-model §4.2.3 «Выделение `updated_seq`»: номер последовательности выдаётся до коммита, и
+    агент, продвинув курсор, пропустил бы строку, закоммиченную позже меньшим номером)."""
+    async with catalog(pg_dsn) as conn:
+        node_id = await catalog_node(conn, await billing_group(conn, "u29"), 29)
+        first, second = await asyncpg.connect(pg_dsn), await asyncpg.connect(pg_dsn)
+        try:
+            earlier = first.transaction()
+            await earlier.start()
+            issued_first = await next_users_seq(first, node_id)
+            later = second.transaction()
+            await later.start()
+            waiting = asyncio.create_task(next_users_seq(second, node_id))
+            await wait_blocked_by(conn, first.get_server_pid())
+            await asyncio.sleep(0.2)  # коммит первой задержан: вторая обязана ждать его
+            assert not waiting.done(), "вторая транзакция получила номер до коммита первой"
+            await earlier.commit()
+            issued_second = await asyncio.wait_for(waiting, timeout=5)
+            await later.commit()
+        finally:
+            await first.close()
+            await second.close()
+        assert issued_second == issued_first + 1
+        assert issued_second == await conn.fetchval(
+            "select desired_users_seq from nodes where id = $1", node_id
+        )
+
+
+class _InsideTransaction:
+    """Подключение вызывающего, уже открывшего транзакцию; любое другое обращение валит тест."""
+
+    def is_in_transaction(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"обращение к подключению: {name}")
+
+
+async def test_the_executor_refuses_a_connection_inside_a_transaction() -> None:
+    """Исполнитель публикации работает на подключении вне транзакции: внутри чужой транзакции
+    транзакции нод стали бы точками сохранения, блокировка пользователя снялась бы до внешнего
+    коммита, и следующий запуск выбрал бы кандидатов без незакоммиченных строк. Отказ — до
+    любого обращения к базе."""
+    with pytest.raises(RuntimeError, match="вне транзакции"):
+        await CompositionService(None).publish_user_on(_InsideTransaction(), uuid.uuid4())

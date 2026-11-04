@@ -47,7 +47,15 @@ from app.jobs.handlers import HANDLERS
 from app.jobs.handlers.composition import PUBLISH_USER
 from app.main import create_app
 
-from tests._agent import FINGERPRINT, HEADERS, IDENTITY, node_as
+from tests._agent import (
+    FINGERPRINT,
+    HEADERS,
+    IDENTITY,
+    LAYOUT,
+    LAYOUT_SEQ,
+    node_as,
+    recorded_streams,
+)
 from tests._pki import STUB_CLIENT_CERT, STUB_CLIENT_CERT_PEM, STUB_CLIENT_FINGERPRINT, escaped
 
 AGENT_PATHS = {
@@ -65,7 +73,7 @@ BEHIND = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "gene
 CURRENT = {
     "config_version": composition.STUB_CONFIG_VERSION,
     "agent_section_version": composition.STUB_AGENT_VERSION,
-    "users_seq": composition.STUB_USERS_SEQ,
+    "users_seq": LAYOUT_SEQ,
     "generation": 1,
 }
 STUB_AGENT_BODY = composition.STUB_AGENT.model_dump(mode="json")
@@ -120,13 +128,17 @@ class NoDatabase:
 
 
 @asynccontextmanager
-async def agent(status: NodeStatus = "active") -> AsyncIterator[httpx.AsyncClient]:
+async def agent(
+    status: NodeStatus = "active", resync_required: bool = False
+) -> AsyncIterator[httpx.AsyncClient]:
     """Клиент раздела `/agent/v1` без базы. Нода запроса — фиксированная карточка в статусе
     `status` (вентиль §4.6 надо проверить на всех восьми), признаки и версия разбираются настоящим
-    кодом (`node_as`)."""
+    кодом (`node_as`); строки состава — раскладка фикстур (`tests/_agent.py`), вентиль, курсор и
+    расшифровка — боевые. Те же правила на строках живой базы — `tests/e2e/test_composition.py`."""
     app = create_app()
     app.dependency_overrides[db_pool] = NoDatabase
     app.dependency_overrides[current_node] = node_as(status)
+    app.dependency_overrides[get_composition_service] = recorded_streams(resync_required)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
         yield client
@@ -345,7 +357,7 @@ async def test_state_answers_the_agent_and_needs_its_version() -> None:
         assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
         assert body["config"]["checksum"] == composition.STUB_CONFIG_CHECKSUM
         assert body["agent"] == STUB_AGENT_BODY
-        assert body["users"]["seq"] == composition.STUB_USERS_SEQ
+        assert body["users"]["seq"] == LAYOUT_SEQ
         assert body["users"]["full"] is False, "дельта не полна: удалять по ней нельзя"
         assert rows_of(body) == [
             (1, "active"),
@@ -530,7 +542,7 @@ async def test_status_gate_decides_what_the_node_receives(status: NodeStatus, fo
             # Удаление обязано ехать строкой и в снапшоте: отсутствие значит «удали» только в
             # ответе, объявившем себя полным, а этот полным не является.
             assert rows_of(body) == [(2, "suspended_quota"), (3, "removed")]
-            assert body["users"]["seq"] == composition.STUB_USERS_SEQ, (
+            assert body["users"]["seq"] == LAYOUT_SEQ, (
                 "курсор идёт по выборке до фильтра по статусу, а не по выданным строкам: иначе "
                 "нода застревала бы всякий раз, когда самое свежее изменение вентиль скрыл"
             )
@@ -542,7 +554,7 @@ async def test_status_gate_decides_what_the_node_receives(status: NodeStatus, fo
                 else [(1, "active"), (2, "suspended_quota"), (3, "removed"), (4, "active")]
             )
             assert rows_of(body) == expected
-            assert body["users"]["seq"] == composition.STUB_USERS_SEQ
+            assert body["users"]["seq"] == LAYOUT_SEQ
         assert body["users"]["full"] is (form == "snapshot" and gate.composition == "all")
         assert body["resync_required"] is gate.filters_composition
         assert bool(body["commands"]) is gate.commands
@@ -571,11 +583,11 @@ async def test_snapshot_and_delta_differ_the_way_the_agent_expects() -> None:
         assert snapshot.status_code == 200, snapshot.text
         body = snapshot.json()
         assert rows_of(body) == [(1, "active"), (2, "suspended_quota"), (4, "active")]
-        assert body["users"]["seq"] == composition.STUB_USERS_SEQ
+        assert body["users"]["seq"] == LAYOUT_SEQ
         assert body["users"]["full"] is True
-        assert composition.STUB_USERS_SEQ == max(
-            row.updated_seq for row in composition.stub_rows(stub_node().id)
-        ), "курсор снапшота — текущий номер изменения, включая строки, в снапшот не попавшие"
+        assert LAYOUT_SEQ == max(seq for _, _, seq, _ in LAYOUT), (
+            "курсор снапшота — текущий номер изменения, включая строки, в снапшот не попавшие"
+        )
 
         nothing = await client.get("/agent/v1/state", params=CURRENT, headers=HEADERS)
         assert nothing.status_code == 204 and nothing.content == b""
@@ -654,7 +666,7 @@ async def test_a_cursor_ahead_of_the_server_is_refused_not_answered_with_204() -
     синхронизированной."""
     async with agent() as client:
         for params in (
-            {**CURRENT, "users_seq": composition.STUB_USERS_SEQ + 1},
+            {**CURRENT, "users_seq": LAYOUT_SEQ + 1},
             {**CURRENT, "config_version": composition.STUB_CONFIG_VERSION + 1},
             {**CURRENT, "users_seq": 2**63 - 1},
             {**CURRENT, "config_version": 2**31 - 1},
@@ -682,7 +694,7 @@ async def test_a_snapshot_is_the_way_out_of_being_ahead(cursor: str) -> None:
         assert snapshot.status_code == 200, snapshot.text
         body = snapshot.json()
         assert body["users"]["full"] is True
-        assert body["users"]["seq"] == composition.STUB_USERS_SEQ, "курсор ставит сервер"
+        assert body["users"]["seq"] == LAYOUT_SEQ, "курсор ставит сервер"
         assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
         assert body["agent"] == STUB_AGENT_BODY, (
             "снапшот отдаёт раздел целиком, и нода принимает его версию, даже если она меньше "
@@ -694,20 +706,7 @@ async def test_a_node_that_owes_a_resync_is_told_so_even_on_current_cursors() ->
     """§5.2: признак нода получает **при выходе** из фильтрующего статуса — то есть уже на
     текущих курсорах. Молчаливый 204 съел бы поручение ровно там, где оно нужно, и строки,
     скрытые вентилем, не пришли бы никогда."""
-    app = create_app()
-    app.dependency_overrides[db_pool] = NoDatabase
-
-    async def owing() -> CurrentNode:
-        return CurrentNode(
-            node=stub_node().model_copy(update={"resync_required": True}),
-            fingerprint=FINGERPRINT,
-            identity_token=IDENTITY,
-            agent_version="0.1.0",
-        )
-
-    app.dependency_overrides[current_node] = owing
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
+    async with agent(resync_required=True) as client:
         response = await client.get("/agent/v1/state", params=CURRENT, headers=HEADERS)
     assert response.status_code == 200, "204 здесь потерял бы поручение о пересинхронизации"
     assert response.json()["resync_required"] is True
@@ -727,13 +726,11 @@ async def test_an_empty_selection_leaves_the_cursor_where_the_node_put_it() -> N
             await client.get("/agent/v1/state", params=behind_on_config, headers=HEADERS)
         ).json()
         assert answer["config"] is not None and answer["users"]["rows"] == []
-        assert answer["users"]["seq"] == composition.STUB_USERS_SEQ, "курсор на месте"
+        assert answer["users"]["seq"] == LAYOUT_SEQ, "курсор на месте"
     async with agent("provisioning") as client:
         held = {**CURRENT, "config_version": 0}
         answer = (await client.get("/agent/v1/state", params=held, headers=HEADERS)).json()
-        assert answer["users"]["seq"] == composition.STUB_USERS_SEQ, (
-            "закрытый поток курсор не трогает"
-        )
+        assert answer["users"]["seq"] == LAYOUT_SEQ, "закрытый поток курсор не трогает"
 
 
 async def test_a_pending_node_does_not_even_get_its_heartbeat_recorded() -> None:
@@ -1012,6 +1009,7 @@ async def test_the_command_channel_is_the_one_from_the_dependency_graph() -> Non
     app.dependency_overrides[db_pool] = NoDatabase
     app.dependency_overrides[current_node] = as_other_node
     app.dependency_overrides[get_command_service] = lambda: commands
+    app.dependency_overrides[get_composition_service] = recorded_streams()
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://control-plane") as client:
         response = await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)

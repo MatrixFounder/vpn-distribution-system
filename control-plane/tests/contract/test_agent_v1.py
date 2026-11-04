@@ -22,6 +22,12 @@
 правило «нода отчитывается только за себя» — настоящее); что живой приём при том же предусловии
 отвечает ровно записанным — `tests/e2e/test_reports.py::test_the_recorded_report_answers_are_
 what_the_live_service_gives`.
+
+С 001.29 настоящий и поток состава: строки `node_user_state` и credentials читаются из базы. Здесь
+служба состава стоит на раскладке фикстур (`tests/_agent.py::RecordedComposition`: строки —
+раскладка, вентиль, курсор, фильтр и расшифровка — боевые); что живая служба на той же раскладке в
+базе отвечает ровно записанным — `tests/e2e/test_composition.py::test_the_recorded_state_answers_
+are_what_the_live_service_gives`.
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ from typing import Any, get_args
 import httpx
 import pytest
 from app.accounting.service import Accept, AccountingService, ReportIn, own_node
-from app.agent_api.deps import current_node, get_accounting_service
+from app.agent_api.deps import current_node, get_accounting_service, get_composition_service
 from app.agent_api.enroll import get_node_service
 from app.db.pool import db_pool
 from app.domain.nodes import STUB_NODE_ID, Enrollment, Node, NodeService, NodeStatus
@@ -49,7 +55,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from tests._agent import node_as
+from tests._agent import node_as, recorded_streams
 from tests._pki import STUB_CLIENT_CERT, STUB_CLIENT_CERT_PEM
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "agent_v1"
@@ -170,6 +176,7 @@ def agent_app(
     app.dependency_overrides[db_pool] = NoDatabase
     app.dependency_overrides[current_node] = node_as(node_status)
     app.dependency_overrides[get_node_service] = RecordedEnrollment
+    app.dependency_overrides[get_composition_service] = recorded_streams()
     if recorded is not None:
         app.dependency_overrides[get_accounting_service] = lambda: RecordedAccounting(recorded)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)

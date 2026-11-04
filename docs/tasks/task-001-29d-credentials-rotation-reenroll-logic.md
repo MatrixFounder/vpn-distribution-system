@@ -36,6 +36,8 @@
 
 - Изменение принятого кода (отступление от 001.25): `revoke_identity` в своей транзакции ставит задачу `composition.rotate_node_credentials` (отзыв по компрометации; 001.87 выносит тело отзыва в общий шаг `_revoke(conn, node_id, at, *, compromise)`: постановка — при `compromise=True`, вывод ноды без компрометации, UC-12 A2, задачу не ставит); `enroll` при обмене нового токена (§4.5 «Пересоздание») сбрасывает `applied_config_version`, `applied_users_seq`, `applied_at`, `missed_heartbeats`, `ok_heartbeats` — новый агент начинает с нуля, и правило «курсор ноды впереди сервера» (409) не срабатывает
 
+- сериализация с `publish_user` (001.29, роаст раунд 3): `rotate_node_credentials` и `rotate_user_credentials` пишут credentials пар и публикуют строки — либо под блокировкой пользователя (`PUBLISH_LOCK_CLASS`, до блокировки строки ноды, ключи по возрастанию), либо постановкой `composition.publish_user`; правило — в 001.29b. Семантика `version`: после снятия пары запись credentials удаляется, и повторная выдача начинает с `version` 1 (README контракта, «Ключи в потоке состава»: нода применяет ключи по значению); сохранить `version` монотонной на пару — решить здесь
+
 ### Интеграция компонентов
 
 `rotate_user_credentials` вызывают перевыпуск токена (`reissue` 001.42) и панель (001.50) с `conn`
@@ -60,7 +62,7 @@
 
 ### Регрессионные тесты
 
-- Команда: `cd control-plane && pytest tests/e2e/test_agent_api.py tests/e2e/test_nodes.py tests/unit/domain/test_composition.py`
+- Команда: `cd control-plane && pytest tests/e2e/test_composition.py tests/e2e/test_agent_api.py tests/e2e/test_nodes.py tests/unit/domain/test_composition.py`
 - Полный набор: `make test` — существующие тесты проходят.
 
 <!-- contract:acceptance -->

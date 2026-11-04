@@ -30,6 +30,7 @@
 - `remove_user(conn, user_id)`: в транзакции вызывающего постановка `composition.publish_user`; исполнитель для `users.status = 'deleted'` пишет только строки `removed` с `updated_seq` через `UPDATE nodes … RETURNING` (001.29)
 - `publish_node(node_id)` — исполнитель задачи `composition.publish_node` (очередь `critical`, ключ `publish_node:{node_id}:{xid}` по образцу `publish_user`; задачу ставит вызывающий в своей транзакции): состав ноды целиком — при первом переходе в `active` (001.30), при смене групп тарифа и групп доступа ноды (изменение записи ноды — 001.87)
 - Изменение принятого кода (отступление от сигнатуры заглушки 001.28): `remove_user` принимает `conn` вызывающего и работает в его транзакции
+- сериализация с `publish_user` (001.29, роаст раунд 3, R3-1): публикации одного пользователя идут под сессионной advisory-блокировкой (`PUBLISH_LOCK_CLASS`, ключ `hashtext(user_id)`), а `publish_node` пишет строки многих пользователей. Писатель строк пользователя обязан либо брать блокировки затронутых пользователей **до** блокировки строки ноды (ключи — по возрастанию), либо ставить `composition.publish_user` на каждого пользователя ноды. Иначе запуск публикации пользователя после смены тарифа выберет кандидатов без незакоммиченной строки `publish_node` и не снимет доступ; блокировка пользователя, взятая после блокировки ноды, даёт взаимную блокировку с `publish_user`. Решить здесь (до кода), какой из двух путей
 
 #### Файл: `control-plane/app/jobs/handlers/composition.py`
 
@@ -76,7 +77,7 @@
 
 ### Регрессионные тесты
 
-- Команда: `cd control-plane && pytest tests/e2e/test_agent_api.py tests/e2e/test_subscriptions.py tests/unit/domain/test_composition.py`
+- Команда: `cd control-plane && pytest tests/e2e/test_composition.py tests/e2e/test_agent_api.py tests/e2e/test_subscriptions.py tests/unit/domain/test_composition.py`
 - Полный набор: `make test` — существующие тесты проходят.
 
 <!-- contract:acceptance -->

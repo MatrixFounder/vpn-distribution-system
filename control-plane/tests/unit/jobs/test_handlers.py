@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import re
 import uuid
@@ -14,6 +15,7 @@ from typing import Any
 import pytest
 from app.jobs import scheduler
 from app.jobs.handlers import HANDLERS
+from app.jobs.handlers.composition import PUBLISH_USER, publish_user, user_of
 from app.jobs.handlers.limits import LIMITS_CHECK, check_limits
 from app.jobs.handlers.maintenance import (
     MAINTENANCE_TYPES,
@@ -95,3 +97,30 @@ def test_the_stub_types_stay_off_the_schedule_until_they_are_real() -> None:
     scheduled = {periodic.type for periodic in scheduler.SCHEDULE}
     assert not scheduled & (MAINTENANCE_TYPES | SUBSCRIPTION_TYPES | {LIMITS_CHECK}), scheduled
     assert "ensure_partitions" in scheduled
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"user_id": "не-uuid"},
+        {"user_id": None},
+        {"node_id": str(uuid.UUID(int=1))},
+        [],
+        ["user_id"],
+        "user_id",
+        5,
+    ],
+    ids=["empty", "not-a-uuid", "null", "wrong-key", "array", "array-of-key", "string", "number"],
+)
+async def test_a_publication_without_a_user_is_refused_without_retries(payload: Any) -> None:
+    """Полезная нагрузка `composition.publish_user` — `{"user_id": …}` (001.29). Негодная — ошибка
+    постановки, а не сбой среды: повтор её не исправит, задача сразу `failed`, к подключению
+    обработчик не обращается. Колонка `jobs.payload` объектом себя не ограничивает, поэтому
+    нагрузка — не объект (массив, строка, число) — тот же отказ, а не `TypeError` с повторами."""
+    broken = dataclasses.replace(job(PUBLISH_USER), payload=payload)
+    with pytest.raises(NonRetryableError, match=re.escape(f"{PUBLISH_USER}: нет user_id")):
+        await publish_user(NoConnection(), broken)
+    assert user_of(
+        dataclasses.replace(job(PUBLISH_USER), payload={"user_id": str(uuid.UUID(int=7))})
+    ) == uuid.UUID(int=7)

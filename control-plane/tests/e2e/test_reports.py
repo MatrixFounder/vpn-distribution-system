@@ -232,18 +232,10 @@ async def test_reports_and_quota_contract_in_openapi(app_client: httpx.AsyncClie
 
 
 async def test_a_quota_request_is_answered_with_the_stub_grant() -> None:
-    """Грант заглушки — тот же 1 ГиБ, что поток состава кладёт в `quota_grant_bytes`: две
-    заглушки одного правила R-26 берут одну константу домена (учёт зависит от домена, не
-    наоборот)."""
+    """Грант заглушки — 1 ГиБ, константа домена (учёт зависит от домена, не наоборот). Размер
+    гранта в строке состава пишет служба грантов (001.36); публикация состава (001.29) его не
+    трогает."""
     assert composition.STUB_QUOTA_GRANT_BYTES == 1073741824
-    granted = [
-        row.quota_grant_bytes
-        for row in composition.stub_rows(STUB_NODE_ID)
-        if row.state == "active"
-    ]
-    assert granted and set(granted) == {composition.STUB_QUOTA_GRANT_BYTES}, (
-        "поток состава берёт ту же константу"
-    )
     async with agent() as client:
         response = await client.post(QUOTA, json=VALID_QUOTA, headers=HEADERS)
         assert response.status_code == 200, response.text
