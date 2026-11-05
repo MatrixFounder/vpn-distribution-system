@@ -509,6 +509,20 @@ async def test_worker_loop_wakes_on_notify_and_survives_faults(
         assert row["locked_by"] is None and row["attempts"] == 1
 
 
+# Блокировку лидера зонд ищет в ``pg_locks``, а не захватывает: попытка захвата держала бы её
+# миг, и планировщик, попавший в этот миг, отступил бы на 5 с — столько же, сколько тест ждёт
+# (RF-1). Ключ bigint advisory-блокировки лежит в ``classid`` (старшие 32 бита) и ``objid``
+# (младшие), ``objsubid = 1``.
+_LEADER_HELD = (
+    "select exists (select 1 from pg_locks where locktype = 'advisory' and granted "
+    "and classid = $1 and objid = $2 and objsubid = 1)"
+)
+
+
+def _advisory_parts(key: int) -> tuple[int, int]:
+    return key >> 32, key & 0xFFFF_FFFF
+
+
 async def test_scheduler_leadership_lock(
     pg_dsn: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -525,9 +539,8 @@ async def test_scheduler_leadership_lock(
         probe = await asyncpg.connect(pg_dsn)
         try:
             for _ in range(50):
-                if not await probe.fetchval("select pg_try_advisory_lock($1)", TEST_LOCK_KEY):
+                if await probe.fetchval(_LEADER_HELD, *_advisory_parts(TEST_LOCK_KEY)):
                     break
-                await probe.execute("select pg_advisory_unlock($1)", TEST_LOCK_KEY)
                 await asyncio.sleep(0.1)
             else:
                 pytest.fail("планировщик не взял блокировку лидера")
