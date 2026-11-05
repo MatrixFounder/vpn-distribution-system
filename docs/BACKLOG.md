@@ -74,6 +74,7 @@ resolution.
 ## Discovered issues / work-items
 
 <!-- feedback:discovered-issues -->
+- **WI-38** [FieldCipher: привязать контейнеры AES-GCM к их записи связанными данными](backlog/wi-38-fieldcipher-aad-binding.md) — effort `S`, status `open`, opened 2026-11-05
 - **WI-34** [Оставленная заявка retro другой задачи — не вложенность](backlog/wi-34-stale-retro-claim-is-not-nesting.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 - **WI-33** [Два решателя, один вход: разбор, декодирование и сравнение — одинаковы на обоих слоях](backlog/wi-33-two-deciders-one-input.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 
