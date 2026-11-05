@@ -13,7 +13,7 @@ from typing import Any
 
 import asyncpg
 import httpx
-from app.domain.composition import xray_email
+from app.domain.composition import credentials_bound, xray_email
 from app.security.crypto import FieldCipher
 
 from tests._agent import LAYOUT, LAYOUT_SEQ, layout_credentials
@@ -44,8 +44,14 @@ async def seed_layout(conn: asyncpg.Connection, node_id: uuid.UUID, cipher: Fiel
                 user_id,
                 node_id,
                 xray_email(user_id),
-                cipher.encrypt(keys.vless_uuid.bytes),
-                cipher.encrypt(keys.trojan_password.encode()),
+                cipher.encrypt(
+                    keys.vless_uuid.bytes,
+                    bound=credentials_bound("vless_uuid_enc", user_id, node_id),
+                ),
+                cipher.encrypt(
+                    keys.trojan_password.encode(),
+                    bound=credentials_bound("trojan_password_enc", user_id, node_id),
+                ),
                 keys.version,
             )
     await conn.execute("update nodes set desired_users_seq = $2 where id = $1", node_id, LAYOUT_SEQ)

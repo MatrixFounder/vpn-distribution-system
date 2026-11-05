@@ -46,7 +46,7 @@ inbound, ротацию `short_ids` с окном перекрытия (Н-33), 
 #### Файл: `control-plane/app/domain/xray_config.py`
 
 - полная сборка по профилям; `limitFallbackUpload`/`limitFallbackDownload` — объекты из `inbounds.params`; `config_version` увеличивается через `CompositionService.publish_config(conn, node_id)` (001.29c) в транзакции изменения
-- источник закрытого ключа при выдаче и при расчёте `config.checksum` (001.29c) — расшифровка `inbound_secrets.private_key_enc` inbound ноды вместо ключа заглушки, выводимого из `node_id` и профиля; смена ключевой пары выпускает новую версию конфигурации в той же транзакции — иначе контрольная сумма строки не сойдётся с выдачей (решение заказчика 2026-11-04, 001.29c)
+- источник закрытого ключа при выдаче и при расчёте `config.checksum` (001.29c) — расшифровка `inbound_secrets.private_key_enc` inbound ноды (контейнер привязан к строке: `bound_to("inbound_secrets", "private_key_enc", inbound_id)`, WI-38) вместо ключа заглушки, выводимого из `node_id` и профиля; смена ключевой пары выпускает новую версию конфигурации в той же транзакции — иначе контрольная сумма строки не сойдётся с выдачей (решение заказчика 2026-11-04, 001.29c)
 
 #### Файл: `control-plane/app/domain/composition.py`
 

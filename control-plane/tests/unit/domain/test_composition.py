@@ -22,12 +22,15 @@ from app.domain.composition import (
     StoredRow,
     UserRow,
     config_checksum,
+    credentials_bound,
     next_users_seq,
     stub_config,
     xray_email,
 )
 from app.domain.nodes import stub_node
 from app.errors import ApiError
+from app.security.crypto import FieldCipher
+from cryptography.exceptions import InvalidTag
 from pydantic import ValidationError
 
 from tests._agent import (
@@ -295,3 +298,39 @@ async def test_the_executor_refuses_a_connection_inside_a_transaction() -> None:
     любого обращения к базе."""
     with pytest.raises(RuntimeError, match="вне транзакции"):
         await CompositionService(None).publish_user_on(_InsideTransaction(), uuid.uuid4())
+
+
+# Известный ответ (WI-38): контейнеры, снятые один раз фиксированным ключом для фиксированной
+# пары. Любое изменение привязки credentials (порядок частей, таблица, колонка) или состава
+# связанных данных их не откроет — иначе после развёртывания такого изменения каждая пара
+# выглядела бы подменённой, и ноды получили бы отзыв всех пользователей.
+KAT_KEY = bytes(range(32))
+KAT_USER = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
+KAT_NODE = uuid.UUID("00000000-0000-7000-8000-0000000000b1")
+KAT_VLESS = bytes.fromhex(
+    "01357f8d16ca5fd8ef6f40e53400d1bc70b6eb992ea077eea24e6191bc75b0e2a3e070103a1c41e082670088c3"
+)
+KAT_TROJAN = bytes.fromhex(
+    "01c203b0ad4ea90149261a95f5525f5654c35b05548b5d1067671592849edbb8dbbfc564bbb690b0595417ca3c"
+    "92eb3c8781"
+)
+
+
+def test_the_credentials_binding_is_pinned_by_a_known_answer() -> None:
+    """Привязка credentials пары — ровно таблица, колонка, пользователь, нода в этом порядке;
+    снятые контейнеры открываются ею, колонки не взаимозаменяемы."""
+    assert credentials_bound("vless_uuid_enc", KAT_USER, KAT_NODE) == (
+        b'["node_user_credentials","vless_uuid_enc",'
+        b'"00000000-0000-7000-8000-0000000000a1","00000000-0000-7000-8000-0000000000b1"]'
+    )
+    cipher = FieldCipher(KAT_KEY)
+    vless = cipher.decrypt(KAT_VLESS, bound=credentials_bound("vless_uuid_enc", KAT_USER, KAT_NODE))
+    assert vless == bytes(range(16))
+    trojan = cipher.decrypt(
+        KAT_TROJAN, bound=credentials_bound("trojan_password_enc", KAT_USER, KAT_NODE)
+    )
+    assert trojan == b"known-trojan-password"
+    with pytest.raises(InvalidTag):
+        cipher.decrypt(
+            KAT_VLESS, bound=credentials_bound("trojan_password_enc", KAT_USER, KAT_NODE)
+        )

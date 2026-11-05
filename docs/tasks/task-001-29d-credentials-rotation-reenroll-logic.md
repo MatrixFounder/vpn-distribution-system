@@ -25,7 +25,7 @@
 
 #### Файл: `control-plane/app/domain/composition.py`
 
-- `rotate_user_credentials(conn, user_id)`: в транзакции вызывающего новые `vless_uuid_enc`/`trojan_password_enc` и `version + 1` в `node_user_credentials` на всех нодах пользователя и постановка `composition.publish_user` (AC-35); имя `rotate_credentials` занято командой ротации identity ноды (001.31)
+- `rotate_user_credentials(conn, user_id)`: в транзакции вызывающего новые `vless_uuid_enc`/`trojan_password_enc` (контейнеры с привязкой пары `credentials_bound`, шифр — `checked_cipher()`, его можно брать и в транзакции: WI-38, соглашение `_enc` data-model §4) и `version + 1` в `node_user_credentials` на всех нодах пользователя и постановка `composition.publish_user` (AC-35); имя `rotate_credentials` занято командой ротации identity ноды (001.31)
 - `rotate_node_credentials(node_id)`: ротация credentials всех пользователей ноды после отзыва её identity по компрометации (UC-12 шаги 3–4; Н-32 — не позднее 4 ч, до 1 000 записей на ноду), задача очереди `critical` с ключом идемпотентности `rotate_node_credentials:{node_id}:{xid}` — по ноде и транзакции отзыва (`interfaces.md` §5.4)
 
 #### Файл: `control-plane/app/jobs/handlers/composition.py`

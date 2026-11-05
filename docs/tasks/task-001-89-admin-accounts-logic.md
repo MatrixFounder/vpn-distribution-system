@@ -53,7 +53,8 @@ Admin (`admin create`) и сброс второго фактора команд�
   `confirm_totp(admin_id, code, sid, ctx)` — новый секрет через `Totp.provision` и подтверждение
   кодом нового секрета, механизм включения второго фактора при первом входе (001.47). До
   подтверждения действует прежний секрет: новый хранится в Redis под ключом
-  `admin:totp_pending:{admin_id}` шифротекстом FieldCipher (как `totp_secret_enc`) с TTL 12 ч — TTL
+  `admin:totp_pending:{admin_id}` шифротекстом FieldCipher (как `totp_secret_enc`; привязка WI-38 —
+  `bound_to("redis", "admin:totp_pending", admin_id)`) с TTL 12 ч — TTL
   бездействия сессии администратора (Н-27); `admin_users.totp_secret_enc` до подтверждения не
   меняется; повторный `reissue_totp` перезаписывает ключ; ключа нет (срок истёк или перевыпуск не
   начат) — 409 `totp_not_pending`. После подтверждения — секрет из ключа записывается в

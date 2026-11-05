@@ -55,6 +55,18 @@ def app_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
             Path(path).unlink(missing_ok=True)
 
 
+@pytest.fixture(autouse=True)
+def checked_field_cipher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Шифр процесса — уже сверенный (WI-38). Тестовая сессия шифрует своим случайным ключом, а
+    база стенда общая: сверка с контрольным контейнером ``settings.field_cipher_check`` записала бы
+    его чужим ключом, и живой api стенда перестал бы работать с шифром. Саму сверку проверяют тесты
+    `unit/security/test_crypto.py` на своих именах ключа."""
+    from app.config import Settings
+    from app.security import crypto
+
+    monkeypatch.setattr(crypto, "_checked", crypto.FieldCipher.from_settings(Settings.load()))
+
+
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
     """DSN PostgreSQL стенда разработки под ролью `app_rw` (роли создаёт bootstrap 001.03)."""

@@ -32,6 +32,7 @@ from app.domain.composition import (
     RowsRead,
     StoredRow,
     UserState,
+    credentials_bound,
 )
 from app.domain.nodes import STUB_NODE_ID, NodeStatus, stub_node
 from app.security.crypto import FieldCipher
@@ -120,9 +121,21 @@ def layout_rows(node_id: uuid.UUID, cipher: FieldCipher) -> list[StoredRow]:
                 quota_grant_bytes=STUB_QUOTA_GRANT_BYTES if state == "active" else 0,
                 blocked_ips=[ipaddress.ip_address(ip) for ip in blocked],
                 updated_seq=seq,
-                vless_uuid_enc=None if keys is None else cipher.encrypt(keys.vless_uuid.bytes),
+                vless_uuid_enc=(
+                    None
+                    if keys is None
+                    else cipher.encrypt(
+                        keys.vless_uuid.bytes,
+                        bound=credentials_bound("vless_uuid_enc", user_id, node_id),
+                    )
+                ),
                 trojan_password_enc=(
-                    None if keys is None else cipher.encrypt(keys.trojan_password.encode())
+                    None
+                    if keys is None
+                    else cipher.encrypt(
+                        keys.trojan_password.encode(),
+                        bound=credentials_bound("trojan_password_enc", user_id, node_id),
+                    )
                 ),
                 credentials_version=None if keys is None else keys.version,
             )

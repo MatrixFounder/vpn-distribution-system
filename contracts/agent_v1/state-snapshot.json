@@ -1,6 +1,6 @@
 {
   "operation": "state",
-  "summary": "Полный снапшот: конфигурация и все строки состава, кроме removed",
+  "summary": "Полный снапшот: конфигурация и все строки состава, кроме removed; пара с непригодными credentials — строкой removed",
   "given": {
     "node_status": "active"
   },

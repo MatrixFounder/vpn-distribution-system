@@ -27,14 +27,15 @@ from app.agent_api.deps import get_composition_service
 from app.config import Settings
 from app.db.pool import get_pool
 from app.domain import composition as composition_module
-from app.domain.composition import CompositionService, next_users_seq
+from app.domain.composition import CompositionService, credentials_bound, next_users_seq
 from app.domain.nodes import STUB_NODE_ID, NodeStatus, stub_node
 from app.domain.statuses import STREAM_GATE
 from app.jobs.handlers import HANDLERS
 from app.jobs.handlers.composition import PUBLISH_USER
 from app.jobs.queue import Job
 from app.redis import get_redis
-from app.security.crypto import FieldCipher
+from app.security import crypto as crypto_module
+from app.security.crypto import Binding, CipherMismatch, FieldCipher
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
@@ -246,11 +247,13 @@ class FailsOnSecondNodeWrite(CompositionService):
         super().__init__(pool)
         self.visited: list[uuid.UUID] = []
 
-    async def _publish_pair(self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID) -> int | None:
+    async def _publish_pair(
+        self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID, cipher: FieldCipher | None
+    ) -> int | None:
         self.visited.append(node_id)
         if len(self.visited) == 2:
             raise asyncpg.exceptions.LockNotAvailableError("сбой записи второй ноды")
-        return await super()._publish_pair(conn, user_id, node_id)
+        return await super()._publish_pair(conn, user_id, node_id, cipher)
 
 
 async def test_tc_e2e_05_a_failure_midway_repeats_the_whole_publication(
@@ -354,9 +357,9 @@ class SpyCipher(FieldCipher):
         self.__dict__.update(inner.__dict__)
         self.opened: list[bytes] = []
 
-    def decrypt(self, b: bytes) -> bytes:
+    def decrypt(self, b: bytes, *, bound: Binding) -> bytes:
         self.opened.append(b)
-        return super().decrypt(b)
+        return super().decrypt(b, bound=bound)
 
 
 async def test_tc_e2e_07_only_the_requesting_node_credentials_are_decrypted(
@@ -397,10 +400,20 @@ async def test_tc_e2e_07_only_the_requesting_node_credentials_are_decrypted(
         assert own is not None and foreign is not None
         assert sorted(spy.opened) == sorted([own[0], own[1]])
         assert rows[0]["credentials"]["vless_uuid"] == str(
-            uuid.UUID(bytes=spy.decrypt(own["vless_uuid_enc"]))
+            uuid.UUID(
+                bytes=spy.decrypt(
+                    own["vless_uuid_enc"],
+                    bound=credentials_bound("vless_uuid_enc", user_id, stand.node_id),
+                )
+            )
         )
         assert rows[0]["credentials"]["vless_uuid"] != str(
-            uuid.UUID(bytes=spy.decrypt(foreign["vless_uuid_enc"]))
+            uuid.UUID(
+                bytes=spy.decrypt(
+                    foreign["vless_uuid_enc"],
+                    bound=credentials_bound("vless_uuid_enc", user_id, other),
+                )
+            )
         ), "у пары на другой ноде свои ключи (§11.3)"
 
         # Отключённой ноде идут только отзывы: ключи её строк не расшифровываются вовсе.
@@ -563,8 +576,10 @@ class PausesAfterWrite(CompositionService):
         self.written, self.release = asyncio.Event(), asyncio.Event()
         self.pid = 0
 
-    async def _publish_pair(self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID) -> int | None:
-        seq = await super()._publish_pair(conn, user_id, node_id)
+    async def _publish_pair(
+        self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID, cipher: FieldCipher | None
+    ) -> int | None:
+        seq = await super()._publish_pair(conn, user_id, node_id, cipher)
         self.pid = conn.get_server_pid()
         self.written.set()
         await self.release.wait()
@@ -805,3 +820,267 @@ async def test_wakes_go_out_after_every_node_is_committed(
         monkeypatch.setattr(composition_module, "get_redis", counting)
         await CompositionService(await get_pool()).publish_user(user_id)
         assert committed == [2, 2], "пробуждение ушло до коммита второй ноды"
+
+
+_SWAP_FROM = (
+    "update node_user_credentials set {column} = (select {source} from node_user_credentials "
+    "where node_id = $3 and user_id = $4) where node_id = $1 and user_id = $2"
+)
+
+
+async def _move(
+    conn: asyncpg.Connection,
+    column: str,
+    target: tuple[uuid.UUID, uuid.UUID],
+    source: tuple[uuid.UUID, uuid.UUID],
+    source_column: str | None = None,
+) -> None:
+    """Подмена прямо в базе: контейнер ``source_column`` пары ``source`` (нода, пользователь)
+    в колонку ``column`` пары ``target``."""
+    query = _SWAP_FROM.format(column=column, source=source_column or column)
+    await conn.execute(query, *target, *source)
+
+
+@pytest.mark.parametrize("form", ["delta", "snapshot"])
+async def test_a_container_moved_from_another_pair_is_not_delivered(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture, form: str
+) -> None:
+    """WI-38: контейнер credentials привязан к своей паре «пользователь × нода» и колонке.
+    Подмена прямо в базе — каждой колонки отдельно: контейнер другого пользователя той же ноды,
+    контейнер той же пары с другой ноды, и перестановка колонок внутри строки — не
+    расшифровывается: такая пара выдаётся строкой ``removed`` без ключей и без адресов (решение
+    заказчика 2026-11-05), в журнале — ошибка с парой; нетронутая пара — с ключами, курсор — по
+    выборке (нетронутая опубликована первой, подменённые — выше неё)."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        node = stand.node_id
+        other = await insert_node(conn, like=node)
+        plan_id = await plan_of(conn, await group_of(conn, node, other))
+        intact = await subscribe(conn, plan_id)
+        tampered = [await subscribe(conn, plan_id) for _ in range(5)]
+        await conn.execute(
+            "insert into user_blocked_ips (user_id, ip) values ($1, '198.51.100.11')", tampered[0]
+        )
+        service = CompositionService(await get_pool())
+        for user in (intact, *tampered):
+            await service.publish_user(user)
+        alien_v, alien_t, moved_v, moved_t, swapped = tampered
+        await _move(conn, "vless_uuid_enc", (node, alien_v), (node, intact))
+        await _move(conn, "trojan_password_enc", (node, alien_t), (node, intact))
+        await _move(conn, "vless_uuid_enc", (node, moved_v), (other, moved_v))
+        await _move(conn, "trojan_password_enc", (node, moved_t), (other, moved_t))
+        await _move(conn, "vless_uuid_enc", (node, swapped), (node, swapped), "trojan_password_enc")
+        with caplog.at_level(logging.ERROR, logger="app.domain.composition"):
+            response = await state(stand, cursors(0, full=form == "snapshot"))
+        assert response.status_code == 200, response.text
+        users = response.json()["users"]
+        by_user = {row["user_id"]: row for row in users["rows"]}
+        assert set(by_user) == {str(intact), *map(str, tampered)}
+        assert by_user[str(intact)]["state"] == "active" and by_user[str(intact)]["credentials"]
+        for user in tampered:
+            row = by_user[str(user)]
+            assert row["state"] == "removed", user
+            assert row.get("credentials") is None and row["blocked_ips"] == [], user
+        desired = await conn.fetchval("select desired_users_seq from nodes where id = $1", node)
+        assert users["seq"] == desired, "курсор — по выборке, включая подменённые пары"
+        assert users["full"] is (form == "snapshot")
+        logged = " ".join(record.getMessage() for record in caplog.records)
+        assert str(node) in logged and all(str(user) in logged for user in tampered)
+
+
+async def test_a_publication_replaces_credentials_that_do_not_open(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Следующая публикация пары с непригодными контейнерами выдаёт ей новые ключи: версия
+    растёт, контейнеры новые, нода получает строку ``active`` с новыми ключами; пригодные
+    контейнеры публикация не трогает (решение заказчика 2026-11-05, WI-38)."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        node = stand.node_id
+        plan_id = await plan_of(conn, await group_of(conn, node))
+        broken, healthy = await subscribe(conn, plan_id), await subscribe(conn, plan_id)
+        service = CompositionService(await get_pool())
+        for user in (broken, healthy):
+            await service.publish_user(user)
+        before = await sealed_keys(conn, node, broken)
+        kept = await sealed_keys(conn, node, healthy)
+        await _move(conn, "vless_uuid_enc", (node, broken), (node, healthy))
+        with caplog.at_level(logging.WARNING, logger="app.domain.composition"):
+            await service.publish_user(broken)
+            await service.publish_user(healthy)
+        after = await sealed_keys(conn, node, broken)
+        assert after[2] == before[2] + 1, "версия credentials выросла"
+        assert after[0] != before[0] and after[1] != before[1], "оба контейнера новые"
+        assert await sealed_keys(conn, node, healthy) == kept, "пригодные не тронуты"
+        assert any(str(broken) in record.getMessage() for record in caplog.records)
+        response = await state(stand, cursors(0))
+        rows = {row["user_id"]: row for row in response.json()["users"]["rows"]}
+        assert rows[str(broken)]["state"] == "active"
+        assert rows[str(broken)]["credentials"]["version"] == after[2]
+
+
+async def test_a_foreign_process_key_fails_the_answer_instead_of_removing_everyone(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выдача берёт шифр процесса через сверку с контрольным контейнером (``checked_cipher``).
+    Ключ процесса не тот (восстановление с другим файлом ключа): ответ падает ошибкой, а не
+    выдаёт каждую пару строкой ``removed`` — иначе нода удалила бы всех пользователей (WI-38)."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        user_id = await subscribe(conn, await plan_of(conn, await group_of(conn, stand.node_id)))
+        await CompositionService(await get_pool()).publish_user(user_id)
+
+        async def mismatch() -> FieldCipher:
+            raise CipherMismatch("ключ процесса не тот (подставлено тестом)")
+
+        monkeypatch.setattr(composition_module, "checked_cipher", mismatch)
+        response = await state(stand, cursors(0))
+        assert response.status_code == 500, response.text
+
+
+async def test_the_first_check_of_a_publication_is_committed(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Первая сверка шифра процесса идёт из публикации — на своём подключении сверки: строка
+    сверки закоммичена, транзакции нод публикации её не несут. Имя строки — под префиксом
+    уборки."""
+    name = f"t19-check-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(crypto_module, "CHECK_KEY", name)
+    monkeypatch.setattr(crypto_module, "_checked", None)
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        try:
+            user_id = await subscribe(
+                conn, await plan_of(conn, await group_of(conn, stand.node_id))
+            )
+            await CompositionService(await get_pool()).publish_user(user_id)
+            assert await conn.fetchval("select count(*) from settings where key = $1", name) == 1
+            assert (await row_of(conn, stand.node_id, user_id)) is not None
+        finally:
+            await conn.execute("delete from settings where key like 't19-check-%'")
+
+
+async def test_a_foreign_process_key_withholds_the_rows_that_need_keys(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Публикация берёт шифр через сверку: ключ процесса не тот — строка ``active`` не пишется
+    и публикация отказывает, а замена непригодных контейнеров не выдаёт парам ключи под чужим
+    ключом."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        plan_id = await plan_of(conn, await group_of(conn, stand.node_id))
+        broken, donor = await subscribe(conn, plan_id), await subscribe(conn, plan_id)
+        service = CompositionService(await get_pool())
+        for user in (broken, donor):
+            await service.publish_user(user)
+        await _move(conn, "vless_uuid_enc", (stand.node_id, broken), (stand.node_id, donor))
+        sealed = await sealed_keys(conn, stand.node_id, broken)
+        seq = (await row_of(conn, stand.node_id, broken) or {}).get("updated_seq")
+
+        async def mismatch() -> FieldCipher:
+            raise CipherMismatch("ключ процесса не тот (подставлено тестом)")
+
+        monkeypatch.setattr(composition_module, "checked_cipher", mismatch)
+        with pytest.raises(CipherMismatch):
+            await CompositionService(await get_pool()).publish_user(broken)
+        assert await sealed_keys(conn, stand.node_id, broken) == sealed, "контейнеры не заменены"
+        row = await row_of(conn, stand.node_id, broken)
+        assert row is not None and row["updated_seq"] == seq, "строка не переписана"
+
+
+async def _foreign_key() -> FieldCipher:
+    raise CipherMismatch("ключ процесса не тот (подставлено тестом)")
+
+
+async def test_a_foreign_process_key_still_writes_the_revocations(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ключ процесса не тот (WI-38, решение заказчика 2026-11-05): публикация пишет строки,
+    которым ключи не нужны, — отзыв с ноды, вышедшей из тарифа, и приостановку — и будит их
+    ноды; строка ``active`` не пишется, credentials не меняются, и после пробуждений публикация
+    отказывает ``CipherMismatch``. Публикация из одних отзывов проходит."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        node = stand.node_id
+        other = await insert_node(conn, like=node)
+        leaving = await group_of(conn, other)
+        plan_id = await plan_of(conn, await group_of(conn, node), leaving)
+        kept, paused = await subscribe(conn, plan_id), await subscribe(conn, plan_id)
+        service = CompositionService(await get_pool())
+        for user in (kept, paused):
+            await service.publish_user(user)
+        before = {
+            user: (await row_of(conn, node, user) or {}).get("updated_seq")
+            for user in (kept, paused)
+        }
+        sealed = {user: await sealed_keys(conn, node, user) for user in (kept, paused)}
+        await conn.execute(
+            "delete from plan_access_groups where plan_id = $1 and access_group_id = $2",
+            plan_id,
+            leaving,
+        )
+        await conn.execute(
+            "update subscriptions set state = 'suspended_admin' where user_id = $1", paused
+        )
+        woken: list[str] = []
+
+        class RecordingRedis:
+            async def publish(self, channel: str, message: str) -> int:
+                woken.append(channel)
+                return 0
+
+        async def recording() -> RecordingRedis:
+            return RecordingRedis()
+
+        monkeypatch.setattr(composition_module, "get_redis", recording)
+        monkeypatch.setattr(composition_module, "checked_cipher", _foreign_key)
+        foreign = CompositionService(await get_pool())
+        with pytest.raises(CipherMismatch):
+            await foreign.publish_user(kept)
+        assert woken == [f"node:{other}"], "отзыв разбудил свою ноду до отказа"
+        gone = await row_of(conn, other, kept)
+        assert gone is not None and gone["state"] == "removed" and not gone["has_credentials"]
+        still = await row_of(conn, node, kept)
+        assert still is not None and still["updated_seq"] == before[kept], "active не переписана"
+        assert await sealed_keys(conn, node, kept) == sealed[kept]
+        woken.clear()
+        await foreign.publish_user(paused)
+        assert sorted(woken) == sorted([f"node:{node}", f"node:{other}"])
+        row = await row_of(conn, node, paused)
+        assert row is not None and row["state"] == "suspended_admin"
+        assert row["updated_seq"] > before[paused]
+        assert await sealed_keys(conn, node, paused) == sealed[paused], "credentials не тронуты"
+        removed = await row_of(conn, other, paused)
+        assert removed is not None and removed["state"] == "removed"
+
+
+@pytest.mark.parametrize("form", ["delta", "disabled"])
+async def test_a_foreign_process_key_still_answers_the_revocations(
+    pg_dsn: str, migrate_env: dict[str, str], monkeypatch: pytest.MonkeyPatch, form: str
+) -> None:
+    """Ответ без строк ``active`` шифра не берёт и при чужом ключе процесса выдаётся (WI-38,
+    роаст безопасности, раунд 3): дельта из одних отзывов и состав ноды в ``disabled`` (вентиль
+    оставляет только отзывы) — 200 с отзывом, а не ошибка."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        plan_id = await plan_of(conn, await group_of(conn, stand.node_id))
+        active, paused = await subscribe(conn, plan_id), await subscribe(conn, plan_id)
+        service = CompositionService(await get_pool())
+        for user in (active, paused):
+            await service.publish_user(user)
+        cursor = await conn.fetchval(
+            "select desired_users_seq from nodes where id = $1", stand.node_id
+        )
+        await conn.execute(
+            "update subscriptions set state = 'suspended_admin' where user_id = $1", paused
+        )
+        await service.publish_user(paused)
+        if form == "disabled":
+            await set_status(conn, stand.node_id, "disabled")
+        monkeypatch.setattr(composition_module, "checked_cipher", _foreign_key)
+        response = await state(stand, cursors(cursor if form == "delta" else 0))
+        assert response.status_code == 200, response.text
+        rows = response.json()["users"]["rows"]
+        assert [(row["user_id"], row["state"]) for row in rows] == [
+            (str(paused), "suspended_admin")
+        ]

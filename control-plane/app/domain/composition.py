@@ -40,17 +40,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
+from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from redis.exceptions import RedisError
 
-from app.config import Settings
 from app.domain.commands import Command, CommandService
 from app.domain.multiplier import MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
 from app.domain.nodes import Node
 from app.domain.statuses import INT4_MAX, INT8_MAX, STREAM_GATE
 from app.errors import ApiError
 from app.redis import get_redis
-from app.security.crypto import FieldCipher
+from app.security.crypto import Binding, CipherMismatch, FieldCipher, bound_to, checked_cipher
 
 log = logging.getLogger(__name__)
 
@@ -401,6 +401,7 @@ select s.state::text as subscription_state,
        ) as shares_group,
        r.state::text as row_state,
        c.user_id is not null as has_credentials,
+       c.vless_uuid_enc, c.trojan_password_enc, c.version as credentials_version,
        array(select b.ip from user_blocked_ips b where b.user_id = $1 order by b.ip)
            as blocked_ips
   from (select $1::uuid as user_id) u
@@ -424,6 +425,20 @@ values ($1, $2, $3, $4, $5)
 on conflict (user_id, node_id) do nothing
 """
 _DELETE_CREDENTIALS = "delete from node_user_credentials where user_id = $1 and node_id = $2"
+# Замена непригодных контейнеров пары новыми ключами: версия растёт, как при ротации (WI-38).
+_REPLACE_CREDENTIALS = """
+update node_user_credentials
+   set vless_uuid_enc = $3, trojan_password_enc = $4, version = version + 1, rotated_at = now()
+ where user_id = $1 and node_id = $2
+"""
+
+
+def credentials_bound(column: str, user_id: uuid.UUID, node_id: uuid.UUID) -> Binding:
+    """Привязка контейнера credentials к паре «пользователь × нода» (WI-38): контейнер другого
+    пользователя или той же пары на другой ноде не расшифровывается (§11.3)."""
+    return bound_to("node_user_credentials", column, user_id, node_id)
+
+
 _READ_NODE = "select desired_users_seq, resync_required from nodes where id = $1"
 _ROW_COLUMNS = """
 select s.user_id, s.state::text as state, s.quota_grant_bytes, s.blocked_ips, s.updated_seq,
@@ -438,6 +453,11 @@ _READ_SNAPSHOT = (
     _ROW_COLUMNS + " where s.node_id = $1 and s.state <> 'removed' order by s.updated_seq"
 )
 _MARK_RESYNC = "update nodes set resync_required = true where id = $1 and not resync_required"
+
+
+class _KeysWithheld(Exception):  # noqa: N818 — сигнал публикации, не ошибка
+    """Строке пары нужны ключи, а шифр процесса не сверен: транзакция ноды откатывается до
+    выделения номера, публикация идёт к следующей ноде (``publish_user_on``)."""
 
 
 class CompositionService:
@@ -456,11 +476,41 @@ class CompositionService:
         self._commands = commands or CommandService(pool)
         self._cipher = cipher
 
-    def _field_cipher(self) -> FieldCipher:
-        """Шифр credentials (§7.2): переданный при создании или ключ из файла секрета."""
+    async def _field_cipher(self) -> FieldCipher:
+        """Шифр credentials (§7.2): шифр процесса, сверенный с контрольным контейнером базы
+        (``checked_cipher``, WI-38: с чужим ключом ключи не выдаются и не пишутся, а пары не
+        выглядят подменёнными), или переданный при создании — только герметичным прогонам без
+        базы (раскладка фикстур); боевые вызовы шифр не передают."""
         if self._cipher is None:
-            self._cipher = FieldCipher.from_settings(Settings.load())
+            self._cipher = await checked_cipher()
         return self._cipher
+
+    @staticmethod
+    def _open(
+        cipher: FieldCipher,
+        user_id: uuid.UUID,
+        node_id: uuid.UUID,
+        vless: bytes | None,
+        trojan: bytes | None,
+        version: int | None,
+    ) -> Credentials | None:
+        """Credentials пары или ``None``, если пара непригодна: записи нет, контейнер не
+        расшифровывается привязкой пары (подменён или повреждён, WI-38) или его текст не
+        разбирается."""
+        if vless is None or trojan is None or version is None:
+            return None
+        # Привязки — до разбора: ошибка построения привязки — дефект кода, и она обязана
+        # упасть громко, а не выдать каждую пару непригодной.
+        vless_bound = credentials_bound("vless_uuid_enc", user_id, node_id)
+        trojan_bound = credentials_bound("trojan_password_enc", user_id, node_id)
+        try:
+            return Credentials(
+                vless_uuid=uuid.UUID(bytes=cipher.decrypt(vless, bound=vless_bound)),
+                trojan_password=cipher.decrypt(trojan, bound=trojan_bound).decode(),
+                version=version,
+            )
+        except InvalidTag, ValueError:  # ValueError: и UnicodeDecodeError, и ValidationError
+            return None
 
     async def _wake(self, node_id: uuid.UUID, users_seq: int) -> bool:
         """``PUBLISH node:{id}`` номером строки после коммита — пробуждение удержанного запроса
@@ -498,17 +548,34 @@ class CompositionService:
 
         Публикации одного пользователя сериализованы (``_LOCK_USER``). Пробуждения уходят после
         коммита всех нод: недоступный Redis задерживает только пробуждения (до тайм-аутов
-        клиента на каждое), а не запись следующих нод."""
+        клиента на каждое), а не запись следующих нод.
+
+        Ключ процесса не тот (``CipherMismatch`` сверки, WI-38): строки, которым ключи не нужны
+        (отзывы — ``removed`` и состояния без доступа), пишутся и будят ноды; пары, которым нужны
+        ключи (``active``), пропускаются, и после пробуждений публикация отказывает тем же
+        ``CipherMismatch`` — задача повторяется (решение заказчика 2026-11-05): приостановка
+        доходит до нод и при чужом ключе."""
         if conn.is_in_transaction():
             raise RuntimeError("публикация состава идёт на подключении вне транзакции")
+        mismatch: CipherMismatch | None = None
+        cipher: FieldCipher | None = None
+        try:
+            cipher = await self._field_cipher()
+        except CipherMismatch as exc:
+            mismatch = exc
         key = str(user_id)
         written: list[tuple[uuid.UUID, int]] = []
+        held: list[uuid.UUID] = []
         await conn.execute(_LOCK_USER, PUBLISH_LOCK_CLASS, key)
         try:
             candidates = [row["node_id"] for row in await conn.fetch(_CANDIDATES, user_id)]
             for node_id in candidates:
-                async with conn.transaction():
-                    seq = await self._publish_pair(conn, user_id, node_id)
+                try:
+                    async with conn.transaction():
+                        seq = await self._publish_pair(conn, user_id, node_id, cipher)
+                except _KeysWithheld:
+                    held.append(node_id)
+                    continue
                 if seq is not None:
                     written.append((node_id, seq))
         finally:
@@ -524,15 +591,27 @@ class CompositionService:
                         skipped,
                     )
                 break
+        if held and mismatch is not None:
+            log.error(
+                "пользователь %s: ключ процесса не сверен — строки active на %d нодах не записаны",
+                user_id,
+                len(held),
+            )
+            raise mismatch
 
     async def _lock_node(self, conn: Any, node_id: uuid.UUID) -> bool:
         """Блокировка строки ноды ``FOR NO KEY UPDATE`` в транзакции вызывающего (``_LOCK_NODE``);
         ``False`` — ноды нет."""
         return await conn.fetchval(_LOCK_NODE, node_id) is not None
 
-    async def _publish_pair(self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID) -> int | None:
+    async def _publish_pair(
+        self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID, cipher: FieldCipher | None
+    ) -> int | None:
         """Строка пары «пользователь × нода» в транзакции вызывающего; номер записанной строки
-        или ``None``, если писать нечего.
+        или ``None``, если писать нечего. ``cipher`` — сверенный шифр процесса или ``None``, если
+        сверка не прошла: строка ``active`` тогда не пишется (``_KeysWithheld`` — до выделения
+        номера), а у пары в состоянии без доступа создание и замена credentials откладываются до
+        публикации со сверенным шифром — строке без доступа ключи не нужны.
 
         Состояние пользователя читается **после** блокировки строки ноды. Две публикации одного
         пользователя уже идут по очереди (``_LOCK_USER``); чтение под блокировкой ноды — против
@@ -551,25 +630,53 @@ class CompositionService:
         shares = bool(pair["shares_group"])
         if not shares and pair["row_state"] in (None, "removed"):
             return None
+        state = pair["subscription_state"] if shares else "removed"
+        if cipher is None and state == "active":
+            raise _KeysWithheld
         seq = await next_users_seq(conn, node_id)
         await conn.execute(
             _UPSERT_ROW,
             node_id,
             user_id,
-            pair["subscription_state"] if shares else "removed",
+            state,
             list(pair["blocked_ips"]) if shares else [],
             seq,
         )
-        if shares and not pair["has_credentials"]:
-            cipher = self._field_cipher()
-            await conn.execute(
-                _INSERT_CREDENTIALS,
-                user_id,
-                node_id,
-                xray_email(user_id),
-                cipher.encrypt(uuid.uuid4().bytes),
-                cipher.encrypt(secrets.token_urlsafe(24).encode()),
-            )
+        if shares and cipher is not None:
+
+            def fresh() -> tuple[bytes, bytes]:
+                return (
+                    cipher.encrypt(
+                        uuid.uuid4().bytes,
+                        bound=credentials_bound("vless_uuid_enc", user_id, node_id),
+                    ),
+                    cipher.encrypt(
+                        secrets.token_urlsafe(24).encode(),
+                        bound=credentials_bound("trojan_password_enc", user_id, node_id),
+                    ),
+                )
+
+            if not pair["has_credentials"]:
+                await conn.execute(
+                    _INSERT_CREDENTIALS, user_id, node_id, xray_email(user_id), *fresh()
+                )
+            elif (
+                self._open(
+                    cipher,
+                    user_id,
+                    node_id,
+                    pair["vless_uuid_enc"],
+                    pair["trojan_password_enc"],
+                    pair["credentials_version"],
+                )
+                is None
+            ):
+                # Контейнеры пары непригодны (решение заказчика 2026-11-05, WI-38): публикация
+                # выдаёт паре новые ключи — версия растёт, нода получит строку с новыми ключами.
+                await conn.execute(_REPLACE_CREDENTIALS, user_id, node_id, *fresh())
+                log.warning(
+                    "пара %s×%s: credentials не расшифровывались — выданы новые", node_id, user_id
+                )
         elif not shares and pair["has_credentials"]:
             await conn.execute(_DELETE_CREDENTIALS, user_id, node_id)
         return seq
@@ -616,24 +723,42 @@ class CompositionService:
         async with self._pool.acquire() as conn:
             await conn.execute(_MARK_RESYNC, node_id)
 
-    def _row(self, node_id: uuid.UUID, stored: StoredRow) -> UserRow:
+    def _row(self, node_id: uuid.UUID, stored: StoredRow, cipher: FieldCipher | None) -> UserRow:
         """Строка ответа. Credentials расшифровываются только у строки, выдающей доступ, — и
-        только из строк ноды запроса: выборка идёт по ``node_id`` ноды из identity (§5.2)."""
+        только из строк ноды запроса: выборка идёт по ``node_id`` ноды из identity (§5.2), а
+        контейнер привязан к паре (``credentials_bound``).
+
+        Пара в ``active`` с непригодными credentials (записи нет, контейнер подменён или
+        повреждён, текст не разбирается) выдаётся строкой ``removed`` без ключей: пользователь
+        теряет доступ на ноде, прежние и чужие ключи там не остаются; остальной ответ и отзывы
+        выдаются (решение заказчика 2026-11-05, WI-38). Новые ключи паре выдаёт следующая
+        публикация."""
         credentials = None
         if stored.state == "active":
-            vless, trojan, version = (
+            if cipher is None:
+                raise RuntimeError("шифр берётся до разбора строк active")
+            credentials = self._open(
+                cipher,
+                stored.user_id,
+                node_id,
                 stored.vless_uuid_enc,
                 stored.trojan_password_enc,
                 stored.credentials_version,
             )
-            if vless is None or trojan is None or version is None:
-                raise LookupError(f"у пары {node_id}×{stored.user_id} в active нет credentials")
-            cipher = self._field_cipher()
-            credentials = Credentials(
-                vless_uuid=uuid.UUID(bytes=cipher.decrypt(vless)),
-                trojan_password=cipher.decrypt(trojan).decode(),
-                version=version,
-            )
+            if credentials is None:
+                log.error(
+                    "пара %s×%s: credentials непригодны — выдана строка removed",
+                    node_id,
+                    stored.user_id,
+                )
+                return UserRow(
+                    user_id=stored.user_id,
+                    state="removed",
+                    xray_email=xray_email(stored.user_id),
+                    quota_grant_bytes=0,
+                    blocked_ips=[],
+                    updated_seq=stored.updated_seq,
+                )
         return UserRow(
             user_id=stored.user_id,
             state=stored.state,
@@ -749,7 +874,12 @@ class CompositionService:
                 if gate.composition == "revocations"
                 else selected
             )
-            rows = [self._row(node.id, row) for row in kept]
+            # Шифр — только под строки active: ответ из одних отзывов (дельта, вентиль ``disabled``
+            # и ``suspended``) выдаётся и при чужом ключе процесса (WI-38).
+            cipher = (
+                await self._field_cipher() if any(row.state == "active" for row in kept) else None
+            )
+            rows = [self._row(node.id, row, cipher) for row in kept]
         resync_required = stored.resync_required
         if gate.filters_composition:
             # Ответ урезан вентилем: признак взводится в колонке ноды (data-model §4.2.3) и
