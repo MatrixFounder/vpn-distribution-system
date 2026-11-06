@@ -15,7 +15,14 @@ from typing import Any
 import pytest
 from app.jobs import scheduler
 from app.jobs.handlers import HANDLERS
-from app.jobs.handlers.composition import PUBLISH_USER, publish_user, user_of
+from app.jobs.handlers.composition import (
+    PUBLISH_NODE,
+    PUBLISH_USER,
+    node_of,
+    publish_node,
+    publish_user,
+    user_of,
+)
 from app.jobs.handlers.limits import LIMITS_CHECK, check_limits
 from app.jobs.handlers.maintenance import (
     MAINTENANCE_TYPES,
@@ -124,3 +131,39 @@ async def test_a_publication_without_a_user_is_refused_without_retries(payload: 
     assert user_of(
         dataclasses.replace(job(PUBLISH_USER), payload={"user_id": str(uuid.UUID(int=7))})
     ) == uuid.UUID(int=7)
+
+
+def test_the_publication_types_are_the_production_names() -> None:
+    """Типы задач публикации — имена §5.4, и под ними — свои обработчики (001.29b). Тесты
+    ставят задачи под подменёнными типами (``tests/conftest.py``), а исполнитель стенда знает
+    только эти: опечатка в имени оставила бы задачи стоять."""
+    assert (PUBLISH_USER, PUBLISH_NODE) == ("composition.publish_user", "composition.publish_node")
+    assert HANDLERS[PUBLISH_USER] is publish_user
+    assert HANDLERS[PUBLISH_NODE] is publish_node
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{}, {"node_id": "не-uuid"}, {"node_id": None}, {"user_id": str(uuid.UUID(int=1))}, [], 5],
+    ids=["empty", "not-a-uuid", "null", "wrong-key", "array", "number"],
+)
+async def test_a_node_publication_without_a_node_is_refused_without_retries(payload: Any) -> None:
+    """Полезная нагрузка ``composition.publish_node`` — ``{"node_id": …}`` (001.29b); негодная —
+    ``NonRetryableError`` без обращения к подключению, как у ``composition.publish_user``."""
+    broken = dataclasses.replace(job(PUBLISH_NODE), payload=payload)
+    with pytest.raises(NonRetryableError, match=re.escape(f"{PUBLISH_NODE}: нет node_id")):
+        await publish_node(NoConnection(), broken)
+    assert node_of(
+        dataclasses.replace(job(PUBLISH_NODE), payload={"node_id": str(uuid.UUID(int=9))})
+    ) == (uuid.UUID(int=9), None)
+
+
+def test_a_node_batch_continues_after_its_user() -> None:
+    """Продолжение состава ноды несёт ``"after"`` — последнего пользователя прежней порции
+    (001.29b, порции); не UUID — ``NonRetryableError``."""
+    node, user = str(uuid.UUID(int=9)), str(uuid.UUID(int=3))
+    batch = dataclasses.replace(job(PUBLISH_NODE), payload={"node_id": node, "after": user})
+    assert node_of(batch) == (uuid.UUID(int=9), uuid.UUID(int=3))
+    broken = dataclasses.replace(job(PUBLISH_NODE), payload={"node_id": node, "after": "x"})
+    with pytest.raises(NonRetryableError, match="after"):
+        node_of(broken)

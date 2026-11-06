@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import asyncpg
 from app.domain.composition import CompositionService
@@ -195,12 +196,19 @@ async def plan(
 
 
 class RecordingComposition(CompositionService):
-    """Поток состава, запоминающий, за кого его разбудили: переход, не разбудивший поток, не
-    даёт ни отзыва в пределах Н-14, ни восстановления доступа (§3.4, §4.11)."""
+    """Поток состава, запоминающий, за кого поставлена публикация: переход, не поставивший её,
+    не даёт ни отзыва в пределах Н-14, ни восстановления доступа (§3.4, §4.11). Прямые вызовы
+    исполнителя записываются в ``direct`` (переход их делать не должен, 001.29b), а не валят
+    вызов: перехваченное исключение спрятало бы такой вызов. Что постановка коммитится в
+    транзакции самого перехода, проверяет ``test_composition_queue.py`` по ``xmin`` строк."""
 
     def __init__(self) -> None:
         super().__init__(pool=None)
         self.published: list[uuid.UUID] = []
+        self.direct: list[uuid.UUID] = []
+
+    async def enqueue_publish_user(self, conn: Any, user_id: uuid.UUID) -> None:
+        self.published.append(user_id)
 
     async def publish_user(self, user_id: uuid.UUID) -> None:
-        self.published.append(user_id)
+        self.direct.append(user_id)

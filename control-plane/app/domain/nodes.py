@@ -459,8 +459,11 @@ class NodeService:
         """Запись ноды (UC-01 шаг 1) в статусе ``pending``: строка ``nodes``, группы доступа,
         первый интервал тарифицируемой группы (R-18: учёт берёт коэффициент по интервалу) и
         первый интервал публичного адреса (§4.17) — от момента создания. Занятый код — 409,
-        неизвестная тарифицируемая группа или группа доступа — 422. Inbound с ключами REALITY
-        (шаг 2) — 001.26; ``created_by`` уйдёт в ``audit_log`` с 001.48."""
+        неизвестная тарифицируемая группа или группа доступа — 422. Группы доступа пишутся по
+        возрастанию ``id``: проверка внешнего ключа держит строку группы ``KEY SHARE``, а
+        изменение тарифа блокирует строки групп ``FOR UPDATE`` в том же порядке — иначе
+        взаимная блокировка (001.29b). Inbound с ключами REALITY (шаг 2) — 001.26;
+        ``created_by`` уйдёт в ``audit_log`` с 001.48."""
         async with transaction(self._pool) as conn:
             try:
                 row = await conn.fetchrow(
@@ -514,7 +517,7 @@ class NodeService:
             try:
                 await conn.executemany(
                     "insert into node_access_groups (node_id, access_group_id) values ($1, $2)",
-                    [(node_id, group) for group in dict.fromkeys(spec.access_group_ids)],
+                    [(node_id, group) for group in sorted(set(spec.access_group_ids))],
                 )
             except asyncpg.ForeignKeyViolationError as exc:
                 raise ApiError(

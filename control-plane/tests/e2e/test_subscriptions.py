@@ -268,6 +268,7 @@ async def test_every_transition_wakes_the_composition_stream(
         composition.published.clear()
         await service.remaining(user)
         assert composition.published == [], "чтение состав не публикует"
+        assert composition.direct == [], "переход вызвал исполнителя публикации напрямую"
 
 
 async def test_a_subscription_is_refused_on_an_archived_plan(

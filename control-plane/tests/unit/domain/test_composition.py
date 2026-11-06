@@ -291,13 +291,14 @@ class _InsideTransaction:
         raise AssertionError(f"обращение к подключению: {name}")
 
 
-async def test_the_executor_refuses_a_connection_inside_a_transaction() -> None:
-    """Исполнитель публикации работает на подключении вне транзакции: внутри чужой транзакции
-    транзакции нод стали бы точками сохранения, блокировка пользователя снялась бы до внешнего
-    коммита, и следующий запуск выбрал бы кандидатов без незакоммиченных строк. Отказ — до
-    любого обращения к базе."""
+@pytest.mark.parametrize("executor", ["publish_user_on", "publish_node_on"])
+async def test_the_executor_refuses_a_connection_inside_a_transaction(executor: str) -> None:
+    """Исполнители публикации (пользователя — 001.29, ноды — 001.29b) работают на подключении вне
+    транзакции: внутри чужой транзакции транзакции пар стали бы точками сохранения, блокировка
+    пользователя снялась бы до внешнего коммита, и следующий запуск выбрал бы кандидатов без
+    незакоммиченных строк. Отказ — до любого обращения к базе."""
     with pytest.raises(RuntimeError, match="вне транзакции"):
-        await CompositionService(None).publish_user_on(_InsideTransaction(), uuid.uuid4())
+        await getattr(CompositionService(None), executor)(_InsideTransaction(), uuid.uuid4())
 
 
 # Известный ответ (WI-38): контейнеры, снятые один раз фиксированным ключом для фиксированной
@@ -334,3 +335,22 @@ def test_the_credentials_binding_is_pinned_by_a_known_answer() -> None:
         cipher.decrypt(
             KAT_VLESS, bound=credentials_bound("trojan_password_enc", KAT_USER, KAT_NODE)
         )
+
+
+class _OutsideTransaction:
+    """Подключение вне транзакции: любое обращение, кроме вопроса о транзакции, валит тест."""
+
+    def is_in_transaction(self) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"постановка обратилась к подключению вне транзакции: {name}")
+
+
+@pytest.mark.parametrize("method", ["enqueue_publish_user", "enqueue_publish_node", "remove_user"])
+async def test_a_publication_is_placed_only_inside_a_transaction(method: str) -> None:
+    """Публикация ставится в транзакции бизнес-операции (§5.4, Н-14): вне транзакции постановка
+    пережила бы откат операции или потерялась бы при крахе между коммитом и постановкой —
+    ``RuntimeError`` до обращения к базе (001.29b)."""
+    with pytest.raises(RuntimeError, match="транзакции"):
+        await getattr(CompositionService(pool=None), method)(_OutsideTransaction(), uuid.uuid4())

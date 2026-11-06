@@ -12,7 +12,9 @@ import os
 import secrets
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 from app.main import create_app
@@ -65,6 +67,43 @@ def checked_field_cipher(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.security import crypto
 
     monkeypatch.setattr(crypto, "_checked", crypto.FieldCipher.from_settings(Settings.load()))
+
+
+# Типы задач публикации состава, которые ставит код под тестом (001.29b): живые исполнители стенда
+# выбирают только известные им типы (``claim(types=HANDLERS)``) и их не тронут.
+TEST_PUBLISH_USER = "test-composition.publish_user"
+TEST_PUBLISH_NODE = "test-composition.publish_node"
+
+
+@pytest.fixture(autouse=True)
+async def composition_jobs_under_test_types(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
+    """Публикация состава, поставленная кодом под тестом, — под типами ``test-composition.*``.
+    Под настоящим типом её забрал бы живой исполнитель стенда: чужой код с ключом шифрования
+    стенда, а не сессии. Поставленные в базу задачи удаляются после теста: стоящая задача
+    растила бы ожидание очереди ``critical`` (``wait_seconds``, метрика стенда). Исполняют их
+    тесты сами (``tests/e2e/_composition.py::run_publications``)."""
+    from app.domain import composition
+    from app.jobs.queue import enqueue
+
+    placed: list[bool] = []
+
+    async def recording(conn: Any, *args: Any, **kwargs: Any) -> Any:
+        placed.append(isinstance(conn, asyncpg.Connection))  # в базу, а не в подделку
+        return await enqueue(conn, *args, **kwargs)
+
+    monkeypatch.setattr(composition, "PUBLISH_USER_JOB", TEST_PUBLISH_USER)
+    monkeypatch.setattr(composition, "PUBLISH_NODE_JOB", TEST_PUBLISH_NODE)
+    monkeypatch.setattr("app.domain.composition.enqueue", recording)
+    yield
+    if any(placed):
+        conn = await asyncpg.connect(os.environ["PG_DSN"])
+        try:
+            await conn.execute(
+                "delete from jobs where type = any($1::text[])",
+                [TEST_PUBLISH_USER, TEST_PUBLISH_NODE],
+            )
+        finally:
+            await conn.close()
 
 
 @pytest.fixture(scope="session")

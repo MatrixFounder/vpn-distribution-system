@@ -49,6 +49,7 @@ import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.db.pool import transaction
+from app.domain.composition import CompositionService
 from app.domain.multiplier import (
     DEFAULT_MULTIPLIER_MILLI,
     MILLI_PER_UNIT,
@@ -253,11 +254,16 @@ class HourCloser(Protocol):
 
 class GroupService:
     """Группы поверх пула asyncpg (001.19). ``accounting`` передаётся вызывающим и обязателен:
-    операции истории закрывают им час учёта (UC-09 A3)."""
+    операции истории закрывают им час учёта (UC-09 A3). ``composition`` — поток состава:
+    удаление группы доступа ставит публикацию состава её нод (001.29b); по умолчанию строится
+    над тем же пулом."""
 
-    def __init__(self, pool: Any, accounting: HourCloser) -> None:
+    def __init__(
+        self, pool: Any, accounting: HourCloser, composition: CompositionService | None = None
+    ) -> None:
         self._pool = pool
         self._accounting = accounting
+        self._composition = composition or CompositionService(pool)
 
     # --- группы доступа: метка, тарифы не трогает ---------------------------------------------
 
@@ -303,11 +309,28 @@ class GroupService:
 
     async def delete_access(self, group_id: uuid.UUID) -> None:
         """Удалить группу доступа. Связи с тарифами и нодами уносит ``ON DELETE CASCADE``
-        (§4.2.2): группа перестаёт существовать, а не остаётся висеть в составе тарифа."""
-        async with self._pool.acquire() as conn:
-            deleted = await conn.execute("delete from access_groups where id = $1", group_id)
-        if deleted.endswith(" 0"):
-            raise _not_found("группа доступа")
+        (§4.2.2): группа перестаёт существовать, а не остаётся висеть в составе тарифа.
+
+        Группа, входившая в состав хоть одного тарифа, уходит из него вместе с удалением, и
+        пользователи этих тарифов теряют доступ на её нодах: на каждую ноду группы в той же
+        транзакции ставится ``composition.publish_node`` — как при выходе группы из тарифа
+        (``PlanService``; отступление от 001.19, задача 001.29b). Строка группы блокируется
+        ``FOR UPDATE`` до чтения её нод и тарифов: незакоммиченная вставка связи с тарифом или
+        нодой держит её ``KEY SHARE``, и чтение дожидается коммита — иначе связь, ушедшая
+        каскадом, осталась бы без публикации (роаст 001.29b, L2)."""
+        async with transaction(self._pool) as conn:
+            if not await conn.fetchval(
+                "select true from access_groups where id = $1 for update", group_id
+            ):
+                raise _not_found("группа доступа")
+            nodes = await conn.fetch(
+                "select node_id from node_access_groups where access_group_id = $1 and exists "
+                "(select 1 from plan_access_groups where access_group_id = $1) order by node_id",
+                group_id,
+            )
+            await conn.execute("delete from access_groups where id = $1", group_id)
+            for row in nodes:
+                await self._composition.enqueue_publish_node(conn, row["node_id"])
 
     # --- тарифицируемые группы: несут деньги, датированы ---------------------------------------
 

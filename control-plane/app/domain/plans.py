@@ -29,6 +29,7 @@ import asyncpg
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from app.db.pool import transaction
+from app.domain.composition import CompositionService
 from app.errors import ApiError
 
 InboundProfile = Literal["vless_raw_vision", "vless_xhttp", "trojan_reality"]
@@ -104,10 +105,13 @@ def _plan(row: asyncpg.Record) -> Plan:
 
 
 class PlanService:
-    """Тарифы поверх пула asyncpg (001.19)."""
+    """Тарифы поверх пула asyncpg (001.19). ``composition`` — поток состава: смена групп тарифа
+    ставит публикацию состава затронутых нод (001.29b); подменяется в тестах, по умолчанию
+    строится над тем же пулом."""
 
-    def __init__(self, pool: Any) -> None:
+    def __init__(self, pool: Any, composition: CompositionService | None = None) -> None:
         self._pool = pool
+        self._composition = composition or CompositionService(pool)
 
     async def list(self) -> list[Plan]:
         async with self._pool.acquire() as conn:
@@ -127,7 +131,9 @@ class PlanService:
             )
             if plan_id is None:
                 raise ApiError("conflict", "тариф с таким именем уже есть", status=409)
-            await self._set_composition(conn, plan_id, data.access_group_ids, data.profiles)
+            await self._set_composition(
+                conn, plan_id, data.access_group_ids, data.profiles, publish=False
+            )
             row = await conn.fetchrow(f"{_SELECT} where p.id = $1", plan_id)
         return _plan(row)
 
@@ -181,27 +187,62 @@ class PlanService:
                     plan_id,
                 )
 
-    @staticmethod
     async def _set_composition(
+        self,
         conn: asyncpg.Connection,
         plan_id: uuid.UUID,
         groups: Sequence[uuid.UUID] | None,
         profiles: Sequence[str] | None,
+        *,
+        publish: bool = True,
     ) -> None:
         """Заменить состав тарифа: связи удаляются и записываются заново. Повтор в переданном
         списке не ошибка запроса — первичный ключ таблицы связи его и так схлопывает, поэтому
-        список приводится к множеству до вставки."""
+        список приводится к множеству до вставки; связи пишутся по возрастанию ``id`` группы.
+
+        Группы, вошедшие в состав или вышедшие из него, меняют состав их нод: на каждую такую
+        ноду в этой же транзакции ставится ``composition.publish_node`` (отступление от 001.19,
+        задача 001.29b). ``publish=False`` — у нового тарифа: подписок на него ещё нет, и
+        составы нод он не меняет. Строки прежних и новых групп блокируются ``FOR UPDATE`` по
+        ``id`` до замены: незакоммиченная вставка группы в ноду (001.87) держит строку группы
+        ``KEY SHARE``, и чтение нод группы дожидается её коммита — иначе нода, вошедшая в
+        группу одновременно с выходом группы из тарифа, осталась бы без публикации (роаст
+        001.29b, L8). Порядок по ``id`` — общий для всех писателей связей с группами: проверка
+        внешнего ключа вставки связи держит строку группы ``KEY SHARE``, а ``FOR UPDATE`` с ней
+        конфликтует, — вставка в порядке запроса (создание тарифа, создание ноды) против
+        изменения тарифа с теми же двумя группами дала бы взаимную блокировку (роаст 001.29b,
+        раунд 2, R2-L1); так же — два изменения тарифов с общими группами."""
         if groups is not None:
+            before = {
+                row["access_group_id"]
+                for row in await conn.fetch(
+                    "select access_group_id from plan_access_groups where plan_id = $1", plan_id
+                )
+            }
+            if publish:
+                await conn.execute(
+                    "select id from access_groups where id = any($1::uuid[]) order by id "
+                    "for update",
+                    sorted(before | set(groups)),
+                )
             await conn.execute("delete from plan_access_groups where plan_id = $1", plan_id)
             try:
                 await conn.executemany(
                     "insert into plan_access_groups (plan_id, access_group_id) values ($1, $2)",
-                    [(plan_id, group_id) for group_id in dict.fromkeys(groups)],
+                    [(plan_id, group_id) for group_id in sorted(set(groups))],
                 )
             except asyncpg.ForeignKeyViolationError as exc:
                 raise ApiError(
                     "unknown_access_group", "группа доступа не найдена", status=422
                 ) from exc
+            changed = before ^ set(groups)
+            if publish and changed:
+                for row in await conn.fetch(
+                    "select distinct node_id from node_access_groups "
+                    "where access_group_id = any($1::uuid[]) order by node_id",
+                    list(changed),
+                ):
+                    await self._composition.enqueue_publish_node(conn, row["node_id"])
         if profiles is not None:
             await conn.execute("delete from plan_protocols where plan_id = $1", plan_id)
             await conn.executemany(

@@ -20,14 +20,13 @@
 - **набор ``SubscriptionState``** — перечисление ``subscription_state`` базы целиком и в том же
   порядке (§4.2.4); кабинет берёт литерал отсюда, а страж сверяет его с ``enum_range`` живой
   базы, а не со списком в тесте;
-- **каждый переход публикует состав**: состояние подписки едет на ноды потоком состава §3.4, и
-  переход, не разбудивший поток, не даёт ни отзыва в пределах Н-14, ни восстановления. Вызов —
-  ``CompositionService.publish_user``, как и ожидает 001.29 («вызывается из
-  ``SubscriptionService``»); чтение (``remaining``) состав не публикует. Ставить вместо вызова
-  задачу очереди (outbox §5.4), как предполагало примечание 001.21, здесь не стали: описание
-  001.29 называет прямой вызов, а ключ идемпотентности задачи ``composition.publish_user``
-  (``publish:{node_id}:{users_seq}``) построен по ноде и последовательности — их знает 001.29,
-  а не эта служба;
+- **каждый переход ставит публикацию состава** в своей транзакции: состояние подписки едет на
+  ноды потоком состава §3.4, и переход, не поставивший публикацию, не даёт ни отзыва в пределах
+  Н-14, ни восстановления. Постановка — ``CompositionService.enqueue_publish_user``, задача
+  ``composition.publish_user`` очереди ``critical`` с ключом ``publish_user:{user_id}:{xid}``
+  (outbox §5.4, 001.29b): она коммитится вместе с переходом и уходит с его откатом, а прямой
+  вызов после коммита терял бы отзыв при крахе между коммитом и вызовом. Чтение
+  (``remaining``) состав не публикует;
 - **начисление трафика — запись журнала баланса, а не правка лимита.** §4.11 говорит «бонус
   увеличивает лимит текущего периода», §4.2.4 — что ``used_billable_bytes`` есть денормализация
   суммы ``balance_entries``, среди источников которой стоят ``bonus`` и ``adjustment``. Выбрано
@@ -117,8 +116,9 @@ def _no_subscription() -> ApiError:
 
 
 class SubscriptionService:
-    """Подписка поверх пула asyncpg (001.22). ``composition`` — поток состава, который будит
-    каждый переход; подменяется в тестах, по умолчанию строится над тем же пулом."""
+    """Подписка поверх пула asyncpg (001.22). ``composition`` — поток состава, публикацию
+    которого ставит каждый переход в своей транзакции (001.29b); подменяется в тестах, по
+    умолчанию строится над тем же пулом."""
 
     def __init__(self, pool: Any, composition: CompositionService | None = None) -> None:
         self._pool = pool
@@ -146,7 +146,7 @@ class SubscriptionService:
                 conn, user_id, plan_id, plan, source, source_id, at=None
             )
             await self._set_current(conn, user_id, period_id, "active", plan["device_limit"])
-        await self._composition.publish_user(user_id)
+            await self._composition.enqueue_publish_user(conn, user_id)
         return period_id
 
     async def renew(
@@ -174,7 +174,7 @@ class SubscriptionService:
                 conn, user_id, current.plan_id, plan, source, source_id, at=start
             )
             await self._set_current(conn, user_id, period_id, "active", plan["device_limit"])
-        await self._composition.publish_user(user_id)
+            await self._composition.enqueue_publish_user(conn, user_id)
         return period_id
 
     async def change_plan(self, user_id: uuid.UUID, plan_id: uuid.UUID, actor: uuid.UUID) -> None:
@@ -206,7 +206,7 @@ class SubscriptionService:
                 user_id,
                 plan["device_limit"],
             )
-        await self._composition.publish_user(user_id)
+            await self._composition.enqueue_publish_user(conn, user_id)
 
     async def add_traffic(
         self,
@@ -259,7 +259,7 @@ class SubscriptionService:
             left = remaining_of(current.traffic_limit_bytes, used)
             if current.state == "suspended_quota" and (left is None or left > 0):
                 await self._set_state(conn, user_id, "active")
-        await self._composition.publish_user(user_id)
+            await self._composition.enqueue_publish_user(conn, user_id)
 
     async def expire(self, user_id: uuid.UUID) -> None:
         """Перевести подписку в ``expired`` по истечении периода: пользователь удаляется из
@@ -273,8 +273,8 @@ class SubscriptionService:
                 "where user_id = $1 and state <> 'expired' returning true",
                 user_id,
             )
-        if changed:
-            await self._composition.publish_user(user_id)
+            if changed:
+                await self._composition.enqueue_publish_user(conn, user_id)
 
     async def set_state(self, user_id: uuid.UUID, state: SubscriptionState, reason: str) -> None:
         """Установить состояние подписки с причиной: ``suspended_quota`` при исчерпании лимита
@@ -288,7 +288,7 @@ class SubscriptionService:
             ):
                 raise _no_subscription()
             await self._set_state(conn, user_id, state)
-        await self._composition.publish_user(user_id)
+            await self._composition.enqueue_publish_user(conn, user_id)
 
     async def remaining(self, user_id: uuid.UUID) -> int | None:
         """Остаток лимита текущего периода в единицах списания: лимит минус израсходованное,

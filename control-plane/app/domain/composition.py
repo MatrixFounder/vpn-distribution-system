@@ -49,10 +49,27 @@ from app.domain.multiplier import MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
 from app.domain.nodes import Node
 from app.domain.statuses import INT4_MAX, INT8_MAX, STREAM_GATE
 from app.errors import ApiError
+from app.jobs.queue import enqueue
 from app.redis import get_redis
 from app.security.crypto import Binding, CipherMismatch, FieldCipher, bound_to, checked_cipher
 
 log = logging.getLogger(__name__)
+
+# Задачи публикации состава (очередь ``critical``, §5.4): ставит бизнес-операция в своей
+# транзакции, исполняют ``publish_user_on`` и ``publish_node_on``. Тип читается при постановке —
+# тесты подменяют его своим, которого живые исполнители стенда не знают (``tests/conftest.py``).
+PUBLISH_USER_JOB = "composition.publish_user"
+PUBLISH_NODE_JOB = "composition.publish_node"
+# Состав ноды пишется порциями (решение заказчика 2026-11-05, роаст 001.29b, L3): задача
+# ``composition.publish_node`` пишет до стольких пользователей и ставит продолжение в конец
+# очереди ``critical`` — отзывы, поставленные раньше продолжения, проходят между порциями, и
+# смена состава большой ноды держит исполнитель не дольше порции (замер стенда: 2,6 мс на
+# пользователя — около 0,5 с на порцию). Первые порции одной операции стоят в очереди подряд,
+# продолжения встают за ними: отзыв по квоте проходит очередь дважды (``limits.check``, затем
+# ``composition.publish_user``) и после смены групп тарифа на K нод, у которых больше порции
+# пользователей, ждёт около 2 × K × 0,52 с — числа и решение заказчика оставить 200 после
+# раунда 3 записаны в задаче 001.29b.
+PUBLISH_NODE_BATCH = 200
 
 # Перечисление ``user_node_state`` data-model.md §4.2.3.
 UserState = Literal["active", "suspended_quota", "suspended_admin", "expired", "removed"]
@@ -375,6 +392,27 @@ select node_id from (
 ) candidates
 order by node_id
 """
+# Пользователи, которых может коснуться состав ноды целиком (``publish_node``): пересечение групп
+# доступа их тарифа с группами ноды (кроме удалённых) и пользователи со строкой не в ``removed``
+# на ноде. Порядок — по ``user_id``: порция начинается после последнего пользователя прежней
+# (``$2``, ``NULL`` — с начала) и берёт не больше ``$3``; блокировку пользователя исполнитель
+# держит одну за раз, и порядок взаимной блокировки не создаёт.
+_NODE_CANDIDATES = """
+select user_id from (
+    select s.user_id
+      from subscriptions s
+      join users usr on usr.id = s.user_id and usr.status <> 'deleted'
+      join subscription_periods p on p.id = s.current_period_id
+      join plan_access_groups pag on pag.plan_id = p.plan_id
+      join node_access_groups nag on nag.access_group_id = pag.access_group_id
+     where nag.node_id = $1 and s.state <> 'none'
+    union
+    select user_id from node_user_state where node_id = $1 and state <> 'removed'
+) candidates
+where $2::uuid is null or user_id > $2
+order by user_id
+limit $3
+"""
 # Публикации одного пользователя идут по очереди: сессионная advisory-блокировка подключения
 # исполнителя (пространство ключей ``PUBLISH_LOCK_CLASS``, ключ — хеш ``user_id``) берётся до
 # выбора кандидатов и снимается после последней ноды. Без неё запуск B (после смены тарифа) мог
@@ -390,9 +428,11 @@ _UNLOCK_USER = "select pg_advisory_unlock($1, hashtext($2))"
 _LOCK_NODE = "select id from nodes where id = $1 for no key update"
 # Состояние пары, прочитанное под блокировкой строки ноды: подписка, общая группа тарифа и
 # ноды, нынешняя строка и запись credentials, заблокированные адреса пользователя (R-27).
+# Удалённый пользователь (``users.status = 'deleted'``) группу ни с одной нодой не делит: при
+# действующей подписке он получает только строки ``removed`` (001.29b).
 _PAIR = """
 select s.state::text as subscription_state,
-       s.state is not null and s.state <> 'none' and exists (
+       s.state is not null and s.state <> 'none' and usr.status <> 'deleted' and exists (
            select 1
              from subscription_periods p
              join plan_access_groups pag on pag.plan_id = p.plan_id
@@ -405,6 +445,7 @@ select s.state::text as subscription_state,
        array(select b.ip from user_blocked_ips b where b.user_id = $1 order by b.ip)
            as blocked_ips
   from (select $1::uuid as user_id) u
+  left join users usr on usr.id = u.user_id
   left join subscriptions s on s.user_id = u.user_id
   left join node_user_state r on r.user_id = u.user_id and r.node_id = $2
   left join node_user_credentials c on c.user_id = u.user_id and c.node_id = $2
@@ -453,6 +494,22 @@ _READ_SNAPSHOT = (
     _ROW_COLUMNS + " where s.node_id = $1 and s.state <> 'removed' order by s.updated_seq"
 )
 _MARK_RESYNC = "update nodes set resync_required = true where id = $1 and not resync_required"
+
+
+async def _place(conn: Any, kind: str, payload: dict[str, str], key: str) -> None:
+    """Постановка задачи публикации в транзакции ``conn``: вне транзакции — ``RuntimeError`` до
+    обращения к базе. ``{xid}`` в ключе — номер транзакции (``pg_current_xact_id``): повтор той же
+    транзакцией — та же задача, изменение другой транзакции публикует её задача."""
+    if not conn.is_in_transaction():
+        raise RuntimeError("публикация состава ставится в транзакции бизнес-операции")
+    if "{xid}" in key:
+        key = key.replace("{xid}", await conn.fetchval("select pg_current_xact_id()::text"))
+    await enqueue(conn, "critical", kind, payload, key)
+
+
+class _NodeGone(Exception):  # noqa: N818 — сигнал публикации, не ошибка
+    """Строки ноды нет — нода удалена между выбором кандидатов и блокировкой: писать на неё
+    нечего (``publish_user_on`` идёт к следующей ноде, ``publish_node_on`` останавливается)."""
 
 
 class _KeysWithheld(Exception):  # noqa: N818 — сигнал публикации, не ошибка
@@ -526,9 +583,18 @@ class CompositionService:
             return False
         return True
 
+    async def _cipher_or_mismatch(self) -> tuple[FieldCipher | None, CipherMismatch | None]:
+        """Шифр процесса или отказ его сверки (WI-38): с чужим ключом публикация пишет строки,
+        которым ключи не нужны, и отказывает там, где они нужны (``_KeysWithheld``)."""
+        try:
+            return await self._field_cipher(), None
+        except CipherMismatch as exc:
+            return None, exc
+
     async def publish_user(self, user_id: uuid.UUID) -> None:
-        """Опубликовать доступ пользователя на его нодах на подключении из пула (прямые вызовы
-        ``SubscriptionService`` 001.22 после коммита — до перевода на очередь в 001.29b)."""
+        """Опубликовать доступ пользователя на его нодах на подключении из пула — прямой запуск
+        исполнителя (тесты, ручная публикация). Бизнес-операции не вызывают его, а ставят задачу
+        в своей транзакции (``enqueue_publish_user``, 001.29b)."""
         async with self._pool.acquire() as conn:
             await self.publish_user_on(conn, user_id)
 
@@ -557,12 +623,7 @@ class CompositionService:
         доходит до нод и при чужом ключе."""
         if conn.is_in_transaction():
             raise RuntimeError("публикация состава идёт на подключении вне транзакции")
-        mismatch: CipherMismatch | None = None
-        cipher: FieldCipher | None = None
-        try:
-            cipher = await self._field_cipher()
-        except CipherMismatch as exc:
-            mismatch = exc
+        cipher, mismatch = await self._cipher_or_mismatch()
         key = str(user_id)
         written: list[tuple[uuid.UUID, int]] = []
         held: list[uuid.UUID] = []
@@ -575,6 +636,8 @@ class CompositionService:
                         seq = await self._publish_pair(conn, user_id, node_id, cipher)
                 except _KeysWithheld:
                     held.append(node_id)
+                    continue
+                except _NodeGone:
                     continue
                 if seq is not None:
                     written.append((node_id, seq))
@@ -608,15 +671,16 @@ class CompositionService:
         self, conn: Any, user_id: uuid.UUID, node_id: uuid.UUID, cipher: FieldCipher | None
     ) -> int | None:
         """Строка пары «пользователь × нода» в транзакции вызывающего; номер записанной строки
-        или ``None``, если писать нечего. ``cipher`` — сверенный шифр процесса или ``None``, если
-        сверка не прошла: строка ``active`` тогда не пишется (``_KeysWithheld`` — до выделения
-        номера), а у пары в состоянии без доступа создание и замена credentials откладываются до
-        публикации со сверенным шифром — строке без доступа ключи не нужны.
+        или ``None``, если писать нечего. Строки ноды нет — ``_NodeGone``. ``cipher`` — сверенный
+        шифр процесса или ``None``, если сверка не прошла: строка ``active`` тогда не пишется
+        (``_KeysWithheld`` — до выделения номера), а у пары в состоянии без доступа создание и
+        замена credentials откладываются до публикации со сверенным шифром — строке без доступа
+        ключи не нужны.
 
         Состояние пользователя читается **после** блокировки строки ноды. Две публикации одного
-        пользователя уже идут по очереди (``_LOCK_USER``); чтение под блокировкой ноды — против
-        писателей строк пользователя на этой ноде, которые блокировку пользователя не берут
-        (состав ноды целиком — 001.29b, ротация credentials — 001.29d): запуск, прочитавший
+        пользователя уже идут по очереди (``_LOCK_USER``; ``publish_node_on`` берёт её тоже); чтение
+        под блокировкой ноды — против писателей строк пользователя на этой ноде, которые
+        блокировку пользователя не берут (ротация credentials — 001.29d): запуск, прочитавший
         состояние до блокировки, мог бы ждать её, пока такой писатель пишет новое состояние, и
         записать старое с большим номером — у ноды остался бы снятый доступ.
 
@@ -625,7 +689,7 @@ class CompositionService:
         credentials удаляется (data-model §4.2.3 «Состав строк»). Номер выделяется, только когда
         строка пишется: пустой номер оставил бы дыру в курсоре ноды."""
         if not await self._lock_node(conn, node_id):
-            return None  # нода исчезла между выбором кандидатов и блокировкой
+            raise _NodeGone
         pair = await conn.fetchrow(_PAIR, user_id, node_id)
         shares = bool(pair["shares_group"])
         if not shares and pair["row_state"] in (None, "removed"):
@@ -921,6 +985,126 @@ class CompositionService:
         """Новая версия конфигурации ноды: запись ``node_config_versions`` и ``PUBLISH
         node:{id}`` — 001.29c (генератор конфигурации — 001.27)."""
 
-    async def remove_user(self, user_id: uuid.UUID) -> None:
-        """Снять доступ пользователя: строки в ``removed`` и отзыв credentials — 001.29b
-        (бюджет Н-13 на доставку отзыва — §5.4)."""
+    async def enqueue_publish_user(self, conn: Any, user_id: uuid.UUID) -> None:
+        """Поставить ``composition.publish_user`` в транзакции бизнес-операции ``conn`` (§5.4,
+        Н-14; 001.29b): задача коммитится вместе с изменением и уходит с его откатом, а прямой
+        вызов после коммита терял бы отзыв при крахе между коммитом и вызовом. Ключ —
+        ``publish_user:{user_id}:{xid}``: повторная постановка той же транзакцией — та же задача,
+        изменение другой транзакции публикует её задача. Очередь ``critical`` (бюджет Н-13)."""
+        await _place(
+            conn, PUBLISH_USER_JOB, {"user_id": str(user_id)}, f"publish_user:{user_id}:{{xid}}"
+        )
+
+    async def enqueue_publish_node(self, conn: Any, node_id: uuid.UUID) -> None:
+        """Поставить ``composition.publish_node`` в транзакции бизнес-операции ``conn``: ключ
+        ``publish_node:{node_id}:{xid}``, очередь ``critical`` (001.29b). Ставят смена групп тарифа
+        (``PlanService``) и удаление группы доступа тарифа (``GroupService.delete_access``), первый
+        ``active`` ноды (001.30) и смена групп ноды (001.87)."""
+        await _place(
+            conn, PUBLISH_NODE_JOB, {"node_id": str(node_id)}, f"publish_node:{node_id}:{{xid}}"
+        )
+
+    async def _continue_node(self, conn: Any, node_id: uuid.UUID, after: uuid.UUID) -> None:
+        """Продолжение состава ноды со следующего после ``after`` пользователя — в конец очереди
+        ``critical``. Ключ ``publish_node:{node_id}:after:{after}`` — без номера транзакции:
+        повтор порции, пока её продолжение ждёт или исполняется, ставит то же продолжение, а не
+        вторую цепочку (уникальность ключа — среди ``pending`` и ``running``). Повтор после
+        исполнения продолжения (исполнитель упал после постановки и задача вернулась по истечении
+        аренды) или с другим последним пользователем порции (кандидаты сдвинулись между
+        попытками) ставит вторую цепочку остатка: остаток пишется ещё раз с новыми номерами,
+        применение строк идемпотентно."""
+        await _place(
+            conn,
+            PUBLISH_NODE_JOB,
+            {"node_id": str(node_id), "after": str(after)},
+            f"publish_node:{node_id}:after:{after}",
+        )
+
+    async def remove_user(self, conn: Any, user_id: uuid.UUID) -> None:
+        """Снять доступ удалённого пользователя в транзакции вызывающего — той, что пишет
+        ``users.status = 'deleted'`` (``delete_account``, 001.17): постановка
+        ``composition.publish_user``. Исполнитель для удалённого пишет на всех его нодах только
+        строки ``removed`` и удаляет credentials (``_PAIR``), бюджет Н-13 — очередь ``critical``.
+
+        Принимает ``conn`` вызывающего (отступление от сигнатуры заглушки 001.28): снятие
+        доступа коммитится вместе с удалением, а не после него."""
+        await self.enqueue_publish_user(conn, user_id)
+
+    async def publish_node(self, node_id: uuid.UUID, after: uuid.UUID | None = None) -> None:
+        """Порция состава ноды на подключении из пула — прямой запуск исполнителя (тесты, ручная
+        публикация); бизнес-операции ставят задачу ``enqueue_publish_node``."""
+        async with self._pool.acquire() as conn:
+            await self.publish_node_on(conn, node_id, after)
+
+    async def publish_node_on(
+        self, conn: Any, node_id: uuid.UUID, after: uuid.UUID | None = None
+    ) -> None:
+        """Исполнитель задачи ``composition.publish_node`` (001.29b) на подключении вызывающего
+        вне транзакции: порция состава ноды — до ``PUBLISH_NODE_BATCH`` пользователей
+        ``_NODE_CANDIDATES`` после ``after`` (``None`` — с начала) — в состоянии их подписки,
+        ``removed`` — тем, кто ноду больше не делит; ``PUBLISH node:{id}`` один раз, после
+        коммита последней строки порции, её номером. Остались пользователи — продолжение
+        (``_continue_node``) в конец очереди ``critical``: отзывы, поставленные раньше него,
+        проходят между порциями (решение заказчика 2026-11-05).
+
+        Кандидаты порции читаются под блокировкой строки ноды (``_LOCK_NODE``, короткая
+        транзакция): публикация пользователя, прочитавшая состояние пары на этой ноде до смены
+        состава и ещё не закоммиченная, держит строку ноды — чтение ждёт её коммита и видит её
+        строку (без этого порция пропустила бы пользователя, чья незакоммиченная строка ещё не
+        видна, а его тариф ноду уже не делит, — доступ остался бы; роаст 001.29b, L1). Нода
+        удалена — порция пуста.
+
+        Пользователи идут по ``user_id``, по одному: блокировка публикации пользователя
+        (``_LOCK_USER``) — **до** блокировки строки ноды, затем своя транзакция с записью пары
+        (``_publish_pair``), снятие блокировки — после её коммита. Так строка не пишется в обход
+        ``publish_user`` того же пользователя (тот выбрал бы кандидатов без незакоммиченной
+        строки и не снял бы доступ), а порядок «пользователь → нода» тот же, что у
+        ``publish_user``, и взаимной блокировки нет (001.29, роаст раунд 3, R3-1). Блокировки всех
+        пользователей порции сразу не берутся: до ``PUBLISH_NODE_BATCH`` advisory-блокировок одной
+        сессии заняли бы общую таблицу блокировок; задача на каждого пользователя публиковала бы
+        все его ноды.
+        Нода исчезла посреди порции — порция останавливается, продолжения нет.
+
+        Ключ процесса не тот (WI-38) — как у ``publish_user_on``: строки без доступа пишутся,
+        строки ``active`` пропускаются; после продолжения и пробуждения — ``CipherMismatch``."""
+        if conn.is_in_transaction():
+            raise RuntimeError("публикация состава идёт на подключении вне транзакции")
+        cipher, mismatch = await self._cipher_or_mismatch()
+        batch = PUBLISH_NODE_BATCH
+        async with conn.transaction():
+            if not await self._lock_node(conn, node_id):
+                return
+            rows = await conn.fetch(_NODE_CANDIDATES, node_id, after, batch + 1)
+        users = [row["user_id"] for row in rows[:batch]]
+        rest = len(rows) > batch
+        last: int | None = None
+        held = 0
+        for user_id in users:
+            key = str(user_id)
+            await conn.execute(_LOCK_USER, PUBLISH_LOCK_CLASS, key)
+            try:
+                async with conn.transaction():
+                    seq = await self._publish_pair(conn, user_id, node_id, cipher)
+            except _KeysWithheld:
+                held += 1
+                continue
+            except _NodeGone:
+                rest = False
+                break
+            finally:
+                if not conn.is_closed():
+                    await conn.execute(_UNLOCK_USER, PUBLISH_LOCK_CLASS, key)
+            if seq is not None:
+                last = seq
+        if rest:
+            async with conn.transaction():
+                await self._continue_node(conn, node_id, users[-1])
+        if last is not None:
+            await self._wake(node_id, last)
+        if held and mismatch is not None:
+            log.error(
+                "нода %s: ключ процесса не сверен — строки active %d пользователей не записаны",
+                node_id,
+                held,
+            )
+            raise mismatch

@@ -13,7 +13,10 @@ from typing import Any
 
 import asyncpg
 import httpx
+from app.domain import composition
 from app.domain.composition import credentials_bound, xray_email
+from app.jobs import queue as jobs
+from app.jobs.handlers import composition as handlers
 from app.security.crypto import FieldCipher
 
 from tests._agent import LAYOUT, LAYOUT_SEQ, layout_credentials
@@ -151,3 +154,20 @@ def cursors(users_seq: int, *, full: bool = False) -> dict[str, Any]:
     if full:
         params["full"] = 1
     return params
+
+
+async def run_publications(conn: asyncpg.Connection) -> list[jobs.Job]:
+    """Исполнить поставленные задачи публикации состава так, как их исполняет очередь: выборка
+    (``claim`` очереди ``critical`` по типам), обработчик, завершение. Типы — подменённые
+    фикстурой ``tests/conftest.py`` (живые исполнители стенда их не берут); исполненные задачи —
+    в порядке выборки."""
+    run = {
+        composition.PUBLISH_USER_JOB: handlers.publish_user,
+        composition.PUBLISH_NODE_JOB: handlers.publish_node,
+    }
+    done: list[jobs.Job] = []
+    while (job := await jobs.claim(conn, "critical", "t29b", types=tuple(run))) is not None:
+        await run[job.type](conn, job)
+        await jobs.complete(conn, job.id, "t29b")
+        done.append(job)
+    return done
