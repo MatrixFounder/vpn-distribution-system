@@ -10,9 +10,9 @@ UC-01, UC-07, UC-11).
 выдача читает курсор ноды, её ``resync_required`` и строки в одном снимке базы, применяет вентиль,
 взводит ``resync_required`` в колонке ноды у урезанного ответа и расшифровывает credentials только
 строк ноды из identity. Постановка публикации в транзакции бизнес-операции, ``publish_node`` и
-``remove_user`` — 001.29b; поток конфигурации — 001.29c; поколение и контрольная сумма состава —
-001.75b; удержание long-poll до 30 с на канале Redis ``node:{id}`` — 001.75c; подтверждение
-курсоров и снятие ``resync_required`` — 001.75; конфигурация Xray и её версии — 001.26, 001.27.
+``remove_user`` — 001.29b; поколение и контрольная сумма состава — 001.75b; удержание long-poll
+до 30 с на канале Redis ``node:{id}`` — 001.75c; подтверждение курсоров и снятие
+``resync_required`` — 001.75; конфигурация Xray и её версии — 001.26, 001.27.
 
 Задача 001.26: раздел ``agent`` ответа — параметры агента вне документа Xray (лимиты nftables,
 коэффициент, стратегия разрыва) со своим курсором версии. Раздел не входит в ``config.json`` и в
@@ -21,11 +21,21 @@ nftables, запись в хранилище агента), а перезапу�
 документа (interfaces.md §5.2). Значения заполняют 001.27 (лимиты), 001.36 (коэффициент), 001.40
 (стратегия).
 
-Что остаётся заглушкой: поток конфигурации (каркас ``STUB_CONFIG_DOCUMENT`` версии 1), раздел
-``agent`` версии 1 и поколение 1 — «что нового» по ним выводится из курсоров запроса. Вентиль по
-статусу берётся из ``domain.statuses`` (§4.6 — единственный источник правил), тег пользователя
-выводится из его идентификатора (``xray_email``), а поток конфигурации не несёт credentials —
-инвариант §5.2.
+Задача 001.29c — поток конфигурации на строках базы: ``publish_config`` в транзакции
+вызывающего выделяет версию (``nodes.desired_config_version``) и пишет строку
+``node_config_versions`` — документ ``XrayConfigBuilder.build`` без закрытых ключей REALITY и
+``checksum`` документа с ключами; первую версию публикует подтверждение ноды (``NodeService.
+approve``). Выдача читает версию ноды и её строку в снимке состава, вставляет ключи ноды из
+identity (``with_reality_keys``) и сверяет сумму документа с ключами со строкой: расхождение или
+отказ источника ключа — раздела ``config`` нет, состав и команды выдаются, ошибка в журнале
+(решения заказчика 2026-11-04 и 2026-11-05).
+
+Что остаётся заглушкой: раздел ``agent`` версии 1 (001.29f) и поколение 1 (001.75b) — «что
+нового» по ним выводится из курсоров запроса; документ конфигурации собирается по inbound
+заглушки (``inbounds.stub_inbounds``), ключ REALITY — ``xray_config.stub_reality_key`` (оба
+заменяет 001.27). Вентиль по статусу берётся из ``domain.statuses``
+(§4.6 — единственный источник правил), тег пользователя выводится из его идентификатора
+(``xray_email``), а поток конфигурации не несёт credentials — инвариант §5.2.
 """
 
 from __future__ import annotations
@@ -38,7 +48,7 @@ import secrets
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -46,12 +56,15 @@ from redis.exceptions import RedisError
 
 from app.domain.commands import Command, CommandService
 from app.domain.multiplier import MULTIPLIER_MILLI_MAX, MULTIPLIER_STEP_MILLI
-from app.domain.nodes import Node
+from app.domain.nodes import Node, read_node
 from app.domain.statuses import INT4_MAX, INT8_MAX, STREAM_GATE
 from app.errors import ApiError
 from app.jobs.queue import enqueue
 from app.redis import get_redis
 from app.security.crypto import Binding, CipherMismatch, FieldCipher, bound_to, checked_cipher
+
+if TYPE_CHECKING:
+    from app.domain.xray_config import RealityKeySource
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +115,9 @@ def config_checksum(document: Mapping[str, Any]) -> str:
 
 class StateConfig(BaseModel):
     """Поток конфигурации: полная конфигурация Xray без credentials пользователей (§5.2), её
-    версия ``node_config_versions.config_version`` и контрольная сумма."""
+    версия ``node_config_versions.config_version`` и контрольная сумма. Документ несёт закрытые
+    ключи REALITY ноды запроса — их вставляет выдача (001.29c), ``checksum`` — по документу с
+    ключами."""
 
     version: int = Field(ge=1)
     checksum: Checksum
@@ -228,38 +243,12 @@ class AckIn(BaseModel):
 
 # --- фиксированные значения заглушки ------------------------------------------------------------
 
-STUB_CONFIG_VERSION = 1
 STUB_AGENT_VERSION = 1
 STUB_GENERATION = 1  # первое поколение identity: ``node_identities.generation`` начинается с 1
 # Размер гранта заглушки — 1 ГиБ; ту же константу использует служба грантов (``accounting.quota``
 # импортирует её отсюда: домен не импортирует учёт). Настоящий размер задаёт 001.36 (R-26,
 # ОВ-A7), и в поток состава он придёт через граф зависимостей, а не импортом.
 STUB_QUOTA_GRANT_BYTES = 1073741824
-
-# Каркас конфигурации Xray: структура без пользователей. Это не выдача генератора: форму
-# серверного документа в именах v26.10.31 объявляет ``XrayConfigBuilder`` (заглушка 001.26,
-# сборка 001.27), а поток конфигурации начнёт отдавать его документ из ``node_config_versions``
-# с 001.29c. Здесь важно одно свойство §5.2: состав inbound пуст, credentials пользователей
-# потоком конфигурации не передаются.
-STUB_CONFIG_DOCUMENT: dict[str, Any] = {
-    "log": {"loglevel": "warning"},
-    "inbounds": [
-        {
-            "tag": "vless_raw_vision",
-            "port": 443,
-            "protocol": "vless",
-            "settings": {"clients": [], "decryption": "none"},
-            "streamSettings": {"network": "raw", "security": "reality"},
-        }
-    ],
-    "outbounds": [
-        {"tag": "direct", "protocol": "freedom"},
-        {"tag": "blackhole", "protocol": "blackhole"},
-    ],
-}
-# Сумма постоянна для пары «нода × версия конфигурации»: в бою она лежит в строке
-# ``node_config_versions`` и считается один раз при публикации (001.27), а не при каждой выдаче.
-STUB_CONFIG_CHECKSUM = config_checksum(STUB_CONFIG_DOCUMENT)
 
 # Раздел ``agent`` заглушки. ``max_conn_per_ip`` равен лимиту карточки ``stub_node``;
 # ``new_conn_rate_per_ip`` — значение заглушки, не умолчание: умолчания у поля нет, оно
@@ -276,13 +265,6 @@ STUB_AGENT = StateAgent(
 def stub_agent() -> StateAgent:
     """Раздел ``agent`` заглушки: фиксированные значения (копия — ответ не делит объект)."""
     return STUB_AGENT.model_copy()
-
-
-def stub_config() -> StateConfig:
-    """Поток конфигурации заглушки: версия, каркас и контрольная сумма от него самого."""
-    return StateConfig(
-        version=STUB_CONFIG_VERSION, checksum=STUB_CONFIG_CHECKSUM, json=STUB_CONFIG_DOCUMENT
-    )
 
 
 # Отказы раздела несут ``Retry-After``: иначе частоту повторов определяет только агент, а
@@ -349,13 +331,26 @@ RowsRead = Literal["snapshot", "delta", "none"]
 
 
 @dataclass(frozen=True, slots=True)
+class StoredConfig:
+    """Строка ``node_config_versions``: документ без закрытых ключей REALITY и ``checksum``
+    документа с ключами (сумма считается при публикации, 001.29c)."""
+
+    version: int
+    document: dict[str, Any]
+    checksum: str
+
+
+@dataclass(frozen=True, slots=True)
 class NodeComposition:
-    """Состав ноды в одном снимке базы: ``nodes.desired_users_seq``, ``nodes.resync_required``
-    и выбранные строки."""
+    """Состояние ноды в одном снимке базы: ``nodes.desired_users_seq``, ``nodes.resync_required``
+    и выбранные строки состава; ``nodes.desired_config_version`` и выданная конфигурация этой
+    версии (``None`` — не запрошена, нечего выдавать или выдача отказала)."""
 
     users_seq: int
     resync_required: bool
     rows: list[StoredRow]
+    config_version: int
+    config: StateConfig | None
 
 
 async def next_users_seq(conn: Any, node_id: uuid.UUID) -> int:
@@ -480,7 +475,24 @@ def credentials_bound(column: str, user_id: uuid.UUID, node_id: uuid.UUID) -> Bi
     return bound_to("node_user_credentials", column, user_id, node_id)
 
 
-_READ_NODE = "select desired_users_seq, resync_required from nodes where id = $1"
+_READ_NODE = (
+    "select desired_users_seq, resync_required, desired_config_version from nodes where id = $1"
+)
+_READ_CONFIG = (
+    "select config_json, checksum from node_config_versions "
+    "where node_id = $1 and config_version = $2"
+)
+# Версия конфигурации выделяется так же, как номер состава (``next_users_seq``): ``UPDATE nodes …
+# RETURNING`` в транзакции вызывающего держит строку ноды до коммита, и версии одной ноды
+# коммитятся по возрастанию.
+_NEXT_CONFIG_VERSION = (
+    "update nodes set desired_config_version = desired_config_version + 1 where id = $1 "
+    "returning desired_config_version"
+)
+_INSERT_CONFIG = (
+    "insert into node_config_versions (node_id, config_version, config_json, checksum) "
+    "values ($1, $2, $3::jsonb, $4)"
+)
 _ROW_COLUMNS = """
 select s.user_id, s.state::text as state, s.quota_grant_bytes, s.blocked_ips, s.updated_seq,
        c.vless_uuid_enc, c.trojan_password_enc, c.version as credentials_version
@@ -520,18 +532,22 @@ class _KeysWithheld(Exception):  # noqa: N818 — сигнал публикац�
 class CompositionService:
     """Потоки конфигурации и состава поверх пула asyncpg. Состав (001.29): исполнитель
     публикации пишет ``node_user_state`` и ``node_user_credentials`` и будит канал Redis
-    ``node:{id}``, выдача читает строки ноды из базы. Поток конфигурации и раздел ``agent`` —
-    фиксированные значения до 001.29c и владельцев полей раздела."""
+    ``node:{id}``, выдача читает строки ноды из базы. Конфигурация (001.29c): ``publish_config``
+    пишет версию в ``node_config_versions``, выдача вставляет закрытые ключи REALITY ноды из
+    identity; источник ключа — ``reality_key`` (до 001.27 — ``stub_reality_key``). Раздел
+    ``agent`` — фиксированные значения до владельцев его полей."""
 
     def __init__(
         self,
         pool: Any,
         commands: CommandService | None = None,
         cipher: FieldCipher | None = None,
+        reality_key: RealityKeySource | None = None,
     ) -> None:
         self._pool = pool
         self._commands = commands or CommandService(pool)
         self._cipher = cipher
+        self._reality_key = reality_key
 
     async def _field_cipher(self) -> FieldCipher:
         """Шифр credentials (§7.2): шифр процесса, сверенный с контрольным контейнером базы
@@ -569,15 +585,16 @@ class CompositionService:
         except InvalidTag, ValueError:  # ValueError: и UnicodeDecodeError, и ValidationError
             return None
 
-    async def _wake(self, node_id: uuid.UUID, users_seq: int) -> bool:
-        """``PUBLISH node:{id}`` номером строки после коммита — пробуждение удержанного запроса
-        состояния (§5.2 «Long-poll»); ``False`` — Redis недоступен. Потеря сообщения стоит до
-        30 с таймаута удержания, а не доставки (раскладка Н-13, interfaces.md §5.4), поэтому сбой
-        Redis пишется в журнал и публикацию не валит: строки уже закоммичены, и повтор задачи
-        выдал бы им новые номера без нужды."""
+    async def _wake(self, node_id: uuid.UUID, mark: int | str) -> bool:
+        """``PUBLISH node:{id}`` после коммита — пробуждение удержанного запроса состояния (§5.2
+        «Long-poll»); ``mark`` — номер строки состава или ``config:{версия}``: удержание читает
+        состояние заново, метка — для журнала и отладки. ``False`` — Redis недоступен. Потеря
+        сообщения стоит до 30 с таймаута удержания, а не доставки (раскладка Н-13, interfaces.md
+        §5.4), поэтому сбой Redis пишется в журнал и публикацию не валит: строки уже
+        закоммичены, и повтор задачи выдал бы им новые номера без нужды."""
         try:
             redis = await get_redis()
-            await redis.publish(f"node:{node_id}", str(users_seq))
+            await redis.publish(f"node:{node_id}", str(mark))
         except RedisError as exc:
             log.warning("node:%s: пробуждение не отправлено (%s)", node_id, exc)
             return False
@@ -745,11 +762,18 @@ class CompositionService:
             await conn.execute(_DELETE_CREDENTIALS, user_id, node_id)
         return seq
 
-    async def _read(self, node_id: uuid.UUID, users_seq: int, rows: RowsRead) -> NodeComposition:
+    async def _read(
+        self, node_id: uuid.UUID, users_seq: int, rows: RowsRead, config_after: int | None
+    ) -> NodeComposition:
         """Курсор ноды, её признак ``resync_required`` и строки — в одном снимке базы
         (``repeatable read``): строка, закоммиченная между чтением курсора и строк, не попадёт в
         ответ без курсора, который её покрывает. ``rows``: ``snapshot`` — все строки, кроме
-        ``removed``; ``delta`` — с номером больше ``users_seq``; ``none`` — без строк."""
+        ``removed``; ``delta`` — с номером больше ``users_seq``; ``none`` — без строк.
+
+        В том же снимке — версия конфигурации ноды и, если она больше ``config_after``
+        (``None`` — конфигурация не выдаётся), её строка с ключами ноды (``_issue_config``):
+        ключ читается тем же снимком, что и строка, и ротация ключевой пары, закоммиченная между
+        чтениями, не выглядит сменой ключа без новой версии."""
         async with (
             self._pool.acquire() as conn,
             conn.transaction(isolation="repeatable_read", readonly=True),
@@ -762,6 +786,22 @@ class CompositionService:
                 records = await conn.fetch(_READ_SNAPSHOT, node_id)
             elif rows == "delta":
                 records = await conn.fetch(_READ_DELTA, node_id, users_seq)
+            version = int(node["desired_config_version"])
+            config = None
+            if config_after is not None and version > config_after:
+                stored = await conn.fetchrow(_READ_CONFIG, node_id, version)
+                config = await self._issue_config(
+                    conn,
+                    node_id,
+                    None
+                    if stored is None
+                    else StoredConfig(
+                        version=version,
+                        document=json.loads(stored["config_json"]),
+                        checksum=stored["checksum"],
+                    ),
+                    version,
+                )
         return NodeComposition(
             users_seq=int(node["desired_users_seq"]),
             resync_required=bool(node["resync_required"]),
@@ -778,7 +818,84 @@ class CompositionService:
                 )
                 for r in records
             ],
+            config_version=version,
+            config=config,
         )
+
+    async def _keyed(
+        self, conn: Any, node_id: uuid.UUID, document: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Документ с закрытыми ключами REALITY ноды ``node_id`` — по ключу на тег inbound
+        REALITY из источника ``reality_key`` (по умолчанию ``stub_reality_key``) на подключении
+        ``conn``. Отказ источника не перехватывается: публикация откатывается с ним, выдача
+        решает сама (``_issue_config``)."""
+        # xray_config импортирует plans, а plans — этот модуль: импорт на месте.
+        from app.domain.xray_config import reality_tags, stub_reality_key, with_reality_keys
+
+        source = self._reality_key or stub_reality_key
+        keys = {tag: await source(conn, node_id, tag) for tag in reality_tags(document)}
+        return with_reality_keys(document, keys)
+
+    async def _issue_config(
+        self, conn: Any, node_id: uuid.UUID, stored: StoredConfig | None, version: int
+    ) -> StateConfig | None:
+        """Раздел ``config`` ноде ``node_id`` — строка версии ``version`` с ключами ноды из
+        identity запроса (``_keyed`` на подключении ``conn``) или ``None`` с ошибкой в журнале
+        приложения (``node_id`` и версия): раздел не выдаётся, нода остаётся на применённой
+        версии, состав и команды выдаются по своим правилам (решения заказчика 2026-11-04 и
+        2026-11-05).
+
+        ``None`` — когда:
+
+        - источник ключа отказал: контейнер ``inbound_secrets`` не открывается привязкой своей
+          строки (``InvalidTag``, ``ValueError`` — и ключ не в 32 байта) или ключ процесса не тот
+          (``CipherMismatch``, WI-38);
+        - сумма документа с ключами не равна ``checksum`` строки: ключевой материал сменился без
+          новой версии, и нода отвергла бы документ по контрольной сумме (§5.2);
+        - строки версии нет — ``desired_config_version`` без своей строки — или строка повреждена
+          по форме (``MalformedConfig``; ключи тогда не запрашиваются): публикация пишет строку
+          и версию одной транзакцией по документу ``build``, так что это повреждение данных, а не
+          гонка (роаст раунд 1, L1).
+
+        Тег без ключа (``KeyError`` вставки) и исключение источника вне набора отказов — дефект
+        кода, а не данных, и не перехватываются: расширенный перехват выдал бы ответ без
+        ``config`` с ложной записью «ключ не получен»."""
+        # xray_config импортирует plans, а plans — этот модуль: импорт на месте.
+        from app.domain.xray_config import MalformedConfig
+
+        if stored is None:
+            log.error(
+                "нода %s, конфигурация %d: строки версии нет — config не выдан", node_id, version
+            )
+            return None
+        try:
+            keyed = await self._keyed(conn, node_id, stored.document)
+        except MalformedConfig:
+            log.error(
+                "нода %s, конфигурация %d: строка версии повреждена — config не выдан",
+                node_id,
+                version,
+            )
+            return None
+        except (InvalidTag, ValueError, CipherMismatch) as exc:
+            # Текст исключения в журнал не идёт: в нём мог бы оказаться ключевой материал.
+            log.error(
+                "нода %s, конфигурация %d: закрытый ключ REALITY не получен (%s) — config не выдан",
+                node_id,
+                version,
+                type(exc).__name__,
+            )
+            return None
+        checksum = config_checksum(keyed)
+        if checksum != stored.checksum:
+            log.error(
+                "нода %s, конфигурация %d: сумма документа с ключами не совпала со строкой — "
+                "ключевой материал или строка изменились без новой версии; config не выдан",
+                node_id,
+                version,
+            )
+            return None
+        return StateConfig(version=version, checksum=checksum, json=keyed)
 
     async def _mark_resync(self, node_id: uuid.UUID) -> None:
         """Взвести ``nodes.resync_required``: ответ отфильтрован статусом, и при выходе из
@@ -887,7 +1004,10 @@ class CompositionService:
         # Снапшот присланный курсор игнорирует (README контракта): нода просит его как раз тогда,
         # когда её курсору нельзя верить (курсор впереди после восстановления, смена поколения).
         # Урезанный «снапшот» читает дельту от нуля — все строки ноды, включая ``removed``.
-        stored = await self._read(node.id, 0 if full else users_seq, read)
+        # Конфигурация читается, когда вентиль её отдаёт: снапшот — любая опубликованная
+        # версия (``config_after = 0``), дельта — версия новее применённой нодой.
+        config_after = (0 if full else config_version) if gate.config else None
+        stored = await self._read(node.id, 0 if full else users_seq, read, config_after)
         current = stored.users_seq
         # Курсор впереди серверного бывает после восстановления Control Plane из копии (§9) и
         # при подделке; дельта к такому состоянию неприменима. Снапшот — исключение и есть выход
@@ -895,16 +1015,15 @@ class CompositionService:
         # ему значило бы оставить ноду без выхода: отказ велит взять снапшот, а снапшот отвечает
         # тем же отказом.
         if not full and (
-            config_version > STUB_CONFIG_VERSION
+            config_version > stored.config_version
             or agent_section_version > STUB_AGENT_VERSION
             or users_seq > current
         ):
             raise cursor_ahead()
-        config = (
-            stub_config()
-            if gate.config and (full or config_version < STUB_CONFIG_VERSION)
-            else None
-        )
+        # Раздела нет и тогда, когда выдача отказала (расхождение суммы, отказ источника ключа,
+        # ``_issue_config``): нода остаётся на применённой версии, и если иных изменений нет,
+        # ответ — 204, а не пустой 200, на который нода тут же спросила бы снова.
+        config = stored.config
         agent = (
             stub_agent()
             if gate.config and (full or agent_section_version < STUB_AGENT_VERSION)
@@ -981,9 +1100,42 @@ class CompositionService:
         if STREAM_GATE[node.status].refused:
             raise node_not_approved()
 
-    async def publish_config(self, node_id: uuid.UUID) -> None:
-        """Новая версия конфигурации ноды: запись ``node_config_versions`` и ``PUBLISH
-        node:{id}`` — 001.29c (генератор конфигурации — 001.27)."""
+    async def publish_config(self, conn: Any, node_id: uuid.UUID) -> int:
+        """Новая версия конфигурации ноды в транзакции вызывающего ``conn`` (001.29c): версия —
+        ``desired_config_version + 1`` под блокировкой строки ноды (``UPDATE nodes … RETURNING``,
+        версии одной ноды коммитятся по возрастанию), строка ``node_config_versions`` — документ
+        ``XrayConfigBuilder.build`` без закрытых ключей REALITY и ``checksum`` того же документа
+        с ключами ноды (``config_checksum``). Возвращает версию. Вне транзакции —
+        ``RuntimeError`` до обращения к базе; ноды нет — ``LookupError``; отказ источника ключа
+        пробрасывается и откатывает транзакцию вызывающего: версия без суммы по ключам не
+        выдавалась бы вовсе.
+
+        ``PUBLISH node:{id}`` — ``wake_config`` после коммита вызывающего: публикация идёт в чужой
+        транзакции и момента коммита не знает. Принимает ``conn`` вызывающего (отступление от
+        сигнатуры заглушки 001.28): версия коммитится вместе с изменением, которое её вызвало
+        (подтверждение ноды — 001.25, inbound и ключевая пара — 001.27).
+
+        До 001.27 документ собирается по inbound заглушки ноды (``inbounds.stub_inbounds``),
+        источник ключа — ``reality_key`` службы."""
+        if not conn.is_in_transaction():
+            raise RuntimeError("версия конфигурации публикуется в транзакции изменения")
+        # xray_config и inbounds импортируют plans, а plans — этот модуль: импорт на месте.
+        from app.domain.inbounds import stub_inbounds
+        from app.domain.xray_config import XrayConfigBuilder
+
+        version = await conn.fetchval(_NEXT_CONFIG_VERSION, node_id)
+        node = await read_node(conn, node_id)
+        if version is None or node is None:
+            raise LookupError(f"нода {node_id} не найдена")
+        document = XrayConfigBuilder().build(node, stub_inbounds(node_id))
+        checksum = config_checksum(await self._keyed(conn, node_id, document))
+        await conn.execute(_INSERT_CONFIG, node_id, version, json.dumps(document), checksum)
+        return int(version)
+
+    async def wake_config(self, node_id: uuid.UUID, version: int) -> bool:
+        """``PUBLISH node:{id}`` после коммита версии ``version`` (``_wake``: Redis недоступен —
+        ``False`` и запись в журнал, версия уже закоммичена)."""
+        return await self._wake(node_id, f"config:{version}")
 
     async def enqueue_publish_user(self, conn: Any, user_id: uuid.UUID) -> None:
         """Поставить ``composition.publish_user`` в транзакции бизнес-операции ``conn`` (§5.4,

@@ -4,7 +4,13 @@
 Задача 001.26: ``XrayConfigBuilder.build`` возвращает фиксированный документ — форму серверной
 конфигурации трёх профилей MVP. Сборка по строкам ``inbounds`` с рандомизацией
 ``limitFallback*`` на ноду — 001.27; запись версии в ``node_config_versions`` и выдача потоком
-конфигурации — 001.29.
+конфигурации — 001.29c.
+
+Задача 001.29c: закрытый ключ REALITY в документ ``build`` не входит. Строка
+``node_config_versions`` хранит документ без ключа, ``with_reality_keys`` вставляет ключ при
+выдаче ноде, определённой по identity запроса (решение заказчика 2026-11-04); источник ключа —
+функция ноды и тега inbound (``RealityKeySource``): до 001.27 — ``stub_reality_key``, с 001.27 —
+расшифровка ``inbound_secrets.private_key_enc`` (§7.2).
 
 Имена полей — Xray-core v26.10.31 (§17.3, WI-37): состав inbound — ``settings.users`` (прежнее
 ``clients`` ядро принимает как псевдоним, но при обоих ключах берёт ``clients``), транспорт —
@@ -18,10 +24,9 @@
   состава и добавляет пользователей через ``HandlerService`` (§5.2);
 - ``spiderX`` и ``fingerprint`` — нет: это параметры клиента, они уходят в клиентские ссылки
   (001.43), а серверу не нужны;
-- закрытый ключ REALITY — да: без ``realitySettings.privateKey`` сервер REALITY не стартует. Это
-  секрет §7.2, и в бою документ с ним не хранится открытым (заметка для 001.27 и 001.29 — в их
-  файлах задач); здесь ключи заглушки выведены из кода профиля и публичны
-  (``inbounds.stub_private_key``);
+- закрытый ключ REALITY — нет: это секрет §7.2, он хранится только в
+  ``inbound_secrets.private_key_enc``. Без ``realitySettings.privateKey`` сервер REALITY не
+  стартует, поэтому выданный ноде документ его несёт — ключ вставляет ``with_reality_keys``;
 - раздел ``routing`` — да, пусть и без правил: без него ядро подставляет маршрутизатор-пустышку
   (``routing.DefaultRouter``), чей ``AddRule`` отвечает ``ErrNoClue``, и правила
   ``RoutingService`` (блокировка адресов R-27, стратегия ``route_block``) ставить некуда; трафик
@@ -34,6 +39,8 @@
 from __future__ import annotations
 
 import copy
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from app.domain.inbounds import (
@@ -68,12 +75,12 @@ def _limit_fallback(values: dict[str, int]) -> dict[str, int]:
 
 def _reality(profile: InboundProfile) -> dict[str, Any]:
     """``realitySettings`` сервера: поля §4.4 источника без клиентских ``spiderX`` и
-    ``fingerprint``; ``xver`` — 0 (В-17), ``maxClientVer`` не задан (необязателен)."""
+    ``fingerprint`` и без закрытого ключа (его вставляет ``with_reality_keys`` при выдаче);
+    ``xver`` — 0 (В-17), ``maxClientVer`` не задан (необязателен)."""
     return {
         "target": STUB_TARGET,
         "xver": 0,
         "serverNames": list(STUB_SERVER_NAMES),
-        "privateKey": xray_key(stub_private_key(profile)),
         "minClientVer": STUB_MIN_CLIENT_VER,
         "shortIds": [STUB_SHORT_IDS[profile]],
         "limitFallbackUpload": _limit_fallback(STUB_LIMIT_FALLBACK_UPLOAD),
@@ -164,3 +171,71 @@ class XrayConfigBuilder:
         фиксированный документ (копию: вызывающий код вправе его менять); сборка по
         аргументам — 001.27."""
         return copy.deepcopy(STUB_XRAY_CONFIG)
+
+
+# Источник закрытого ключа REALITY: подключение вызывающего, нода, тег inbound → 32 байта x25519.
+# Ключ читается на подключении вызывающего: публикация в транзакции ротации ключевой пары (001.27)
+# видит новый ключ своей транзакции, выдача — ключ того же снимка базы, что и строка версии.
+# Отказ — исключением: ``InvalidTag`` или ``ValueError`` (контейнер не открывается привязкой своей
+# строки), ``CipherMismatch`` (ключ процесса не тот, WI-38).
+RealityKeySource = Callable[[Any, uuid.UUID, str], Awaitable[bytes]]
+
+
+async def stub_reality_key(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+    """Источник ключа до 001.27: ``inbounds.stub_private_key`` ноды и тега (тег inbound заглушки
+    равен коду профиля); подключение не читается. 001.27 заменяет источник расшифровкой
+    ``inbound_secrets.private_key_enc``."""
+    return stub_private_key(node_id, tag)
+
+
+class MalformedConfig(Exception):  # noqa: N818 — повреждение данных, имя в ряду CipherMismatch
+    """Документ конфигурации не той формы, чтобы вставить ключи REALITY: не объект, нет списка
+    ``inbounds``, inbound или его ``streamSettings``/``realitySettings`` не объект (в том числе
+    ``null``), у inbound REALITY нет строкового тега. ``build`` такого не пишет — это
+    повреждённая строка ``node_config_versions``; выдача отвечает на неё, как на отсутствие строки
+    (001.29c, L1)."""
+
+
+def _reality_sections(document: Any) -> list[tuple[str, dict[str, Any]]]:
+    """Тег и ``realitySettings`` каждого inbound REALITY в порядке документа; форма не та —
+    ``MalformedConfig``. Один обход для ``reality_tags`` и ``with_reality_keys``: ключи
+    запрашиваются ровно для тех разделов, в которые потом вставляются."""
+    inbounds = document.get("inbounds") if isinstance(document, dict) else None
+    if not isinstance(inbounds, list):
+        raise MalformedConfig("нет списка inbounds")
+    sections = []
+    for item in inbounds:
+        if not isinstance(item, dict):
+            raise MalformedConfig("inbound — не объект")
+        stream = item.get("streamSettings", {})
+        if not isinstance(stream, dict):
+            raise MalformedConfig("streamSettings — не объект")
+        # Нет ключа — inbound не REALITY; ``null`` на месте раздела — повреждение, а не его
+        # отсутствие (роаст раунд 2, G7).
+        if "realitySettings" not in stream:
+            continue
+        reality = stream["realitySettings"]
+        if not isinstance(reality, dict) or not isinstance(item.get("tag"), str):
+            raise MalformedConfig("realitySettings — не объект или у inbound нет тега")
+        sections.append((item["tag"], reality))
+    return sections
+
+
+def reality_tags(document: Any) -> list[str]:
+    """Теги inbound документа, у которых есть ``realitySettings``, — в порядке документа; документ
+    не ``dict`` или форма не та — ``MalformedConfig`` (документ приходит из строки базы, его тип
+    проверяется здесь, а не аннотацией)."""
+    return [tag for tag, _ in _reality_sections(document)]
+
+
+def with_reality_keys(document: Any, keys: Mapping[str, bytes]) -> dict[str, Any]:
+    """Копия ``document`` с закрытым ключом своего тега в ``realitySettings.privateKey`` каждого
+    inbound REALITY (запись Xray — ``xray_key``); исходный документ не меняется. Тега нет в
+    ``keys`` — ``KeyError``: документ без ключа сервер REALITY не запустит, и выдавать его нельзя.
+    Ключ не в 32 байта — ``ValueError`` (``xray_key``); форма не та — ``MalformedConfig``."""
+    if not isinstance(document, dict):
+        raise MalformedConfig("документ — не объект")
+    keyed = copy.deepcopy(document)
+    for tag, reality in _reality_sections(keyed):
+        reality["privateKey"] = xray_key(keys[tag])
+    return keyed

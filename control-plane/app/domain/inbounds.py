@@ -10,7 +10,8 @@ UC-01, UC-03, UC-12).
 Что в заглушке настоящее: генерация ключевой пары x25519 (библиотека ``cryptography``) и запись
 ключа в форме, которую принимает Xray, — base64url без дополнения (``xray_key``). Фиксированные
 inbound заглушки согласованы с фиксированной конфигурацией ``XrayConfigBuilder``: порт, тег,
-``short_ids``, цель и открытый ключ каждого из них соответствуют серверной части документа.
+``short_ids`` и цель каждого из них соответствуют серверной части документа, открытый ключ —
+пара к закрытому ключу заглушки своей ноды, который выдача вставляет в документ (001.29c).
 
 Закрытого ключа в модели нет: он живёт в ``inbound_secrets`` зашифрованным (§7.2), и панель,
 читающая ``Inbound``, его не получает ни в каком виде.
@@ -60,7 +61,9 @@ def gen_x25519() -> tuple[bytes, bytes]:
 
 def xray_key(raw: bytes) -> str:
     """Ключ x25519 в записи Xray: base64url без дополнения (``realitySettings.privateKey``,
-    ``pbk`` клиентской ссылки). Ключ другой длины — ошибка вызывающего кода, а не данных."""
+    ``pbk`` клиентской ссылки). Ключ другой длины — ``ValueError``: у генератора это ошибка
+    вызывающего кода, у ключа, расшифрованного из ``inbound_secrets``, — повреждение данных (выдача
+    конфигурации считает его отказом источника, 001.29c)."""
     if len(raw) != 32:
         raise ValueError("ключ x25519 — ровно 32 байта")
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
@@ -198,15 +201,18 @@ STUB_LIMIT_FALLBACK_DOWNLOAD = {
 }
 
 
-def stub_private_key(profile: InboundProfile) -> bytes:
-    """Закрытый ключ заглушки: выведен из кода профиля и потому публичен — секретом он не
-    является и в бою не встречается. Настоящий ключ — только ``gen_x25519`` (001.27)."""
-    return hashlib.sha256(f"control-plane stub reality key:{profile}".encode()).digest()
+def stub_private_key(node_id: uuid.UUID, profile: str) -> bytes:
+    """Закрытый ключ заглушки: SHA-256 от ``node_id`` и кода профиля (тег inbound заглушки равен
+    коду профиля). Выведен из открытых значений и потому публичен — секретом он не является и в
+    бою не встречается; настоящий ключ — только ``gen_x25519`` (001.27). Ключ зависит от ноды:
+    ключ, одинаковый у всех нод, не позволил бы проверить, что нода получает только свой
+    (001.29c)."""
+    return hashlib.sha256(f"control-plane stub reality key:{node_id}:{profile}".encode()).digest()
 
 
-def stub_public_key(profile: InboundProfile) -> str:
-    """Открытый ключ заглушки в записи Xray — пара к ``stub_private_key``."""
-    private = X25519PrivateKey.from_private_bytes(stub_private_key(profile))
+def stub_public_key(node_id: uuid.UUID, profile: InboundProfile) -> str:
+    """Открытый ключ заглушки в записи Xray — пара к ``stub_private_key`` той же ноды."""
+    private = X25519PrivateKey.from_private_bytes(stub_private_key(node_id, profile))
     return xray_key(private.public_key().public_bytes_raw())
 
 
@@ -251,7 +257,7 @@ def stub_inbounds(node_id: uuid.UUID) -> list[Inbound]:
             port=STUB_PORTS[profile],
             tag=profile,
             enabled=True,
-            reality_public_key=stub_public_key(profile),
+            reality_public_key=stub_public_key(node_id, profile),
             reality_short_ids=[STUB_SHORT_IDS[profile]],
             reality_target=STUB_TARGET,
             reality_server_names=list(STUB_SERVER_NAMES),

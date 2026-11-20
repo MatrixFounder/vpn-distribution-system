@@ -349,8 +349,10 @@ inbound_secrets
 node_config_versions
   node_id                uuid FK nodes
   config_version         int
-  config_json            jsonb                    — полная конфигурация Xray без credentials
-  checksum               text
+  config_json            jsonb                    — полная конфигурация Xray без credentials и
+                                                     без закрытых ключей REALITY; ключи вставляет
+                                                     C-01 при выдаче (001.29c)
+  checksum               text                     — SHA-256 документа с ключами
   created_at             timestamptz
   PK (node_id, config_version)
 

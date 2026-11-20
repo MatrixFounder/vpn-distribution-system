@@ -1,5 +1,5 @@
 """Потоки конфигурации и состава: правила выдачи на раскладке фикстур без базы (задачи 001.28,
-001.29) и выделение номера изменения на живой базе (TC-UNIT-01 001.29)."""
+001.29, 001.29c) и выделение номера изменения на живой базе (TC-UNIT-01 001.29)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from typing import Any
 
 import asyncpg
 import pytest
+from app.config import SecretError
 from app.domain.composition import (
     REVOKING_STATES,
-    STUB_CONFIG_CHECKSUM,
-    STUB_CONFIG_DOCUMENT,
+    STUB_AGENT_VERSION,
     STUB_GENERATION,
     CompositionService,
     NodeComposition,
@@ -24,20 +24,22 @@ from app.domain.composition import (
     config_checksum,
     credentials_bound,
     next_users_seq,
-    stub_config,
     xray_email,
 )
+from app.domain.inbounds import stub_private_key, xray_key
 from app.domain.nodes import stub_node
 from app.errors import ApiError
-from app.security.crypto import FieldCipher
+from app.security.crypto import CipherMismatch, FieldCipher
 from cryptography.exceptions import InvalidTag
 from pydantic import ValidationError
 
 from tests._agent import (
     LAYOUT,
+    LAYOUT_CONFIG_VERSION,
     LAYOUT_SEQ,
     USER_ACTIVE,
     RecordedComposition,
+    layout_config,
     layout_credentials,
 )
 from tests.e2e._catalog import billing_group, catalog
@@ -61,17 +63,55 @@ def test_checksum_is_sha256_of_the_canonical_form() -> None:
 
 def test_checksum_does_not_depend_on_key_order() -> None:
     """Сумма считается от документа, а не от текста: перестановка ключей её не меняет, а любое
-    изменение значения — меняет. Значение для каркаса заглушки посчитано один раз."""
+    изменение значения — меняет."""
     assert config_checksum({"a": 1, "b": 2}) == config_checksum({"b": 2, "a": 1})
     assert config_checksum({"a": 1}) != config_checksum({"a": 2})
-    assert stub_config().checksum == STUB_CONFIG_CHECKSUM == config_checksum(STUB_CONFIG_DOCUMENT)
 
 
-def test_the_config_document_carries_no_clients() -> None:
-    """§5.2: поток конфигурации идёт без credentials пользователей. Для каркаса это значит
-    пустой список клиентов в каждом inbound — генератор 001.27 обязан сохранить свойство."""
-    for inbound in STUB_CONFIG_DOCUMENT["inbounds"]:
-        assert inbound["settings"]["clients"] == [], inbound["tag"]
+async def test_the_issued_config_carries_the_keys_of_the_node_that_asked() -> None:
+    """001.29c: выданный документ — строка версии ноды с закрытым ключом REALITY своей ноды и
+    своего inbound в каждом ``realitySettings``; у двух нод ключи различаются, а
+    ``config.checksum`` — сумма выданного документа с ключами, она же записана в строке. §5.2:
+    состав inbound пуст — credentials пользователей потоком конфигурации не идут."""
+    issued = {}
+    for node_id in (NODE, OTHER_NODE):
+        answer = await RecordedComposition().state_for(
+            stub_node(node_id=node_id), 0, 0, STUB_GENERATION, False, 0
+        )
+        assert answer is not None and answer.config is not None
+        config = answer.config
+        assert config.version == LAYOUT_CONFIG_VERSION
+        assert (
+            config.checksum == config_checksum(config.document) == layout_config(node_id).checksum
+        )
+        for inbound in config.document["inbounds"]:
+            reality = inbound["streamSettings"]["realitySettings"]
+            assert reality["privateKey"] == xray_key(stub_private_key(node_id, inbound["tag"]))
+            assert inbound["settings"]["users"] == [], inbound["tag"]
+        issued[node_id] = [
+            inbound["streamSettings"]["realitySettings"]["privateKey"]
+            for inbound in config.document["inbounds"]
+        ]
+    assert len(set(issued[NODE])) == 3, "у каждого inbound свой ключ"
+    assert not set(issued[NODE]) & set(issued[OTHER_NODE]), "у другой ноды — другие ключи"
+
+
+async def _foreign_key(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+    """Источник ключа, отдающий ключ другой ноды: ключевой материал сменился без новой версии."""
+    return stub_private_key(OTHER_NODE, tag)
+
+
+async def test_a_withheld_config_alone_is_no_reason_to_answer() -> None:
+    """Выдача конфигурации отказала (расхождение суммы), а по составу и разделу ``agent`` нода
+    на текущих курсорах: изменений, которые нода может применить, нет — ``None`` (204, удержание),
+    а не пустой 200, на который нода тут же спросила бы снова. Та же нода, отставшая и по
+    составу, получает состав без раздела ``config``."""
+    service = RecordedComposition(reality_key=_foreign_key)
+    node = stub_node(node_id=NODE)
+    assert await service.state_for(node, 0, LAYOUT_SEQ, STUB_GENERATION, False, 1) is None
+    answer = await service.state_for(node, 0, 0, STUB_GENERATION, False, STUB_AGENT_VERSION)
+    assert answer is not None and answer.config is None
+    assert [row.updated_seq for row in answer.users.rows] == [1, 2, 3, 4]
 
 
 def test_xray_email_is_the_stable_tag_of_the_user() -> None:
@@ -165,8 +205,10 @@ async def test_the_saved_resync_flag_reaches_the_agent() -> None:
 class TrailingRemoval(RecordedComposition):
     """Раскладка, где самое свежее изменение (5) — удаление пары."""
 
-    async def _read(self, node_id: uuid.UUID, users_seq: int, rows: RowsRead) -> NodeComposition:
-        base = await super()._read(node_id, users_seq, rows)
+    async def _read(
+        self, node_id: uuid.UUID, users_seq: int, rows: RowsRead, config_after: int | None
+    ) -> NodeComposition:
+        base = await super()._read(node_id, users_seq, rows, config_after)
         removed = StoredRow(
             user_id=uuid.UUID("00000000-0000-7000-8000-0000000000a5"),
             state="removed",
@@ -179,7 +221,11 @@ class TrailingRemoval(RecordedComposition):
         )
         extra = [removed] if rows == "delta" else []
         return NodeComposition(
-            users_seq=LAYOUT_SEQ + 1, resync_required=False, rows=[*base.rows, *extra]
+            users_seq=LAYOUT_SEQ + 1,
+            resync_required=False,
+            rows=[*base.rows, *extra],
+            config_version=base.config_version,
+            config=base.config,
         )
 
 
@@ -347,10 +393,159 @@ class _OutsideTransaction:
         raise AssertionError(f"постановка обратилась к подключению вне транзакции: {name}")
 
 
-@pytest.mark.parametrize("method", ["enqueue_publish_user", "enqueue_publish_node", "remove_user"])
+@pytest.mark.parametrize(
+    "method", ["enqueue_publish_user", "enqueue_publish_node", "remove_user", "publish_config"]
+)
 async def test_a_publication_is_placed_only_inside_a_transaction(method: str) -> None:
     """Публикация ставится в транзакции бизнес-операции (§5.4, Н-14): вне транзакции постановка
     пережила бы откат операции или потерялась бы при крахе между коммитом и постановкой —
-    ``RuntimeError`` до обращения к базе (001.29b)."""
+    ``RuntimeError`` до обращения к базе (001.29b). Версия конфигурации — так же (001.29c): вне
+    транзакции изменения она пережила бы его откат, и нода получила бы документ, которого
+    изменение не оставило."""
     with pytest.raises(RuntimeError, match="транзакции"):
         await getattr(CompositionService(pool=None), method)(_OutsideTransaction(), uuid.uuid4())
+
+
+# Иные исключения источника: дефект кода, ошибка базы и таймаут подключения в 001.27, отсутствие
+# файла ключа процесса (``SecretError`` — родитель ``CipherMismatch``, его бросает
+# ``FieldCipher.from_settings``).
+UNEXPECTED: dict[str, Exception] = {
+    "RuntimeError": RuntimeError("источник сломан"),
+    "KeyError": KeyError("нет строки inbound_secrets"),
+    "AttributeError": AttributeError("источник сломан"),
+    "TypeError": TypeError("источник сломан"),
+    "OSError": OSError("файл ключа недоступен"),
+    "TimeoutError": TimeoutError("база не ответила"),
+    "SecretError": SecretError("файл ключа недоступен"),
+    "PostgresError": asyncpg.exceptions.UndefinedTableError("relation does not exist"),
+    # Листовые классы сценариев раунда 3 (H2): лист ловит расширение перехвата до любого предка —
+    # таймаут запроса (``OperatorInterventionError``), обрыв соединения (``ConnectionError``),
+    # разрыв подключения (``PostgresConnectionError``), ошибка клиента (``InterfaceError``).
+    "QueryCanceledError": asyncpg.exceptions.QueryCanceledError("statement timeout"),
+    "ConnectionResetError": ConnectionResetError("соединение сброшено"),
+    "ConnectionDoesNotExistError": asyncpg.exceptions.ConnectionDoesNotExistError("closed"),
+    "InterfaceError": asyncpg.exceptions.InterfaceError("cannot perform operation"),
+}
+
+
+@pytest.mark.parametrize("error", sorted(UNEXPECTED))
+async def test_an_unexpected_source_error_is_not_taken_for_a_refused_key(error: str) -> None:
+    """Отказ источника ключа — только ``InvalidTag``, ``ValueError`` и ``CipherMismatch``: иное
+    исключение источника (дефект кода, ошибка базы, таймаут, нет файла ключа) пробрасывается, а
+    не превращается в ответ без ``config`` с ложной записью «ключ не получен» (роаст 001.29c,
+    раунды 1–3). Проверяется на двойнике ``RecordedComposition``; живой путь выдачи —
+    ``tests/e2e/test_composition.py::test_29c_an_unexpected_source_error_answers_500``."""
+    raised = UNEXPECTED[error]
+
+    async def broken(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+        raise raised
+
+    with pytest.raises(type(raised)):
+        await RecordedComposition(reality_key=broken).state_for(
+            stub_node(node_id=NODE), 0, 0, STUB_GENERATION, False, 0
+        )
+
+
+async def test_the_key_source_reads_inside_the_publishing_transaction(pg_dsn: str) -> None:
+    """Источник ключа получает подключение вызывающего и видит его незакоммиченную версию: в
+    001.27 ротация ключевой пары пишет новый ключ и публикует версию одной транзакцией, и сумма
+    обязана считаться по новому ключу этой транзакции, а не по прежнему с другого подключения."""
+    async with catalog(pg_dsn) as conn:
+        node_id = await catalog_node(conn, await billing_group(conn, "u29c"), 191)
+        seen: list[tuple[bool, int]] = []
+
+        async def watching(source_conn: Any, node: uuid.UUID, tag: str) -> bytes:
+            version = await source_conn.fetchval(
+                "select desired_config_version from nodes where id = $1", node
+            )
+            seen.append((source_conn.is_in_transaction(), version))
+            return stub_private_key(node, tag)
+
+        async with conn.transaction():
+            version = await CompositionService(None, reality_key=watching).publish_config(
+                conn, node_id
+            )
+        assert version == 1
+        assert seen == [(True, 1)] * 3, "три inbound REALITY, версия своей транзакции"
+
+
+REFUSED: dict[str, Exception] = {
+    "InvalidTag": InvalidTag(),
+    "ValueError": ValueError("контейнер не разбирается"),
+    "CipherMismatch": CipherMismatch("ключ процесса не тот"),
+}
+
+
+@pytest.mark.parametrize("refusal", sorted(REFUSED))
+async def test_a_refused_key_rolls_the_publication_back(pg_dsn: str, refusal: str) -> None:
+    """Отказ источника ключа при публикации — каждый из трёх — пробрасывается и откатывает
+    транзакцию вызывающего: ни версии, ни строки. Версия, закоммиченная без суммы по ключам, не
+    выдавалась бы никогда."""
+    raised = REFUSED[refusal]
+
+    async def refusing(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+        raise raised
+
+    async with catalog(pg_dsn) as conn:
+        node_id = await catalog_node(conn, await billing_group(conn, "u29c"), 192)
+        with pytest.raises(type(raised)):
+            async with conn.transaction():
+                await CompositionService(None, reality_key=refusing).publish_config(conn, node_id)
+        assert (
+            await conn.fetchval("select desired_config_version from nodes where id = $1", node_id)
+            == 0
+        )
+        assert (
+            await conn.fetchval(
+                "select count(*) from node_config_versions where node_id = $1", node_id
+            )
+            == 0
+        )
+
+
+async def test_config_versions_are_issued_in_commit_order(pg_dsn: str) -> None:
+    """Версию выделяет ``UPDATE nodes … RETURNING`` под блокировкой строки ноды: вторая
+    публикация той же ноды ждёт коммита первой и получает следующую версию — не ту же (нарушение
+    ключа строки, 500 бизнес-операции) и не раньше коммита первой."""
+    async with catalog(pg_dsn) as conn:
+        node_id = await catalog_node(conn, await billing_group(conn, "u29c"), 193)
+        service = CompositionService(None)
+        first, second = await asyncpg.connect(pg_dsn), await asyncpg.connect(pg_dsn)
+        try:
+            earlier = first.transaction()
+            await earlier.start()
+            issued_first = await service.publish_config(first, node_id)
+            later = second.transaction()
+            await later.start()
+            waiting = asyncio.create_task(service.publish_config(second, node_id))
+            await wait_blocked_by(conn, first.get_server_pid())
+            await asyncio.sleep(0.2)  # коммит первой задержан: вторая обязана ждать его
+            assert not waiting.done(), "вторая публикация получила версию до коммита первой"
+            await earlier.commit()
+            issued_second = await asyncio.wait_for(waiting, timeout=5)
+            await later.commit()
+        finally:
+            await first.close()
+            await second.close()
+        assert (issued_first, issued_second) == (1, 2)
+        rows = await conn.fetch(
+            "select config_version from node_config_versions where node_id = $1 "
+            "order by config_version",
+            node_id,
+        )
+        assert [row["config_version"] for row in rows] == [1, 2]
+
+
+async def test_publishing_for_a_missing_node_is_a_lookup_error(pg_dsn: str) -> None:
+    """Ноды нет — ``LookupError`` до записи строки: версия без ноды не пишется."""
+    missing = uuid.uuid4()
+    async with catalog(pg_dsn) as conn:
+        async with conn.transaction():
+            with pytest.raises(LookupError):
+                await CompositionService(None).publish_config(conn, missing)
+        assert (
+            await conn.fetchval(
+                "select count(*) from node_config_versions where node_id = $1", missing
+            )
+            == 0
+        )

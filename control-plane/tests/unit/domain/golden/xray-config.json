@@ -40,7 +40,6 @@
           "serverNames": [
             "www.example.com"
           ],
-          "privateKey": "sHJ1FTpexKQm3YlXg142qg4syIYGvl7Bi0yUspWbK1c",
           "minClientVer": "1.8.1",
           "shortIds": [
             "6ba85179e30d4fc2"
@@ -78,7 +77,6 @@
           "serverNames": [
             "www.example.com"
           ],
-          "privateKey": "IAqDYbKGJx13UqdGzynanpIfWE5SKQ2rZeAGRxb1ji8",
           "minClientVer": "1.8.1",
           "shortIds": [
             "a1c3e5f70b2d4f68"
@@ -128,7 +126,6 @@
           "serverNames": [
             "www.example.com"
           ],
-          "privateKey": "Tv4yYY4j75Z6uNzwicLF7ZJFbZwvj62SSQ-E8RY5g_k",
           "minClientVer": "1.8.1",
           "shortIds": [
             "3e9b21d07c5a84f1"

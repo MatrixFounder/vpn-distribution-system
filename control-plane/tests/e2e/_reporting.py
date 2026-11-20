@@ -26,6 +26,7 @@ from typing import Any
 
 import asyncpg
 import httpx
+from app.domain.composition import CompositionService
 from app.domain.nodes import NodeStatus
 from app.domain.users import hash_token
 from app.main import create_app
@@ -282,6 +283,10 @@ async def _stand(
         introduced,
     )
     headers, fingerprint = await insert_identity(conn, node_id, introduced)
+    # Нода стенда — подтверждённая: подтверждение публикует первую версию конфигурации (001.29c),
+    # и без неё курсор ``config_version`` = 1 запросов стенда опережал бы сервер.
+    async with conn.transaction():
+        await CompositionService(None).publish_config(conn, node_id)
     members = []
     wanted: list[uuid.UUID | None] = [None] * users + list(member_ids)
     for n, wanted_id in enumerate(wanted):

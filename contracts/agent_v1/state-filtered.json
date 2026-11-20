@@ -29,10 +29,29 @@
     "body": {
       "config": {
         "version": 1,
-        "checksum": "664b6ba348336aaede6f8ad31a0c9cb88db35a84cbf70e14f94640457bf821c1",
+        "checksum": "2247481755901e4b5fac97dc08ddf294cb6d833212015c7e676453008996a4a1",
         "json": {
           "log": {
             "loglevel": "warning"
+          },
+          "api": {
+            "tag": "api",
+            "listen": "127.0.0.1:10085",
+            "services": [
+              "HandlerService",
+              "StatsService",
+              "RoutingService"
+            ]
+          },
+          "stats": {},
+          "policy": {
+            "levels": {
+              "0": {
+                "statsUserUplink": true,
+                "statsUserDownlink": true,
+                "statsUserOnline": true
+              }
+            }
           },
           "inbounds": [
             {
@@ -40,12 +59,126 @@
               "port": 443,
               "protocol": "vless",
               "settings": {
-                "clients": [],
+                "users": [],
+                "decryption": "none",
+                "flow": "xtls-rprx-vision"
+              },
+              "streamSettings": {
+                "method": "raw",
+                "security": "reality",
+                "realitySettings": {
+                  "target": "www.example.com:443",
+                  "xver": 0,
+                  "serverNames": [
+                    "www.example.com"
+                  ],
+                  "minClientVer": "1.8.1",
+                  "shortIds": [
+                    "6ba85179e30d4fc2"
+                  ],
+                  "limitFallbackUpload": {
+                    "afterBytes": 1048576,
+                    "bytesPerSec": 65536,
+                    "burstBytesPerSec": 131072
+                  },
+                  "limitFallbackDownload": {
+                    "afterBytes": 2097152,
+                    "bytesPerSec": 131072,
+                    "burstBytesPerSec": 262144
+                  },
+                  "privateKey": "YkAIsgcp0A9ONizG9qjRLvhJeX-Hh9UVknFEjKYeP2M"
+                },
+                "sockopt": {
+                  "trustedXForwardedFor": []
+                }
+              }
+            },
+            {
+              "tag": "vless_xhttp",
+              "port": 2087,
+              "protocol": "vless",
+              "settings": {
+                "users": [],
                 "decryption": "none"
               },
               "streamSettings": {
-                "network": "raw",
-                "security": "reality"
+                "method": "xhttp",
+                "security": "reality",
+                "realitySettings": {
+                  "target": "www.example.com:443",
+                  "xver": 0,
+                  "serverNames": [
+                    "www.example.com"
+                  ],
+                  "minClientVer": "1.8.1",
+                  "shortIds": [
+                    "a1c3e5f70b2d4f68"
+                  ],
+                  "limitFallbackUpload": {
+                    "afterBytes": 1048576,
+                    "bytesPerSec": 65536,
+                    "burstBytesPerSec": 131072
+                  },
+                  "limitFallbackDownload": {
+                    "afterBytes": 2097152,
+                    "bytesPerSec": 131072,
+                    "burstBytesPerSec": 262144
+                  },
+                  "privateKey": "KKyqROlQyY3KtAET5QsuoW405_CcQRYcpQiMW_N6_Kk"
+                },
+                "xhttpSettings": {
+                  "path": "/9f3c1a7e",
+                  "mode": "auto",
+                  "xPaddingBytes": "100-1000",
+                  "xPaddingObfsMode": false,
+                  "xPaddingKey": "x_padding",
+                  "xPaddingHeader": "X-Padding",
+                  "xPaddingPlacement": "queryInHeader",
+                  "xPaddingMethod": "repeat-x",
+                  "uplinkHTTPMethod": "POST",
+                  "sessionIDPlacement": "path",
+                  "sessionIDKey": ""
+                },
+                "sockopt": {
+                  "trustedXForwardedFor": []
+                }
+              }
+            },
+            {
+              "tag": "trojan_reality",
+              "port": 8443,
+              "protocol": "trojan",
+              "settings": {
+                "users": []
+              },
+              "streamSettings": {
+                "method": "raw",
+                "security": "reality",
+                "realitySettings": {
+                  "target": "www.example.com:443",
+                  "xver": 0,
+                  "serverNames": [
+                    "www.example.com"
+                  ],
+                  "minClientVer": "1.8.1",
+                  "shortIds": [
+                    "3e9b21d07c5a84f1"
+                  ],
+                  "limitFallbackUpload": {
+                    "afterBytes": 1048576,
+                    "bytesPerSec": 65536,
+                    "burstBytesPerSec": 131072
+                  },
+                  "limitFallbackDownload": {
+                    "afterBytes": 2097152,
+                    "bytesPerSec": 131072,
+                    "burstBytesPerSec": 262144
+                  },
+                  "privateKey": "vjNVqvxGl3Y9eKW7FQaSafr3cfnkGWoKV9lno3eDmLE"
+                },
+                "sockopt": {
+                  "trustedXForwardedFor": []
+                }
               }
             }
           ],
@@ -58,7 +191,10 @@
               "tag": "blackhole",
               "protocol": "blackhole"
             }
-          ]
+          ],
+          "routing": {
+            "rules": []
+          }
         }
       },
       "agent": {

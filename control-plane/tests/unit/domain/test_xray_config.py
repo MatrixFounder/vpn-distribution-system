@@ -1,7 +1,8 @@
 """Конфигурация Xray заглушки 001.26 против эталона ``golden/xray-config.json``: форма серверного
 документа трёх профилей §4.4 в именах Xray-core v26.10.31 (WI-37), ограничения канонической
 записи (``contracts/agent_v1/README.md``, «Контрольная сумма конфигурации») и согласованность с
-фиксированными inbound заглушки (``inbounds.stub_inbounds``).
+фиксированными inbound заглушки (``inbounds.stub_inbounds``). 001.29c: документ ``build`` — без
+закрытых ключей REALITY, ключ ноды вставляет ``with_reality_keys`` при выдаче (TC-UNIT-01).
 
 Эталон правится людьми: изменение документа обязано быть видно в diff эталона, тест его только
 читает. Свойства критериев приёмки проверяются по самому эталону — значит, и по выдаче
@@ -13,13 +14,21 @@ import base64
 import json
 import re
 import unicodedata
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from app.domain.inbounds import stub_inbounds
+import pytest
+from app.domain.inbounds import stub_inbounds, stub_private_key, xray_key
 from app.domain.nodes import stub_node
-from app.domain.xray_config import XrayConfigBuilder
+from app.domain.xray_config import (
+    MalformedConfig,
+    XrayConfigBuilder,
+    reality_tags,
+    stub_reality_key,
+    with_reality_keys,
+)
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 GOLDEN = Path(__file__).parent / "golden" / "xray-config.json"
@@ -131,8 +140,8 @@ def test_build_returns_the_golden_document() -> None:
 
 
 def test_build_hands_out_a_copy() -> None:
-    """Вызывающий код (001.29 запишет документ в ``node_config_versions``) вправе менять
-    полученный словарь — фиксированный документ заглушки от этого меняться не должен."""
+    """Вызывающий код (``publish_config`` 001.29c пишет документ в ``node_config_versions``) вправе
+    менять полученный словарь — фиксированный документ заглушки от этого меняться не должен."""
     first = built()
     first["inbounds"][0]["streamSettings"]["realitySettings"]["shortIds"].append("ff")
     first["log"]["loglevel"] = "debug"
@@ -167,14 +176,14 @@ def test_three_profiles_on_distinct_ports_with_reality() -> None:
 def test_reality_carries_the_server_fields_of_section_4_4() -> None:
     """Критерий приёмки: поля §4.4 источника, включая ``minClientVer`` и ``xver`` = 0 (В-17);
     ``limitFallbackUpload`` и ``limitFallbackDownload`` — объекты из трёх полей, а не числа
-    колонок ``reality_limit_fb_*``."""
+    колонок ``reality_limit_fb_*``. Закрытого ключа в документе ``build`` нет (001.29c): строка
+    ``node_config_versions`` хранит документ без него."""
     for item in golden()["inbounds"]:
         reality = item["streamSettings"]["realitySettings"]
         assert set(reality) == {
             "target",
             "xver",
             "serverNames",
-            "privateKey",
             "minClientVer",
             "shortIds",
             "limitFallbackUpload",
@@ -322,9 +331,12 @@ def test_the_config_matches_the_stub_inbounds() -> None:
     ``short_ids``, цель, имена, минимальная версия и поля профиля из ``params`` совпадают, а
     открытый ключ inbound — пара к закрытому ключу документа (запись ключа — строгая). Иначе
     генераторы подписки на заглушках (001.41, 001.43) выдали бы клиенту ``pbk``, ``sid`` и
-    параметры XHTTP, которых сервер не ждёт."""
-    document = golden()
-    for item in stub_inbounds(stub_node().id):
+    параметры XHTTP, которых сервер не ждёт. Ключ — тот, что выдача вставит ноде (001.29c)."""
+    node_id = stub_node().id
+    document = with_reality_keys(
+        golden(), {tag: stub_private_key(node_id, tag) for tag in reality_tags(golden())}
+    )
+    for item in stub_inbounds(node_id):
         config = inbound(document, item.tag)
         reality = config["streamSettings"]["realitySettings"]
         assert config["port"] == item.port, item.tag
@@ -377,3 +389,97 @@ def test_the_config_matches_the_stub_inbounds() -> None:
         i["streamSettings"]["realitySettings"]["privateKey"] for i in document["inbounds"]
     ]
     assert len(set(keys_by_tag)) == 3, "у каждого inbound своя ключевая пара (inbound_secrets)"
+
+
+KEYED_NODE = uuid.UUID("00000000-0000-7000-8000-0000000000c9")
+
+
+def test_tc_unit_01_the_key_of_each_inbound_goes_into_its_reality_section() -> None:
+    """TC-UNIT-01: ``with_reality_keys`` ставит в ``realitySettings`` каждого inbound REALITY ключ
+    его тега в записи Xray и больше ничего в документе не меняет; документ ``build`` остаётся
+    без ключей (копия). Тег без ключа — ошибка, а не документ без ключа: сервер REALITY без
+    ``privateKey`` не стартует."""
+    document = golden()
+    private = {
+        "vless_raw_vision": bytes(range(32)),
+        "vless_xhttp": bytes(range(1, 33)),
+        "trojan_reality": bytes(range(2, 34)),
+    }
+    assert reality_tags(document) == list(private)
+    keyed = with_reality_keys(document, private)
+    # Исходный документ — до любой правки результата: вставка на месте (копия не снята или снята
+    # не глубоко) оставила бы ключи в строке версии, которую пишет публикация.
+    assert document == golden() and "privateKey" not in keys(document), "исходный — без ключей"
+    for item in keyed["inbounds"]:
+        reality = item["streamSettings"]["realitySettings"]
+        assert reality["privateKey"] == xray_key(private[item["tag"]]), item["tag"]
+        reality.pop("privateKey")
+    assert keyed == golden(), "кроме ключей документ не изменился"
+    for missing in private:
+        partial = {tag: key for tag, key in private.items() if tag != missing}
+        with pytest.raises(KeyError, match=missing):
+            with_reality_keys(document, partial)
+
+
+async def test_the_stub_key_belongs_to_its_node_and_inbound() -> None:
+    """Источник ключа до 001.27: ключ ноды и тега, пара к открытому ключу ``stub_inbounds`` той
+    же ноды. У двух нод и у трёх inbound одной ноды ключи различны — иначе проверка «нода
+    получает только свой ключ» (001.29c, TC-E2E-02) не отличала бы свой ключ от чужого."""
+    seen = set()
+    for node_id in (stub_node().id, KEYED_NODE):
+        for item in stub_inbounds(node_id):
+            key = await stub_reality_key(None, node_id, item.tag)
+            assert key == stub_private_key(node_id, item.tag)
+            assert x25519_public(xray_key(key)) == item.reality_public_key, (node_id, item.tag)
+            seen.add(key)
+    assert len(seen) == 6
+
+
+def test_only_reality_inbounds_get_a_key() -> None:
+    """Ключ запрашивается и вставляется только у inbound с ``realitySettings``: inbound без
+    защиты REALITY (без ``streamSettings`` или с другим ``security``) ключа не требует и не
+    получает — иначе источник ключа (``inbound_secrets``, 001.27) спрашивали бы о ключе, которого
+    у такого inbound нет."""
+    document = golden()
+    document["inbounds"].insert(1, {"tag": "plain", "port": 1, "protocol": "vless"})
+    document["inbounds"].append(
+        {"tag": "tls", "port": 2, "protocol": "trojan", "streamSettings": {"security": "tls"}}
+    )
+    tags = reality_tags(document)
+    assert tags == ["vless_raw_vision", "vless_xhttp", "trojan_reality"]
+    keyed = with_reality_keys(document, {tag: bytes(32) for tag in tags})
+    assert "privateKey" not in keys(keyed["inbounds"][1]) | keys(keyed["inbounds"][-1])
+    assert [i["tag"] for i in keyed["inbounds"] if "privateKey" in keys(i)] == tags
+
+
+MALFORMED: dict[str, Any] = {
+    "не объект": [],
+    "нет inbounds": {},
+    "inbounds не список": {"inbounds": {}},
+    "inbound не объект": {"inbounds": ["vless_raw_vision"]},
+    "streamSettings не объект": {"inbounds": [{"tag": "t", "streamSettings": "raw"}]},
+    "streamSettings null": {"inbounds": [{"tag": "t", "streamSettings": None}]},
+    "streamSettings пустой список": {"inbounds": [{"tag": "t", "streamSettings": []}]},
+    "realitySettings null": {
+        "inbounds": [{"tag": "t", "streamSettings": {"realitySettings": None}}]
+    },
+    "realitySettings не объект": {
+        "inbounds": [{"tag": "t", "streamSettings": {"realitySettings": "x"}}]
+    },
+    "нет тега": {"inbounds": [{"streamSettings": {"realitySettings": {}}}]},
+    "тег не строка": {"inbounds": [{"tag": 7, "streamSettings": {"realitySettings": {}}}]},
+}
+
+
+@pytest.mark.parametrize("case", sorted(MALFORMED))
+def test_a_malformed_document_is_refused_as_malformed(case: str) -> None:
+    """Строка версии, повреждённая по форме, — ``MalformedConfig`` и у ``reality_tags``, и у
+    ``with_reality_keys``, а не ``KeyError``/``TypeError``/``AttributeError``: выдача отвечает на
+    неё ответом без ``config`` (роаст 001.29c, L1), а не 500 на весь ответ. ``MalformedConfig`` — не
+    ``ValueError``: повреждение строки не выдаётся за отказ источника ключа."""
+    document = MALFORMED[case]
+    assert not issubclass(MalformedConfig, ValueError | LookupError | TypeError)
+    with pytest.raises(MalformedConfig):
+        reality_tags(document)
+    with pytest.raises(MalformedConfig):
+        with_reality_keys(document, {"t": bytes(32), "vless_raw_vision": bytes(32)})

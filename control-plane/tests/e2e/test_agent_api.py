@@ -40,7 +40,7 @@ from app.domain.commands import (
     CommandService,
 )
 from app.domain.composition import CompositionService
-from app.domain.nodes import Node, NodeStatus, Version, stub_node
+from app.domain.nodes import STUB_NODE_ID, Node, NodeStatus, Version, stub_node
 from app.domain.statuses import STREAM_GATE, HeartbeatIn, NodeMetrics, StatusService
 from app.errors import ApiError
 from app.jobs.handlers import HANDLERS
@@ -52,7 +52,9 @@ from tests._agent import (
     HEADERS,
     IDENTITY,
     LAYOUT,
+    LAYOUT_CONFIG_VERSION,
     LAYOUT_SEQ,
+    layout_config,
     node_as,
     recorded_streams,
 )
@@ -71,7 +73,7 @@ AGENT_PATHS = {
 BODY_SCHEMAS = ("AckIn", "HeartbeatIn", "NodeMetrics", "CommandResultIn")
 BEHIND = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "generation": 1}
 CURRENT = {
-    "config_version": composition.STUB_CONFIG_VERSION,
+    "config_version": LAYOUT_CONFIG_VERSION,
     "agent_section_version": composition.STUB_AGENT_VERSION,
     "users_seq": LAYOUT_SEQ,
     "generation": 1,
@@ -82,7 +84,7 @@ VALID_HEARTBEAT: dict[str, Any] = {
     "agent_version": "0.1.0",
     "xray_version": "26.9.1",
     "node_time": "2026-09-10T12:00:00Z",
-    # Числа намеренно не равны STUB_CONFIG_VERSION (1) и STUB_USERS_SEQ (4): совпадение сделало бы
+    # Числа намеренно не равны LAYOUT_CONFIG_VERSION (1) и LAYOUT_SEQ (4): совпадение сделало бы
     # страж «маршрут передал тело» неотличимым от «маршрут подставил константы заглушки».
     "applied_config_version": 0,
     "applied_users_seq": 3,
@@ -354,8 +356,8 @@ async def test_state_answers_the_agent_and_needs_its_version() -> None:
         body = response.json()
         assert body["generation"] == composition.STUB_GENERATION
         assert body["resync_required"] is False
-        assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
-        assert body["config"]["checksum"] == composition.STUB_CONFIG_CHECKSUM
+        assert body["config"]["version"] == LAYOUT_CONFIG_VERSION
+        assert body["config"]["checksum"] == layout_config(STUB_NODE_ID).checksum
         assert body["agent"] == STUB_AGENT_BODY
         assert body["users"]["seq"] == LAYOUT_SEQ
         assert body["users"]["full"] is False, "дельта не полна: удалять по ней нельзя"
@@ -646,7 +648,7 @@ async def test_a_provisioning_node_that_applied_the_config_is_held() -> None:
     отставшей по нему значило бы отвечать ей 200 на каждый запрос вечно."""
     async with agent("provisioning") as client:
         applied = {
-            "config_version": composition.STUB_CONFIG_VERSION,
+            "config_version": LAYOUT_CONFIG_VERSION,
             "agent_section_version": composition.STUB_AGENT_VERSION,
             "users_seq": 0,
             "generation": 1,
@@ -667,7 +669,7 @@ async def test_a_cursor_ahead_of_the_server_is_refused_not_answered_with_204() -
     async with agent() as client:
         for params in (
             {**CURRENT, "users_seq": LAYOUT_SEQ + 1},
-            {**CURRENT, "config_version": composition.STUB_CONFIG_VERSION + 1},
+            {**CURRENT, "config_version": LAYOUT_CONFIG_VERSION + 1},
             {**CURRENT, "users_seq": 2**63 - 1},
             {**CURRENT, "config_version": 2**31 - 1},
             {**CURRENT, "agent_section_version": composition.STUB_AGENT_VERSION + 1},
@@ -695,7 +697,7 @@ async def test_a_snapshot_is_the_way_out_of_being_ahead(cursor: str) -> None:
         body = snapshot.json()
         assert body["users"]["full"] is True
         assert body["users"]["seq"] == LAYOUT_SEQ, "курсор ставит сервер"
-        assert body["config"]["version"] == composition.STUB_CONFIG_VERSION
+        assert body["config"]["version"] == LAYOUT_CONFIG_VERSION
         assert body["agent"] == STUB_AGENT_BODY, (
             "снапшот отдаёт раздел целиком, и нода принимает его версию, даже если она меньше "
             "присланной"

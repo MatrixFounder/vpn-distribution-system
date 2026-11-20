@@ -1,0 +1,45 @@
+{
+  "task": "001.29c",
+  "history_markers": [
+    "прежн",
+    "раунд",
+    "было",
+    "снят",
+    "Найдено при"
+  ],
+  "patterns": [
+    {
+      "name": "каркас конфигурации заглушки 001.28 и версия-константа",
+      "regex": "STUB_CONFIG_(?:DOCUMENT|CHECKSUM|VERSION)|\\bstub_config\\(",
+      "current": "строка node_config_versions, StoredConfig, LAYOUT_CONFIG_VERSION в тестах"
+    },
+    {
+      "name": "закрытый ключ REALITY в документе build и в строке версии",
+      "regex": "с ``?privateKey``?|privateKey``? \\(ключи заглушки|закрытый ключ REALITY — да|документ с ним не хранится открытым",
+      "current": "build и config_json — без privateKey; ключ вставляет выдача (with_reality_keys)"
+    },
+    {
+      "name": "ключ заглушки из одного кода профиля",
+      "regex": "выведен[а-я]* из кода профиля|stub_private_key\\(profile\\)|stub_public_key\\(profile\\)",
+      "current": "stub_private_key(node_id, profile): SHA-256 от ноды и кода профиля"
+    },
+    {
+      "name": "поток конфигурации — заглушка до 001.29c",
+      "regex": "поток конфигурации[^.;\\n]{0,40}(?:заглушк|фиксированн)|``?publish_config``?[^.;\\n]{0,20}заглушк|поток конфигурации — 001\\.29c",
+      "current": "поток конфигурации на строках node_config_versions (001.29c)"
+    },
+    {
+      "name": "прежняя сигнатура publish_config(node_id)",
+      "regex": "publish_config\\(node_id\\)|publish_config\\(self, node_id",
+      "current": "publish_config(conn, node_id) -> int; wake_config(node_id, version)"
+    },
+    {
+      "name": "запись документа конфигурации — за 001.29",
+      "regex": "001\\.29 запишет документ|выдача потоком\\s+конфигурации — 001\\.29\\b(?!c)",
+      "current": "001.29c"
+    }
+  ],
+  "history_sections": {
+    "tests/tests-001/report-001-29c.md": "^## Раунд 1 — роаст"
+  }
+}

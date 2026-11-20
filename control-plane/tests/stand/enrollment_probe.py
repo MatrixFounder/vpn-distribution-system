@@ -58,6 +58,7 @@ NODE_REFERENCES = (
     "node_identities",
     "node_ip_history",
     "node_billing_assignments",
+    "node_config_versions",  # подтверждение публикует версию конфигурации (001.29c)
 )
 STATE = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "generation": 1}
 

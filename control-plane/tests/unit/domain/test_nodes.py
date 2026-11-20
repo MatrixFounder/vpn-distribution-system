@@ -9,6 +9,7 @@ import contextlib
 import datetime as dt
 import importlib
 import ipaddress
+import json
 import re
 import secrets
 import uuid
@@ -169,6 +170,9 @@ class Recorder:
     def acquire(self) -> Recorder:
         return self
 
+    def is_in_transaction(self) -> bool:
+        return bool(self.open)
+
     async def _answer(self, query: str, args: tuple[object, ...]) -> object:
         self.sql.append(query)
         self.args.append(args)
@@ -264,7 +268,9 @@ async def test_expiry_is_judged_at_the_operation_moment() -> None:
     recorded = []
     for call, answer in calls:
         conn = Recorder(answer)
-        with contextlib.suppress(ApiError, TypeError, ValidationError):
+        # LookupError: подтверждение публикует конфигурацию (001.29c), а подменное подключение
+        # карточки ноды не отдаёт — что идёт за проверяемыми операторами, здесь не проверяется.
+        with contextlib.suppress(ApiError, LookupError, TypeError, ValidationError):
             await call(nodes.NodeService(conn, ca))
         lock = conn.sql.index(nodes._LOCK_NODE)
         assert not [q for q in conn.sql[lock:] if "now()" in q], conn.sql[lock:]
@@ -396,14 +402,59 @@ async def test_status_writes_follow_the_status_rules() -> None:
     for name, call in calls.items():
         conn = Recorder(full_path)
         # После записи статуса подменное подключение не отвечает на чтение карточки и состояния —
-        # то, что идёт следом, здесь не проверяется.
-        with contextlib.suppress(ApiError, TypeError, ValidationError):
+        # то, что идёт следом (в том числе публикация конфигурации 001.29c), здесь не проверяется.
+        with contextlib.suppress(ApiError, LookupError, TypeError, ValidationError):
             await call(nodes.NodeService(conn, ca))
         writes[name] = written(conn)
     assert writes["enroll"] == [ON_REENROLLMENT]
     assert writes["revoke"] == [ON_REVOCATION]
     assert len(writes["approve"]) == 1
     assert StatusService.can_transition("pending", cast(nodes.NodeStatus, writes["approve"][0]))
+
+
+async def test_approval_publishes_the_config_in_its_transaction_and_wakes_after_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """001.29c: подтверждение выделяет версию конфигурации и пишет её строку в своей транзакции,
+    после записи статуса, — версия коммитится вместе с подтверждением и откатывается с его
+    отказом; публикация отдельной транзакцией после коммита оставила бы подтверждённую ноду без
+    конфигурации при сбое между ними. ``PUBLISH node:{id}`` — после коммита: пробуждение до него
+    застало бы удержанный запрос без строки версии."""
+    from app.domain import composition
+
+    node_id = uuid.uuid4()
+    card = {**nodes.stub_node(status="provisioning", node_id=node_id).model_dump()}
+    card["legal_profile"] = json.dumps(card["legal_profile"])
+
+    def approvable(query: str) -> object:
+        if query.startswith("select cert_fingerprint from node_identities"):
+            return [{"cert_fingerprint": "0" * 64}]
+        if query == composition._NEXT_CONFIG_VERSION:
+            return 7
+        if query == nodes._NODE_BY_ID:
+            return card
+        return answers(query)
+
+    conn = Recorder(approvable)
+    woken: list[tuple[uuid.UUID, int, bool]] = []
+
+    async def wake(self: composition.CompositionService, node: uuid.UUID, version: int) -> bool:
+        woken.append((node, version, bool(conn.open)))
+        return True
+
+    monkeypatch.setattr(composition.CompositionService, "wake_config", wake)
+    approved = await nodes.NodeService(conn, InternalCA.from_pem(*make_ca())).approve(
+        node_id, uuid.uuid4(), "0" * 64
+    )
+    assert approved.id == node_id
+    status = next(i for i, q in enumerate(conn.sql) if q.startswith("update nodes set status"))
+    version = conn.sql.index(composition._NEXT_CONFIG_VERSION)
+    row = conn.sql.index(composition._INSERT_CONFIG)
+    assert status < version < row, "версия и строка — после записи статуса"
+    assert conn.scopes[status] is not None, "подтверждение — в транзакции"
+    assert conn.scopes[version] is conn.scopes[status] is conn.scopes[row], "в той же транзакции"
+    assert conn.args[row][:2] == (node_id, 7), "строка — выделенной версии"
+    assert woken == [(node_id, 7, False)], "пробуждение — одно, той версией, после коммита"
 
 
 async def test_the_panel_service_holds_the_ca_certificate_not_the_key(

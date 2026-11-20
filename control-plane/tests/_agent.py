@@ -11,6 +11,10 @@
 (четыре строки с номерами 1…4) живёт здесь: герметичные прогоны подставляют её службе состава
 (``RecordedComposition``), сквозные тесты заводят ту же раскладку строками живой базы
 (``tests/e2e/_composition.py``).
+
+С 001.29c поток конфигурации читает версию ноды и строку ``node_config_versions``. Раскладка —
+версия 1: документ ``XrayConfigBuilder.build`` без ключей и сумма документа с ключами заглушки
+ноды (``layout_config``); живой стенд публикует ту же версию (``tests/e2e/_reporting.py``).
 """
 
 from __future__ import annotations
@@ -30,11 +34,20 @@ from app.domain.composition import (
     Credentials,
     NodeComposition,
     RowsRead,
+    StoredConfig,
     StoredRow,
     UserState,
+    config_checksum,
     credentials_bound,
 )
+from app.domain.inbounds import stub_inbounds, stub_private_key
 from app.domain.nodes import STUB_NODE_ID, NodeStatus, stub_node
+from app.domain.xray_config import (
+    RealityKeySource,
+    XrayConfigBuilder,
+    reality_tags,
+    with_reality_keys,
+)
 from app.security.crypto import FieldCipher
 from fastapi import Depends
 
@@ -72,6 +85,7 @@ def node_as(
 # --- раскладка фикстур контракта ----------------------------------------------------------------
 
 LAYOUT_SEQ = 4  # ``nodes.desired_users_seq`` раскладки: номер последнего изменения
+LAYOUT_CONFIG_VERSION = 1  # ``nodes.desired_config_version`` раскладки: первая версия
 USER_ACTIVE = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
 USER_SUSPENDED = uuid.UUID("00000000-0000-7000-8000-0000000000a2")
 USER_REMOVED = uuid.UUID("00000000-0000-7000-8000-0000000000a3")
@@ -143,28 +157,56 @@ def layout_rows(node_id: uuid.UUID, cipher: FieldCipher) -> list[StoredRow]:
     return rows
 
 
+def layout_config(node_id: uuid.UUID) -> StoredConfig:
+    """Строка ``node_config_versions`` раскладки — та, что пишет ``publish_config``: документ
+    ``build`` без ключей и сумма документа с ключами заглушки ноды (``stub_private_key``)."""
+    document = XrayConfigBuilder().build(stub_node(node_id=node_id), stub_inbounds(node_id))
+    keys = {tag: stub_private_key(node_id, tag) for tag in reality_tags(document)}
+    return StoredConfig(
+        version=LAYOUT_CONFIG_VERSION,
+        document=document,
+        checksum=config_checksum(with_reality_keys(document, keys)),
+    )
+
+
 class RecordedComposition(CompositionService):
-    """Служба состава на раскладке фикстур без базы: вентиль, курсор, фильтр и расшифровка —
-    боевые, источник строк — ``layout_rows``. Признак ``resync_required`` запоминается в
-    экземпляре, как его хранила бы колонка ноды."""
+    """Служба состава на раскладке фикстур без базы: вентиль, курсор, фильтр, расшифровка и
+    выдача конфигурации с ключами — боевые, источник строк — ``layout_rows`` и
+    ``layout_config``. Признак ``resync_required`` запоминается в экземпляре, как его хранила бы
+    колонка ноды. ``reality_key`` — источник ключа выдачи (строка раскладки посчитана ключами
+    заглушки)."""
 
     def __init__(
-        self, resync_required: bool = False, commands: CommandService | None = None
+        self,
+        resync_required: bool = False,
+        commands: CommandService | None = None,
+        reality_key: RealityKeySource | None = None,
     ) -> None:
         cipher = throwaway_cipher()
-        super().__init__(pool=None, commands=commands, cipher=cipher)
+        super().__init__(pool=None, commands=commands, cipher=cipher, reality_key=reality_key)
         self._layout_cipher = cipher
         self.resync_required = resync_required
 
-    async def _read(self, node_id: uuid.UUID, users_seq: int, rows: RowsRead) -> NodeComposition:
+    async def _read(
+        self, node_id: uuid.UUID, users_seq: int, rows: RowsRead, config_after: int | None
+    ) -> NodeComposition:
         layout = layout_rows(node_id, self._layout_cipher)
         selected = {
             "snapshot": [row for row in layout if row.state != "removed"],
             "delta": [row for row in layout if row.updated_seq > users_seq],
             "none": [],
         }[rows]
+        config = None
+        if config_after is not None and LAYOUT_CONFIG_VERSION > config_after:
+            config = await self._issue_config(
+                None, node_id, layout_config(node_id), LAYOUT_CONFIG_VERSION
+            )
         return NodeComposition(
-            users_seq=LAYOUT_SEQ, resync_required=self.resync_required, rows=selected
+            users_seq=LAYOUT_SEQ,
+            resync_required=self.resync_required,
+            rows=selected,
+            config_version=LAYOUT_CONFIG_VERSION,
+            config=config,
         )
 
     async def _mark_resync(self, node_id: uuid.UUID) -> None:

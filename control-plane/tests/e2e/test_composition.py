@@ -1,7 +1,8 @@
 """Поток состава на живой базе (задача 001.29; R-04; UC-01, UC-05, UC-10, UC-11): выделение
 ``updated_seq`` под блокировкой строки ноды, исполнитель ``composition.publish_user`` на строках
 ``node_user_state``, вентиль по статусу с ``resync_required`` из колонки ноды и расшифровка
-credentials только для ноды из identity.
+credentials только для ноды из identity. Поток конфигурации (001.29c): отказ выдачи — сумма
+документа с ключами разошлась со строкой или источник ключа REALITY отказал (TC-E2E-03, 04).
 
 Нода стенда — настоящая (identity, ``current_node``, стенд приёма отчётов 001.34); прочие ноды —
 копии без identity. Задачи очереди здесь не ставятся: на стенде работают живые исполнители, и
@@ -27,19 +28,28 @@ from app.agent_api.deps import get_composition_service
 from app.config import Settings
 from app.db.pool import get_pool
 from app.domain import composition as composition_module
-from app.domain.composition import CompositionService, credentials_bound, next_users_seq
+from app.domain.commands import STUB_COMMAND_ID
+from app.domain.composition import (
+    CompositionService,
+    config_checksum,
+    credentials_bound,
+    next_users_seq,
+)
+from app.domain.inbounds import stub_private_key
 from app.domain.nodes import STUB_NODE_ID, NodeStatus, stub_node
 from app.domain.statuses import STREAM_GATE
+from app.domain.xray_config import reality_tags, with_reality_keys
 from app.jobs.handlers import HANDLERS
 from app.jobs.handlers.composition import PUBLISH_USER
 from app.jobs.queue import Job
 from app.redis import get_redis
 from app.security import crypto as crypto_module
 from app.security.crypto import Binding, CipherMismatch, FieldCipher
+from cryptography.exceptions import InvalidTag
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from tests._agent import LAYOUT_SEQ
+from tests._agent import LAYOUT_CONFIG_VERSION, LAYOUT_SEQ
 from tests.e2e._composition import (
     cursors,
     group_of,
@@ -50,7 +60,7 @@ from tests.e2e._composition import (
     state,
     subscribe,
 )
-from tests.e2e._reporting import AGENT_IP, insert_node, reporting, wait_blocked_by
+from tests.e2e._reporting import AGENT_IP, insert_node, insert_user, reporting, wait_blocked_by
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "agent_v1"
 
@@ -1084,3 +1094,334 @@ async def test_a_foreign_process_key_still_answers_the_revocations(
         assert [(row["user_id"], row["state"]) for row in rows] == [
             (str(paused), "suspended_admin")
         ]
+
+
+FOREIGN_NODE = uuid.UUID("00000000-0000-7000-8000-0000000000fe")
+
+
+async def config_rows(conn: asyncpg.Connection, node_id: uuid.UUID) -> list[tuple[Any, ...]]:
+    """Курсоры конфигурации ноды и её строки версий — то, что выдача менять не вправе."""
+    node = await conn.fetchrow(
+        "select desired_config_version, applied_config_version from nodes where id = $1", node_id
+    )
+    versions = await conn.fetch(
+        "select config_version, checksum from node_config_versions where node_id = $1 "
+        "order by config_version",
+        node_id,
+    )
+    return [tuple(node), *[tuple(row) for row in versions]]
+
+
+async def test_tc_e2e_03_29c_a_key_changed_without_a_new_version_withholds_the_config(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """001.29c TC-E2E-03: источник ключа ноды отдаёт другой ключ, строка версии прежняя — сумма
+    документа с ключами не совпадает с ``checksum`` строки, и нода отвергла бы документ (§5.2).
+    Ответ 200 без раздела ``config``; строки состава и команды выданы; ошибка в журнале с
+    ``node_id`` и версией; курсоры конфигурации ноды и строки версий не меняются (решение
+    заказчика 2026-11-04)."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        await seed_layout(stand.conn, stand.node_id, FieldCipher.from_settings(Settings.load()))
+        before = await config_rows(stand.conn, stand.node_id)
+        pool = await get_pool()
+
+        async def foreign_key(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            return stub_private_key(FOREIGN_NODE, tag)
+
+        async def foreign() -> CompositionService:
+            return CompositionService(pool, reality_key=foreign_key)
+
+        assert (await state(stand, BEHIND)).json()["config"] is not None, "ключ своей ноды — выдан"
+        stand.app.dependency_overrides[get_composition_service] = foreign
+        with caplog.at_level(logging.ERROR, logger="app.domain.composition"):
+            response = await state(stand, BEHIND)
+        after = await config_rows(stand.conn, stand.node_id)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["config"] is None
+    assert [r["updated_seq"] for r in body["users"]["rows"]] == [1, 2, 3, 4]
+    assert [c["id"] for c in body["commands"]] == [str(STUB_COMMAND_ID)]
+    assert before[0] == (LAYOUT_CONFIG_VERSION, 0) and len(before) == 2
+    assert after == before, "версия и курсоры конфигурации ноды не изменились"
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(
+        str(stand.node_id) in m and f"конфигурация {LAYOUT_CONFIG_VERSION}" in m and "сумма" in m
+        for m in errors
+    ), errors
+
+
+# Отказ источника ключа: контейнер не открывается привязкой (``InvalidTag``), текст контейнера не
+# разбирается (``ValueError``), ключ процесса не тот (``CipherMismatch``), ключ не в 32 байта
+# (``ValueError`` записи ключа ``xray_key``).
+# Текст исключения несёт метку: в журнал он попадать не должен — в бою там мог бы оказаться
+# ключевой материал.
+MARKER = "kAey-material-29c"
+REFUSALS: dict[str, tuple[Exception | bytes, str]] = {
+    "InvalidTag": (InvalidTag(MARKER), "InvalidTag"),
+    "ValueError": (ValueError(MARKER), "ValueError"),
+    "CipherMismatch": (CipherMismatch(MARKER), "CipherMismatch"),
+    "short-key": (bytes(31), "ValueError"),
+}
+
+
+@pytest.mark.parametrize("refusal", sorted(REFUSALS))
+async def test_tc_e2e_04_29c_a_refused_key_withholds_the_config(
+    pg_dsn: str,
+    migrate_env: dict[str, str],
+    caplog: pytest.LogCaptureFixture,
+    refusal: str,
+) -> None:
+    """001.29c TC-E2E-04: источник ключа ноды отказывает — контейнер не открывается привязкой
+    своей строки (``InvalidTag``) или не разбирается (``ValueError``, и ключ не в 32 байта), ключ
+    процесса не тот (``CipherMismatch``, WI-38); строки состава — без ``active``. Ответ 200 без
+    раздела ``config``; отзывы и команды выданы; ошибка в журнале с ``node_id``, версией и типом
+    отказа (решение заказчика 2026-11-05). Версия — 2, а не 1: номер в журнале — версии строки.
+    Текст исключения (метка) и трассировка не попадают ни в одну запись журнала любого уровня."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        async with conn.transaction():
+            version = await CompositionService(None).publish_config(conn, stand.node_id)
+        revoked = [await insert_user(conn), await insert_user(conn)]
+        for seq, (user_id, row_state) in enumerate(
+            zip(revoked, ("suspended_quota", "removed"), strict=True), 1
+        ):
+            await conn.execute(
+                "insert into node_user_state (node_id, user_id, state, updated_seq) "
+                "values ($1, $2, $3, $4)",
+                stand.node_id,
+                user_id,
+                row_state,
+                seq,
+            )
+        await conn.execute("update nodes set desired_users_seq = 2 where id = $1", stand.node_id)
+        pool = await get_pool()
+
+        outcome, logged = REFUSALS[refusal]
+
+        async def refusing(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            if isinstance(outcome, bytes):
+                return outcome
+            raise outcome
+
+        async def refused() -> CompositionService:
+            return CompositionService(pool, reality_key=refusing)
+
+        stand.app.dependency_overrides[get_composition_service] = refused
+        with caplog.at_level(logging.DEBUG):
+            response = await state(stand, BEHIND)
+    assert version == LAYOUT_CONFIG_VERSION + 1
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["config"] is None
+    assert [(r["updated_seq"], r["state"]) for r in body["users"]["rows"]] == [
+        (1, "suspended_quota"),
+        (2, "removed"),
+    ]
+    assert [c["id"] for c in body["commands"]] == [str(STUB_COMMAND_ID)]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(
+        str(stand.node_id) in m and f"конфигурация {version}:" in m and f"({logged})" in m
+        for m in errors
+    ), errors
+    for record in caplog.records:
+        assert MARKER not in record.getMessage(), "текст исключения в журнале"
+        assert record.exc_info is None and record.exc_text is None, "трассировка в журнале"
+
+
+async def test_29c_a_new_version_reaches_the_node_behind_it_and_only_that_node(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Вторая версия (``publish_config`` в транзакции изменения): курсор ноды —
+    ``desired_config_version + 1``, строка своя (документ версии 2 здесь отличается от первой —
+    уровнем журнала, сумма пересчитана по документу с ключами). Нода на версии 1 получает версию 2
+    — её документ и сумму, а не строку версии 1; нода на версии 2 — раздела нет (на текущих
+    курсорах — 204); версия 3 — впереди сервера, 409. Отказ выдачи версии 2 пишет в журнал её
+    номер, а не номер первой версии."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        conn = stand.conn
+        async with conn.transaction():
+            version = await CompositionService(None).publish_config(conn, stand.node_id)
+        assert version == 2
+        document = json.loads(
+            await conn.fetchval(
+                "select config_json::text from node_config_versions "
+                "where node_id = $1 and config_version = 2",
+                stand.node_id,
+            )
+        )
+        document["log"]["loglevel"] = "info"
+        keys = {tag: stub_private_key(stand.node_id, tag) for tag in reality_tags(document)}
+        checksum = config_checksum(with_reality_keys(document, keys))
+        await conn.execute(
+            "update node_config_versions set config_json = $3::jsonb, checksum = $4 "
+            "where node_id = $1 and config_version = $2",
+            stand.node_id,
+            2,
+            json.dumps(document),
+            checksum,
+        )
+        behind = await state(stand, cursors(0))
+        current = await state(stand, {**cursors(0), "config_version": 2})
+        ahead = await state(stand, {**cursors(0), "config_version": 3})
+        desired = await conn.fetchval(
+            "select desired_config_version from nodes where id = $1", stand.node_id
+        )
+        pool = await get_pool()
+
+        async def foreign_key(source_conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            return stub_private_key(FOREIGN_NODE, tag)
+
+        async def foreign() -> CompositionService:
+            return CompositionService(pool, reality_key=foreign_key)
+
+        stand.app.dependency_overrides[get_composition_service] = foreign
+        with caplog.at_level(logging.ERROR, logger="app.domain.composition"):
+            withheld = await state(stand, cursors(0))
+    assert withheld.status_code == 204, "версия 2 не выдана, иных изменений нет"
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(str(stand.node_id) in m and "конфигурация 2:" in m for m in errors), errors
+    assert desired == 2
+    assert behind.status_code == 200, behind.text
+    config = behind.json()["config"]
+    assert (config["version"], config["checksum"]) == (2, checksum)
+    assert config["json"]["log"] == {"loglevel": "info"}, "документ — строки версии 2"
+    assert current.status_code == 204, "версия 2 у ноды уже есть, состав и раздел на месте"
+    assert ahead.status_code == 409 and ahead.json()["error"]["code"] == "cursor_ahead"
+
+
+# Повреждение строки версии: строки нет или форма документа не та (``MalformedConfig``).
+DAMAGES = {
+    "нет строки": ("delete from node_config_versions where node_id = $1", "строки версии нет"),
+    "нет inbounds": (
+        "update node_config_versions set config_json = '{}'::jsonb where node_id = $1",
+        "повреждена",
+    ),
+    "не объект": (
+        "update node_config_versions set config_json = '[]'::jsonb where node_id = $1",
+        "повреждена",
+    ),
+    "нет тега": (
+        "update node_config_versions set config_json = config_json #- '{inbounds,0,tag}' "
+        "where node_id = $1",
+        "повреждена",
+    ),
+    "realitySettings null": (
+        "update node_config_versions set config_json = jsonb_set(config_json, "
+        "'{inbounds,1,streamSettings,realitySettings}', 'null'::jsonb) where node_id = $1",
+        "повреждена",
+    ),
+}
+
+
+@pytest.mark.parametrize("damage", sorted(DAMAGES))
+async def test_29c_a_damaged_version_row_withholds_the_config(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture, damage: str
+) -> None:
+    """``desired_config_version`` без своей строки или строка, повреждённая по форме (нет
+    ``inbounds``, документ не объект, у inbound REALITY нет тега; публикация пишет строку и
+    версию одной транзакцией по документу ``build`` — это повреждение данных): раздела ``config``
+    нет, ошибка с ``node_id`` и версией в журнал, состав и команды выдаются — как при расхождении
+    суммы, а не 500 на весь ответ (роаст раунд 1, L1). Источник ключа при этом не спрашивается.
+    Версия — 2: номер в журнале — версии ноды, а не первой."""
+    statement, logged = DAMAGES[damage]
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        await seed_layout(stand.conn, stand.node_id, FieldCipher.from_settings(Settings.load()))
+        async with stand.conn.transaction():
+            version = await CompositionService(None).publish_config(stand.conn, stand.node_id)
+        await stand.conn.execute(statement, stand.node_id)
+        pool = await get_pool()
+
+        async def untouchable(conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            raise AssertionError("ключ повреждённой строки не запрашивается")
+
+        async def guarded() -> CompositionService:
+            return CompositionService(pool, reality_key=untouchable)
+
+        stand.app.dependency_overrides[get_composition_service] = guarded
+        with caplog.at_level(logging.ERROR, logger="app.domain.composition"):
+            response = await state(stand, BEHIND)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["config"] is None
+    assert [r["updated_seq"] for r in body["users"]["rows"]] == [1, 2, 3, 4]
+    assert [c["id"] for c in body["commands"]] == [str(STUB_COMMAND_ID)]
+    assert version == LAYOUT_CONFIG_VERSION + 1
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(
+        str(stand.node_id) in m and f"конфигурация {version}:" in m and logged in m for m in errors
+    ), errors
+
+
+async def test_29c_the_key_is_read_in_the_snapshot_of_the_issued_version(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """Источник ключа при выдаче получает подключение снимка, в котором прочитаны версия ноды и
+    её строка (``repeatable read``, только чтение, тот же снимок — изменение, закоммиченное после
+    чтения версии, источнику не видно): в 001.27 ротация ключевой пары, закоммиченная
+    между чтением строки и ключа на разных подключениях, выглядела бы сменой ключа без новой
+    версии — ложная ошибка и ``config`` не выдан."""
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        pool = await get_pool()
+        seen: list[tuple[bool, str, str, str]] = []
+
+        async def watching(source_conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            if not seen:
+                # Изменение коммитится другим подключением после того, как выдача прочитала
+                # версию: подключение того же снимка его не видит, свежая транзакция — видит.
+                await stand.conn.execute(
+                    "update nodes set city = 'Osaka' where id = $1", stand.node_id
+                )
+            seen.append(
+                (
+                    source_conn.is_in_transaction(),
+                    await source_conn.fetchval("show transaction_isolation"),
+                    await source_conn.fetchval("show transaction_read_only"),
+                    await source_conn.fetchval(
+                        "select city from nodes where id = $1", stand.node_id
+                    ),
+                )
+            )
+            return stub_private_key(node_id, tag)
+
+        async def watched() -> CompositionService:
+            return CompositionService(pool, reality_key=watching)
+
+        stand.app.dependency_overrides[get_composition_service] = watched
+        response = await state(stand, BEHIND)
+    assert response.status_code == 200, response.text
+    assert response.json()["config"]["version"] == LAYOUT_CONFIG_VERSION
+    assert seen == [(True, "repeatable read", "on", "Tokyo")] * 3, "три ключа — в снимке выдачи"
+
+
+LIVE_UNEXPECTED: dict[str, Exception] = {
+    "RuntimeError": RuntimeError("источник сломан"),
+    "QueryCanceledError": asyncpg.exceptions.QueryCanceledError("statement timeout"),
+    "ConnectionResetError": ConnectionResetError("соединение сброшено"),
+}
+
+
+@pytest.mark.parametrize("error", sorted(LIVE_UNEXPECTED))
+async def test_29c_an_unexpected_source_error_answers_500(
+    pg_dsn: str, migrate_env: dict[str, str], caplog: pytest.LogCaptureFixture, error: str
+) -> None:
+    """Живой путь выдачи (``_read`` → ``_issue_config`` в снимке базы): исключение источника ключа
+    вне набора отказов — дефект кода, таймаут запроса, обрыв соединения — пробрасывается, ответ —
+    500, а не 200 без ``config`` с ложной записью «config не выдан» (роаст раунды 1–3, H1).
+    Модульный страж того же правила идёт через двойник ``RecordedComposition``, который подменяет
+    ``_read`` целиком."""
+    raised = LIVE_UNEXPECTED[error]
+    async with reporting(pg_dsn, migrate_env, users=0) as stand:
+        pool = await get_pool()
+
+        async def broken(source_conn: Any, node_id: uuid.UUID, tag: str) -> bytes:
+            raise raised
+
+        async def service() -> CompositionService:
+            return CompositionService(pool, reality_key=broken)
+
+        stand.app.dependency_overrides[get_composition_service] = service
+        with caplog.at_level(logging.ERROR, logger="app.domain.composition"):
+            response = await state(stand, BEHIND)
+    assert response.status_code == 500, response.text
+    withheld = [r.getMessage() for r in caplog.records if "config не выдан" in r.getMessage()]
+    assert withheld == [], "иное исключение источника принято за отказ выдачи"

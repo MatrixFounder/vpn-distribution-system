@@ -392,6 +392,13 @@ def _identity(row: asyncpg.Record) -> Identity:
     return Identity.model_validate(dict(row))
 
 
+async def read_node(conn: Any, node_id: uuid.UUID) -> Node | None:
+    """Карточка ноды на подключении вызывающего — в его транзакции (публикация конфигурации
+    001.29c собирает документ по карточке, которую видит её транзакция); ``None`` — ноды нет."""
+    row = await conn.fetchrow(_NODE_BY_ID, node_id)
+    return None if row is None else _node(row)
+
+
 # --- карточка для заглушек других служб --------------------------------------------------------
 # Заглушки учёта, состава и отчётов (001.28, 001.33) проверяют себя на фиксированной ноде, не
 # заводя её в базе; служба нод этих значений больше не выдаёт.
@@ -684,7 +691,18 @@ class NodeService:
         обмен (второй токен другого администратора) — тогда действующая identity уже другая, и
         подтверждать её, не видев, нельзя: 409 ``identity_changed``. Без действующей identity —
         409, выведенная нода — 409, из любого статуса, кроме ``pending``, — 409.
-        ``admin_id`` уйдёт в ``audit_log`` с 001.48."""
+        ``admin_id`` уйдёт в ``audit_log`` с 001.48.
+
+        В той же транзакции — новая версия конфигурации (``publish_config``, 001.29c): без неё
+        ``desired_config_version`` оставался бы 0, и нода в ``provisioning`` конфигурацию не
+        получила бы. Подтверждение после повторного ввода ноды (обмен вернул её в ``pending``)
+        выпускает следующую версию: документ собирается заново по нынешней карточке.
+        ``PUBLISH node:{id}`` — после коммита (отступление от 001.25: подтверждение публикует
+        конфигурацию)."""
+        # composition импортирует этот модуль (карточка ``Node``), поэтому импорт — на месте.
+        from app.domain.composition import CompositionService
+
+        composition = CompositionService(self._pool)
         async with transaction(self._pool) as conn:
             node = await conn.fetchrow(_LOCK_NODE, node_id)
             if node is None:
@@ -716,7 +734,10 @@ class NodeService:
                 node_id,
                 at,
             )
-            return _node(await conn.fetchrow(_NODE_BY_ID, node_id))
+            version = await composition.publish_config(conn, node_id)
+            approved = _node(await conn.fetchrow(_NODE_BY_ID, node_id))
+        await composition.wake_config(node_id, version)
+        return approved
 
     async def set_manual_status(
         self,

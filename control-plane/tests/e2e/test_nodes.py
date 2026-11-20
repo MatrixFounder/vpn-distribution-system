@@ -6,6 +6,9 @@ bootstrap-токен (Н-24, хеш, аннулирование прежнего
 enrollment, отказ CA как ошибка запроса и операции панели, которые не реализованы и отвечают 501
 (изменение записи, ручной статус, вывод из эксплуатации; операции над inbound — 001.26).
 
+Подтверждение публикует первую версию конфигурации (001.29c): строка ``node_config_versions``
+без закрытых ключей REALITY, выдача вставляет ключ только ноде из identity (TC-E2E-01, 02).
+
 Раздел ``/agent/v1`` здесь настоящий целиком: сертификат приходит заголовком ``X-Client-Cert`` в
 той форме, в какой его передаёт nginx (``tests/_pki.py::escaped``), ``current_node`` ищет ноду в
 базе. Какой нодой признан запрос, видно по отказу ``node_mismatch``: отчёт с чужим ``node_id``
@@ -17,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import hashlib
+import json
 import os
 import uuid
 from collections.abc import AsyncIterator
@@ -29,7 +33,11 @@ import asyncpg
 import httpx
 import pytest
 from app.agent_api.enroll import CSR_MAX_CHARS, get_node_service
+from app.domain.composition import config_checksum
+from app.domain.inbounds import stub_private_key, xray_key
+from app.domain.xray_config import reality_tags
 from app.main import create_app
+from app.redis import get_redis
 from app.security.ca import CsrRejectedError, InternalCA, serial_hex
 from app.security.sessions import SessionStore
 from cryptography import x509
@@ -1371,3 +1379,99 @@ async def test_state_and_card_agree_on_the_same_node(pg_dsn: str, redis_url: str
                 state["agent_version"],
                 state["xray_version"],
             ), step
+
+
+async def config_versions(conn: asyncpg.Connection, node_id: str) -> list[asyncpg.Record]:
+    rows: list[asyncpg.Record] = await conn.fetch(
+        "select config_version, config_json::text as text, checksum from node_config_versions "
+        "where node_id = $1 order by config_version",
+        uuid.UUID(node_id),
+    )
+    return rows
+
+
+async def test_tc_e2e_01_29c_approval_publishes_the_first_config(
+    pg_dsn: str, redis_url: str
+) -> None:
+    """001.29c TC-E2E-01: подтверждение ноды пишет первую версию конфигурации в той же
+    транзакции (строка ``node_config_versions`` версии 1, ``desired_config_version`` = 1), после
+    коммита будит канал ``node:{id}``, и нода в ``provisioning`` получает эту версию. До
+    подтверждения версии нет: обмен токена конфигурацию не публикует. Подтверждение после
+    повторного ввода — версия 2."""
+    async with onboarding(pg_dsn, redis_url) as ob:
+        node_id = (await ob.create_node())["id"]
+        me = await ob.enrolled(node_id)
+        assert await config_versions(ob.conn, node_id) == []
+        assert (await ob.state(node_id))["cursors"]["desired_config_version"] == 0
+        redis = await get_redis()
+        woken = None
+        async with redis.pubsub() as channel:
+            await channel.subscribe(f"node:{node_id}")
+            approved = await ob.approve(node_id, me.fingerprint)
+            for _ in range(40):
+                woken = await channel.get_message(ignore_subscribe_messages=True, timeout=0.25)
+                if woken is not None:
+                    break
+        assert approved.status_code == 200 and approved.json()["status"] == "provisioning"
+        rows = await config_versions(ob.conn, node_id)
+        assert [row["config_version"] for row in rows] == [1]
+        assert (await ob.state(node_id))["cursors"]["desired_config_version"] == 1
+        assert woken is not None and woken["data"] == "config:1", "канал node:{id} разбужен"
+        answer = await ob.as_agent(me)
+        assert answer.status_code == 200, answer.text
+        config = answer.json()["config"]
+        assert config["version"] == 1 and config["checksum"] == rows[0]["checksum"]
+        assert answer.json()["users"]["rows"] == [], "состав в provisioning закрыт"
+
+        # Повторный ввод (отзыв, новый обмен — снова pending) и подтверждение выпускают следующую
+        # версию: документ собирается заново, а не берётся прежний.
+        assert (await ob.revoke(node_id)).status_code == 200
+        reborn = await ob.enrolled(node_id)
+        assert (await ob.approve(node_id, reborn.fingerprint)).status_code == 200
+        assert [row["config_version"] for row in await config_versions(ob.conn, node_id)] == [1, 2]
+        assert (await ob.state(node_id))["cursors"]["desired_config_version"] == 2
+        assert (await ob.as_agent(reborn)).json()["config"]["version"] == 2
+
+
+async def test_tc_e2e_02_29c_the_private_key_is_not_stored_and_goes_only_to_its_node(
+    pg_dsn: str, redis_url: str
+) -> None:
+    """001.29c TC-E2E-02: две подтверждённые ноды. В ``config_json`` обеих строк нет ни ключа
+    ``privateKey``, ни значения закрытого ключа; выданный документ несёт в каждом
+    ``realitySettings`` ключ своей ноды и своего inbound, ключи нод различаются; ``config.checksum``
+    ответа = ``checksum`` строки = сумма выданного документа. Без ключей выданный документ равен
+    хранимому."""
+    async with onboarding(pg_dsn, redis_url) as ob:
+        nodes = []
+        for _ in range(2):
+            node_id = (await ob.create_node())["id"]
+            me = await ob.enrolled(node_id)
+            assert (await ob.approve(node_id, me.fingerprint)).status_code == 200
+            nodes.append(me)
+        issued: dict[str, set[str]] = {}
+        stored_texts = []
+        for me in nodes:
+            (row,) = await config_versions(ob.conn, me.node_id)
+            stored = json.loads(row["text"])
+            stored_texts.append(row["text"])
+            assert "privateKey" not in row["text"], "ключа нет ни на каком уровне строки"
+            answer = await ob.as_agent(me)
+            assert answer.status_code == 200, answer.text
+            config = answer.json()["config"]
+            assert config["checksum"] == row["checksum"] == config_checksum(config["json"])
+            keys = {
+                item["tag"]: item["streamSettings"]["realitySettings"].pop("privateKey")
+                for item in config["json"]["inbounds"]
+            }
+            assert keys == {
+                tag: xray_key(stub_private_key(uuid.UUID(me.node_id), tag))
+                for tag in reality_tags(stored)
+            }, "ключ своей ноды и своего inbound"
+            assert len(set(keys.values())) == 3
+            assert config["json"] == stored, "кроме ключей выданный документ — строка версии"
+            issued[me.node_id] = set(keys.values())
+        first, second = issued.values()
+        assert not first & second, "ключи двух нод различаются"
+        for text in stored_texts:
+            for key in first | second:
+                assert key not in text, "значения закрытого ключа в строке нет"
