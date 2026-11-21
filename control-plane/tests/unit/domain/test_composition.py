@@ -337,12 +337,16 @@ class _InsideTransaction:
         raise AssertionError(f"обращение к подключению: {name}")
 
 
-@pytest.mark.parametrize("executor", ["publish_user_on", "publish_node_on"])
+@pytest.mark.parametrize(
+    "executor", ["publish_user_on", "publish_node_on", "rotate_node_credentials_on"]
+)
 async def test_the_executor_refuses_a_connection_inside_a_transaction(executor: str) -> None:
     """Исполнители публикации (пользователя — 001.29, ноды — 001.29b) работают на подключении вне
     транзакции: внутри чужой транзакции транзакции пар стали бы точками сохранения, блокировка
     пользователя снялась бы до внешнего коммита, и следующий запуск выбрал бы кандидатов без
-    незакоммиченных строк. Отказ — до любого обращения к базе."""
+    незакоммиченных строк. Отказ — до любого обращения к базе. Исполнитель ротации credentials
+    ноды (001.29d) открывает свою транзакцию тоже: ротация и постановка публикации коммитятся
+    вместе, а внутри чужой транзакции стали бы её частью."""
     with pytest.raises(RuntimeError, match="вне транзакции"):
         await getattr(CompositionService(None), executor)(_InsideTransaction(), uuid.uuid4())
 
@@ -394,14 +398,23 @@ class _OutsideTransaction:
 
 
 @pytest.mark.parametrize(
-    "method", ["enqueue_publish_user", "enqueue_publish_node", "remove_user", "publish_config"]
+    "method",
+    [
+        "enqueue_publish_user",
+        "enqueue_publish_node",
+        "remove_user",
+        "publish_config",
+        "enqueue_rotate_node",
+        "rotate_user_credentials",
+    ],
 )
 async def test_a_publication_is_placed_only_inside_a_transaction(method: str) -> None:
     """Публикация ставится в транзакции бизнес-операции (§5.4, Н-14): вне транзакции постановка
     пережила бы откат операции или потерялась бы при крахе между коммитом и постановкой —
     ``RuntimeError`` до обращения к базе (001.29b). Версия конфигурации — так же (001.29c): вне
     транзакции изменения она пережила бы его откат, и нода получила бы документ, которого
-    изменение не оставило."""
+    изменение не оставило. Ротация credentials (001.29d) — так же: ротация пользователя коммитится
+    вместе с перевыпуском токена, постановка ротации ноды — вместе с отзывом identity."""
     with pytest.raises(RuntimeError, match="транзакции"):
         await getattr(CompositionService(pool=None), method)(_OutsideTransaction(), uuid.uuid4())
 

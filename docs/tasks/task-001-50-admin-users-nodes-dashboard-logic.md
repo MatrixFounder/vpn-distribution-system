@@ -34,7 +34,7 @@
 
 #### Файл: `control-plane/app/api/admin/users.py`
 
-- поиск по адресу и идентификатору; действия через `SubscriptionService`, `CompositionService.rotate_user_credentials`; карточка из `subscription_access_log`, последнего подключения, `traffic_hourly` и причины отзыва; корректировка баланса с причиной
+- поиск по адресу и идентификатору; действия через `SubscriptionService`, `CompositionService.rotate_user_credentials` (по одному пользователю на транзакцию и без строк нод, взятых до вызова: блокировка публикации пользователя держится до коммита — 001.29d, роаст раунд 3); карточка из `subscription_access_log`, последнего подключения, `traffic_hourly` и причины отзыва; корректировка баланса с причиной
 - последнее подключение к ноде — `max(user_online_ips.last_seen)` по ноде, при отсутствии строки — последний `hour_start` в `traffic_hourly` с ненулевым raw; `node_user_state.updated_at` — время изменения строки состава, а не подключения
 - причина отзыва — `subscriptions.state_reason`
 - пометка недоставляемого адреса — `users.email_undeliverable_at` (колонка — 001.51, ставит и

@@ -164,6 +164,7 @@ async def run_publications(conn: asyncpg.Connection) -> list[jobs.Job]:
     run = {
         composition.PUBLISH_USER_JOB: handlers.publish_user,
         composition.PUBLISH_NODE_JOB: handlers.publish_node,
+        composition.ROTATE_NODE_JOB: handlers.rotate_node_credentials,
     }
     done: list[jobs.Job] = []
     while (job := await jobs.claim(conn, "critical", "t29b", types=tuple(run))) is not None:

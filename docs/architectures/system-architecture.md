@@ -55,9 +55,9 @@ Python-пакетов; общая база данных; межмодульны�
   `worker-background` — почта, webhook, агрегация, сверки, экспорт кодов. Версию конфигурации
   ноды пишет транзакция той операции, которая меняет конфигурацию (`publish_config`, 001.29c):
   подтверждение ноды и операции панели над inbound, в том числе ротация ключевой пары, — C-01;
-  ротация ключевой пары всех inbound ноды по отзыву identity (`composition.rotate_node_credentials`,
-  `worker-critical`) и снятие прежнего `short_id` через 24 ч задачей — исполнитель C-02 (001.29d,
-  001.27).
+  ротация по отзыву identity (`composition.rotate_node_credentials`, `worker-critical`: credentials
+  всех пар ноды — 001.29d, ключевая пара её inbound — 001.27) и снятие прежнего `short_id` через
+  24 ч задачей — исполнитель C-02.
 - Функции: F-03 (асинхронная часть), F-04, F-09.
 - Технологии: Python 3.14, тот же код, что C-01; запуск `python -m app.jobs.worker --queue`.
 - Интерфейсы: PostgreSQL (очередь и данные), Redis (pub/sub пробуждения), SMTP-реле, webhook.

@@ -30,7 +30,7 @@ from app.domain.composition import CompositionService
 from app.domain.nodes import NodeStatus
 from app.domain.users import hash_token
 from app.main import create_app
-from app.security.ca import InternalCA
+from app.security.ca import InternalCA, serial_hex
 from cryptography import x509
 
 from tests._pki import escaped, make_ca
@@ -192,7 +192,7 @@ async def insert_identity(
         hash_token(token),
         generation,
         issued_at,
-        format(cert.serial_number, "x"),
+        serial_hex(cert.serial_number),
     )
     headers = {
         "X-Agent-Version": "0.1.0",

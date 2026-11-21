@@ -83,7 +83,11 @@
   в `traffic_gaps` — по ответу на вопрос «решить здесь» ниже
 - общий шаг отзыва: тело `revoke_identity` выносится в `_revoke(conn, node_id, at, *, compromise)`.
   При `compromise=True` шаг ставит `composition.rotate_node_credentials` (постановку в
-  `revoke_identity` вводит 001.29d; задача вызывает `rotate_keypair(reason=compromise)` 001.27).
+  `revoke_identity` вводит 001.29d; задача вызывает `rotate_keypair(reason=compromise)` 001.27)
+  по правилу 001.29d: отзыв, отозвавший хотя бы одну identity, — всегда; повторный — если
+  `CompositionService.rotation_unfinished` (у ноды есть отозванная identity, а последняя ротация
+  отказала или её нет; решение заказчика 2026-11-21) — то есть `compromise and (revoked or
+  rotation_unfinished)`, а не `compromise and revoked`.
   `revoke_identity` вызывает шаг с `compromise=True`, вывод — с `compromise=False`. Постановку
   строки внешнего журнала отзывов, которую 001.67 вводит в `revoke_identity`, задача переносит в
   общий шаг: вывод ноды пишет строку на каждую identity и каждый аннулированный токен тем же путём

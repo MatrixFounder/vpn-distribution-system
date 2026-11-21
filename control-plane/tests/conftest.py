@@ -73,11 +73,13 @@ def checked_field_cipher(monkeypatch: pytest.MonkeyPatch) -> None:
 # выбирают только известные им типы (``claim(types=HANDLERS)``) и их не тронут.
 TEST_PUBLISH_USER = "test-composition.publish_user"
 TEST_PUBLISH_NODE = "test-composition.publish_node"
+TEST_ROTATE_NODE = "test-composition.rotate_node_credentials"
 
 
 @pytest.fixture(autouse=True)
 async def composition_jobs_under_test_types(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
-    """Публикация состава, поставленная кодом под тестом, — под типами ``test-composition.*``.
+    """Публикация состава и ротация credentials ноды (001.29d), поставленные кодом под тестом, —
+    под типами ``test-composition.*``.
     Под настоящим типом её забрал бы живой исполнитель стенда: чужой код с ключом шифрования
     стенда, а не сессии. Поставленные в базу задачи удаляются после теста: стоящая задача
     растила бы ожидание очереди ``critical`` (``wait_seconds``, метрика стенда). Исполняют их
@@ -93,6 +95,7 @@ async def composition_jobs_under_test_types(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(composition, "PUBLISH_USER_JOB", TEST_PUBLISH_USER)
     monkeypatch.setattr(composition, "PUBLISH_NODE_JOB", TEST_PUBLISH_NODE)
+    monkeypatch.setattr(composition, "ROTATE_NODE_JOB", TEST_ROTATE_NODE)
     monkeypatch.setattr("app.domain.composition.enqueue", recording)
     yield
     if any(placed):
@@ -100,7 +103,7 @@ async def composition_jobs_under_test_types(monkeypatch: pytest.MonkeyPatch) -> 
         try:
             await conn.execute(
                 "delete from jobs where type = any($1::text[])",
-                [TEST_PUBLISH_USER, TEST_PUBLISH_NODE],
+                [TEST_PUBLISH_USER, TEST_PUBLISH_NODE, TEST_ROTATE_NODE],
             )
         finally:
             await conn.close()

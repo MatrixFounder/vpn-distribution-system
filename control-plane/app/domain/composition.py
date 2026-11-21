@@ -73,6 +73,10 @@ log = logging.getLogger(__name__)
 # тесты подменяют его своим, которого живые исполнители стенда не знают (``tests/conftest.py``).
 PUBLISH_USER_JOB = "composition.publish_user"
 PUBLISH_NODE_JOB = "composition.publish_node"
+# Ротация credentials пар ноды после отзыва её identity (Н-32, UC-12 шаг 3; 001.29d): ставит отзыв
+# в своей транзакции, исполняет ``rotate_node_credentials_on``. Тип читается при постановке — тесты
+# подменяют его своим, как и типы публикации (``tests/conftest.py``).
+ROTATE_NODE_JOB = "composition.rotate_node_credentials"
 # Состав ноды пишется порциями (решение заказчика 2026-11-05, роаст 001.29b, L3): задача
 # ``composition.publish_node`` пишет до стольких пользователей и ставит продолжение в конец
 # очереди ``critical`` — отзывы, поставленные раньше продолжения, проходят между порциями, и
@@ -415,6 +419,8 @@ limit $3
 # не видит и не снимает, A коммитит доступ, которого новый тариф не даёт.
 PUBLISH_LOCK_CLASS = 2901
 _LOCK_USER = "select pg_advisory_lock($1, hashtext($2))"
+# Та же блокировка в транзакции вызывающего (ротация пользователя, 001.29d): снимается её коммитом.
+_LOCK_USER_XACT = "select pg_advisory_xact_lock($1, hashtext($2))"
 _UNLOCK_USER = "select pg_advisory_unlock($1, hashtext($2))"
 # Блокировка строки ноды — ``FOR NO KEY UPDATE``: тот же режим берут ``UPDATE nodes …`` другой
 # публикации и приём отчёта (``accounting/service.py``), поэтому чтение состояния пары ждёт их
@@ -473,6 +479,40 @@ def credentials_bound(column: str, user_id: uuid.UUID, node_id: uuid.UUID) -> Bi
     """Привязка контейнера credentials к паре «пользователь × нода» (WI-38): контейнер другого
     пользователя или той же пары на другой ноде не расшифровывается (§11.3)."""
     return bound_to("node_user_credentials", column, user_id, node_id)
+
+
+def _fresh_credentials(
+    cipher: FieldCipher, user_id: uuid.UUID, node_id: uuid.UUID
+) -> tuple[bytes, bytes]:
+    """Новые ключи пары — контейнеры ``vless_uuid_enc`` и ``trojan_password_enc`` с привязкой своей
+    пары: UUID VLESS и пароль Trojan из CSPRNG (§7.2). Одна функция для создания пары, замены
+    непригодных контейнеров (001.29) и ротации (001.29d)."""
+    return (
+        cipher.encrypt(
+            uuid.uuid4().bytes, bound=credentials_bound("vless_uuid_enc", user_id, node_id)
+        ),
+        cipher.encrypt(
+            secrets.token_urlsafe(24).encode(),
+            bound=credentials_bound("trojan_password_enc", user_id, node_id),
+        ),
+    )
+
+
+# Пары ноды и пары пользователя для ротации (001.29d): по возрастанию второго ключа — порядок
+# записи строк одной транзакцией.
+_NODE_PAIRS = "select user_id from node_user_credentials where node_id = $1 order by user_id"
+_USER_PAIRS = "select node_id from node_user_credentials where user_id = $1 order by node_id"
+# Ротация ноды не довершена (решение заказчика 2026-11-21, H-1): у ноды есть отозванная identity,
+# а последняя по порядку постановки (``id``) задача ротации отказала (``dead``, ``failed``) или её
+# нет. Нода без отозванной identity не скомпрометирована — ротировать нечего.
+_ROTATION_UNFINISHED = """
+select exists (select 1 from node_identities where node_id = $2 and revoked_at is not null)
+   and coalesce((select j.status::text not in ('pending', 'running', 'done')
+                   from jobs j
+                  where j.type = $1 and j.payload->>'node_id' = $3
+                  order by j.id desc
+                  limit 1), true)
+"""
 
 
 _READ_NODE = (
@@ -696,10 +736,12 @@ class CompositionService:
 
         Состояние пользователя читается **после** блокировки строки ноды. Две публикации одного
         пользователя уже идут по очереди (``_LOCK_USER``; ``publish_node_on`` берёт её тоже); чтение
-        под блокировкой ноды — против писателей строк пользователя на этой ноде, которые
-        блокировку пользователя не берут (ротация credentials — 001.29d): запуск, прочитавший
-        состояние до блокировки, мог бы ждать её, пока такой писатель пишет новое состояние, и
-        записать старое с большим номером — у ноды остался бы снятый доступ.
+        под блокировкой ноды — против писателей пары на этой ноде, которые блокировку
+        пользователя не берут, а строку ноды берут: запуск, прочитавший состояние до блокировки,
+        мог бы ждать её, пока такой писатель пишет новое, и записать старое с большим номером — у
+        ноды остался бы снятый доступ. Ротация credentials (001.29d) пишет ключи пары под
+        блокировкой строки ноды, поэтому пара читается здесь с ключами целиком прежними или целиком
+        новыми; строки состава ротация не пишет — их публикует поставленная ею задача.
 
         Тариф делит группу с нодой — строка в состоянии подписки, credentials пары создаются
         при отсутствии; не делит, а строка есть и не ``removed`` — строка ``removed``, запись
@@ -724,22 +766,13 @@ class CompositionService:
             seq,
         )
         if shares and cipher is not None:
-
-            def fresh() -> tuple[bytes, bytes]:
-                return (
-                    cipher.encrypt(
-                        uuid.uuid4().bytes,
-                        bound=credentials_bound("vless_uuid_enc", user_id, node_id),
-                    ),
-                    cipher.encrypt(
-                        secrets.token_urlsafe(24).encode(),
-                        bound=credentials_bound("trojan_password_enc", user_id, node_id),
-                    ),
-                )
-
             if not pair["has_credentials"]:
                 await conn.execute(
-                    _INSERT_CREDENTIALS, user_id, node_id, xray_email(user_id), *fresh()
+                    _INSERT_CREDENTIALS,
+                    user_id,
+                    node_id,
+                    xray_email(user_id),
+                    *_fresh_credentials(cipher, user_id, node_id),
                 )
             elif (
                 self._open(
@@ -754,7 +787,12 @@ class CompositionService:
             ):
                 # Контейнеры пары непригодны (решение заказчика 2026-11-05, WI-38): публикация
                 # выдаёт паре новые ключи — версия растёт, нода получит строку с новыми ключами.
-                await conn.execute(_REPLACE_CREDENTIALS, user_id, node_id, *fresh())
+                await conn.execute(
+                    _REPLACE_CREDENTIALS,
+                    user_id,
+                    node_id,
+                    *_fresh_credentials(cipher, user_id, node_id),
+                )
                 log.warning(
                     "пара %s×%s: credentials не расшифровывались — выданы новые", node_id, user_id
                 )
@@ -1171,6 +1209,110 @@ class CompositionService:
             {"node_id": str(node_id), "after": str(after)},
             f"publish_node:{node_id}:after:{after}",
         )
+
+    async def enqueue_rotate_node(self, conn: Any, node_id: uuid.UUID) -> None:
+        """Поставить ``composition.rotate_node_credentials`` в транзакции отзыва identity ``conn``
+        (Н-32, UC-12 шаг 3; 001.29d): ключ ``rotate_node_credentials:{node_id}:{xid}`` — повтор
+        постановки той же транзакцией сливается; очередь ``critical``. Вне транзакции —
+        ``RuntimeError`` до обращения к базе (``_place``)."""
+        await _place(
+            conn,
+            ROTATE_NODE_JOB,
+            {"node_id": str(node_id)},
+            f"rotate_node_credentials:{node_id}:{{xid}}",
+        )
+
+    async def rotation_unfinished(self, conn: Any, node_id: uuid.UUID) -> bool:
+        """Ротация credentials ноды не довершена: у ноды есть отозванная identity, а последняя по
+        ``id`` задача ротации этой ноды отказала (``dead``, ``failed``) или её нет (отзыв до 001.29d
+        или вывод ноды без компрометации 001.87; отказавшую задачу очистка очереди удаляет по сроку
+        — исход тот же). Стоящая (``pending``, ``running``) и завершённая (``done``) — в работе или
+        довершены; последнюю задачу ротации ноды, пока она в ``done``, очистка 001.37 хранит: иначе
+        повторный отзыв ротировал бы довершённую ноду ещё раз, а после 001.27 это новая ключевая
+        пара и рассылка ``node_address_changed`` (решение заказчика 2026-11-21). Без отозванной
+        identity ротировать нечего. По этому признаку повторный отзыв ставит ротацию снова (решение
+        заказчика 2026-11-21, H-1): ротация, исчерпавшая попытки при отказе — ключ процесса не тот,
+        — иначе не восстанавливалась бы, и пары скомпрометированной ноды оставались бы с прежними
+        ключами."""
+        return bool(
+            await conn.fetchval(_ROTATION_UNFINISHED, ROTATE_NODE_JOB, node_id, str(node_id))
+        )
+
+    async def rotate_node_credentials(self, node_id: uuid.UUID) -> int:
+        """Ротация credentials пар ноды на подключении из пула — прямой запуск исполнителя
+        (тесты, ручная ротация); отзыв identity ставит задачу ``enqueue_rotate_node``."""
+        async with self._pool.acquire() as conn:
+            return await self.rotate_node_credentials_on(conn, node_id)
+
+    async def rotate_node_credentials_on(self, conn: Any, node_id: uuid.UUID) -> int:
+        """Исполнитель ``composition.rotate_node_credentials`` (001.29d) на подключении вне
+        транзакции (иначе ротация стала бы частью чужой транзакции — ``RuntimeError`` до обращения
+        к базе): своя транзакция — строка ноды ``FOR NO KEY UPDATE`` (``_lock_node``, как у
+        публикации: публикация на этой ноде ждёт коммита ротации), новые ключи каждой пары ноды по
+        возрастанию ``user_id`` (``_fresh_credentials``, ``version + 1``, ``rotated_at``) и
+        постановка ``composition.publish_node`` — строки ноды переопубликуются с новыми номерами.
+        Возвращает число пар; ноды нет — 0.
+
+        Шифр берётся до транзакции: ключ процесса не тот (``CipherMismatch``, WI-38) — ничего не
+        записано, задача повторяется. Транзакция одна на все пары (Н-32: до 1 000): пара не
+        остаётся с прежним ключом наполовину. Повтор после коммита ротирует ещё раз — безвредно,
+        нода применяет ключи по значению."""
+        if conn.is_in_transaction():
+            raise RuntimeError("ротация credentials ноды идёт на подключении вне транзакции")
+        cipher = await self._field_cipher()
+        async with conn.transaction():
+            if not await self._lock_node(conn, node_id):
+                return 0
+            users = [row["user_id"] for row in await conn.fetch(_NODE_PAIRS, node_id)]
+            await conn.executemany(
+                _REPLACE_CREDENTIALS,
+                [
+                    (user_id, node_id, *_fresh_credentials(cipher, user_id, node_id))
+                    for user_id in users
+                ],
+            )
+            if users:
+                await self.enqueue_publish_node(conn, node_id)
+        return len(users)
+
+    async def rotate_user_credentials(self, conn: Any, user_id: uuid.UUID) -> int:
+        """Ротация credentials пользователя на всех его нодах (AC-35; 001.29d) в транзакции
+        вызывающего ``conn`` — перевыпуска токена (001.42) или операции панели (001.50): блокировка
+        публикации пользователя (``PUBLISH_LOCK_CLASS``, до коммита вызывающего), затем по каждой
+        его паре, по возрастанию ``node_id``, строка ноды ``FOR NO KEY UPDATE`` (как у публикации и
+        ротации ноды — общий первый шаг писателей пары, без него ротация ноды и ротация
+        пользователя могли бы ждать друг друга по кругу), новые ключи и ``version + 1``; затем
+        постановка ``composition.publish_user``. Возвращает число ротированных пар. Вне
+        транзакции — ``RuntimeError`` до обращения к базе; ключ процесса не тот —
+        ``CipherMismatch``, операция вызывающего откатывается.
+
+        Предусловие вызывающего (порядок «пользователь, затем строки нод»): до вызова транзакция
+        не держит строк нод и блокировок публикации других пользователей, и в одной транзакции
+        ротируется один пользователь. Блокировка пользователя держится до коммита вызывающего:
+        вторая ротация той же транзакции (U1, затем U2) ждала бы U2, держа строки нод U1, а
+        публикация U2, держащая U2, — строку ноды U1 (взаимная блокировка; роаст 001.29d,
+        раунд 3, L-2)."""
+        if not conn.is_in_transaction():
+            raise RuntimeError("ротация credentials пользователя идёт в транзакции вызывающего")
+        cipher = await self._field_cipher()
+        # Блокировка публикации пользователя — до чтения его пар (как у publish_user и
+        # publish_node: пользователь, затем строки нод): публикация, создающая новую пару, ждёт
+        # коммита перевыпуска, а не выдаёт её ключи, пока прежний токен ещё действует (роаст
+        # раунд 2, L-2). Снимается коммитом транзакции вызывающего.
+        await conn.execute(_LOCK_USER_XACT, PUBLISH_LOCK_CLASS, str(user_id))
+        rotated = 0
+        for node_id in [row["node_id"] for row in await conn.fetch(_USER_PAIRS, user_id)]:
+            if not await self._lock_node(conn, node_id):
+                continue
+            result = await conn.execute(
+                _REPLACE_CREDENTIALS,
+                user_id,
+                node_id,
+                *_fresh_credentials(cipher, user_id, node_id),
+            )
+            rotated += result == "UPDATE 1"
+        await self.enqueue_publish_user(conn, user_id)
+        return rotated
 
     async def remove_user(self, conn: Any, user_id: uuid.UUID) -> None:
         """Снять доступ удалённого пользователя в транзакции вызывающего — той, что пишет

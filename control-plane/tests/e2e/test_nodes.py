@@ -1475,3 +1475,68 @@ async def test_tc_e2e_02_29c_the_private_key_is_not_stored_and_goes_only_to_its_
         for text in stored_texts:
             for key in first | second:
                 assert key not in text, "значения закрытого ключа в строке нет"
+
+
+async def test_tc_e2e_01_29d_a_new_enrollment_resets_the_applied_cursors(
+    pg_dsn: str, redis_url: str
+) -> None:
+    """001.29d TC-E2E-01 (§4.5 «Пересоздание»): обмен нового токена сбрасывает то, что прислал
+    прежний агент, — ``applied_config_version``, ``applied_users_seq``, ``applied_at``,
+    ``last_heartbeat_at`` (решение заказчика 2026-11-21), ``missed_heartbeats``,
+    ``ok_heartbeats``; курсоры сервера (``desired_*``) остаются. Сброс проверяется строкой ноды:
+    пока новый агент не подтвердил курсор состава, ``applied_users_seq`` — 0 (условие выдачи
+    001.44 не выполняется). Подтверждённый новый агент с нулевыми курсорами получает ответ —
+    это свойство правила 409 (оно сравнивает курсоры запроса с ``desired_*``), а не сброса."""
+    async with onboarding(pg_dsn, redis_url) as ob:
+        node_id = (await ob.create_node())["id"]
+        me = await ob.enrolled(node_id)
+        assert (await ob.approve(node_id, me.fingerprint)).status_code == 200
+        await ob.conn.execute(
+            "update nodes set status = 'active', desired_users_seq = 7, "
+            "applied_config_version = 1, applied_users_seq = 7, applied_at = now(), "
+            "missed_heartbeats = 2, ok_heartbeats = 3, last_heartbeat_at = now() where id = $1",
+            uuid.UUID(node_id),
+        )
+        reborn = await ob.enrolled(node_id)
+        row = await ob.conn.fetchrow(
+            "select status::text as status, desired_config_version, desired_users_seq, "
+            "applied_config_version, applied_users_seq, applied_at, last_heartbeat_at, "
+            "missed_heartbeats, ok_heartbeats from nodes where id = $1",
+            uuid.UUID(node_id),
+        )
+        assert dict(row) == {
+            "status": "pending",
+            "desired_config_version": 1,
+            "desired_users_seq": 7,
+            "applied_config_version": 0,
+            "applied_users_seq": 0,
+            "applied_at": None,
+            "last_heartbeat_at": None,
+            "missed_heartbeats": 0,
+            "ok_heartbeats": 0,
+        }
+        assert (await ob.approve(node_id, reborn.fingerprint)).status_code == 200
+        answer = await ob.as_agent(reborn)
+        assert answer.status_code == 200, answer.text
+
+
+async def test_29d_revoking_a_node_with_only_a_token_rotates_nothing(
+    pg_dsn: str, redis_url: str
+) -> None:
+    """001.29d: отзыв ноды, у которой есть только выданный неиспользованный bootstrap-токен, а
+    identity нет, аннулирует токен и ротацию credentials не ставит — identity не отзывалась,
+    скомпрометированных ключей нет (решения заказчика 2026-11-20 и 2026-11-21)."""
+    from app.domain import composition
+
+    async with onboarding(pg_dsn, redis_url) as ob:
+        node_id = (await ob.create_node())["id"]
+        await ob.issue(node_id)
+        revoked = await ob.revoke(node_id)
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["bootstrap_token_annulled_at"] is not None, "токен аннулирован"
+        jobs = await ob.conn.fetchval(
+            "select count(*) from jobs where type = $1 and payload->>'node_id' = $2",
+            composition.ROTATE_NODE_JOB,
+            node_id,
+        )
+        assert jobs == 0

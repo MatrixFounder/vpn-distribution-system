@@ -596,7 +596,9 @@ class NodeService:
         ``token_expired`` (A1). Затем, в той же транзакции: лист ноды по CSR (``ValueError`` CA
         откатывает всё, токен остаётся годным), погашение токена, отзыв прежних identity ноды
         (§4.5 «Пересоздание»), новая identity со следующим поколением и адресом ``source``,
-        нода — в ``pending`` с версиями, которые предъявил агент (шаг 6 сверяет их)."""
+        нода — в ``pending`` с версиями, которые предъявил агент (шаг 6 сверяет их); курсоры
+        ``applied_*``, ``last_heartbeat_at`` и счётчики heartbeat прежнего агента сброшены
+        (001.29d)."""
         if self._ca is None:
             raise RuntimeError("обмен токена без CA: NodeService создан без ca")
         token_hash = hash_token(token)
@@ -667,9 +669,16 @@ class NodeService:
             # отсюда, поэтому импорт на месте, а не в заголовке модуля.
             from app.domain.statuses import ON_REENROLLMENT
 
+            # Новый агент начинает с нуля (§4.5 «Пересоздание», 001.29d): то, что подтверждал и
+            # присылал прежний, к нему не относится — курсор прежнего агента не выглядел бы
+            # применённым новым, его последний heartbeat — свежестью нового (правило «offline»
+            # 001.30; решение заказчика 2026-11-21, M-1). Курсоры сервера (``desired_*``) не
+            # трогаются.
             await conn.execute(
                 "update nodes set status = $5, status_changed_at = $2, "
-                "agent_version = $3, xray_version = $4 where id = $1",
+                "agent_version = $3, xray_version = $4, applied_config_version = 0, "
+                "applied_users_seq = 0, applied_at = null, last_heartbeat_at = null, "
+                "missed_heartbeats = 0, ok_heartbeats = 0 where id = $1",
                 node_id,
                 at,
                 agent_version,
@@ -756,20 +765,39 @@ class NodeService:
         неотозванные identity ноды получают ``revoked_at``, неиспользованный bootstrap-токен
         аннулируется (иначе утёкший с VPS токен выпустил бы identity после отзыва), нода — в
         ``disabled``. Раздел ``/agent/v1`` сверяет identity с базой на каждом запросе, поэтому
-        следующий же запрос ноды — 401. Повторный отзыв ничего не меняет и не сдвигает
-        ``status_changed_at``. Запись ноды остаётся: новый токен выдаётся отдельно."""
+        следующий же запрос ноды — 401. Повторный отзыв identity и статус не меняет и не сдвигает
+        ``status_changed_at``. Запись ноды остаётся: новый токен выдаётся отдельно.
+
+        Отзыв, отозвавший хотя бы одну identity, ставит в той же транзакции ротацию credentials
+        пар ноды (``composition.rotate_node_credentials``, Н-32; 001.29d, отступление от 001.25);
+        повторный — только если у ноды есть отозванная identity, а последняя ротация ноды не
+        довершена (``dead``, ``failed`` или её нет): так администратор перезапускает ротацию после
+        устранения причины отказа. Перезапуск — до пересоздания ноды: после обмена нового токена
+        повторный отзыв отзывает и новую identity, и нода снова ``disabled`` (решение заказчика
+        2026-11-21)."""
         async with transaction(self._pool) as conn:
             node = await conn.fetchrow(_LOCK_NODE, node_id)
             if node is None:
                 raise _not_found()
             at: dt.datetime = await conn.fetchval(_MOMENT)
-            await conn.execute(
+            revoked = await conn.fetch(
                 "update node_identities set revoked_at = $2 "
-                "where node_id = $1 and revoked_at is null",
+                "where node_id = $1 and revoked_at is null returning generation",
                 node_id,
                 at,
             )
             await conn.execute(_ANNUL_TOKENS, node_id, at)
+            # Отзыв ротирует credentials пар ноды (Н-32, UC-12 шаг 3; 001.29d) в той же
+            # транзакции: первый — всегда, в том числе отклонение ноды в pending (UC-01 A2:
+            # токен мог утечь; решение заказчика 2026-11-20); повторный — только если у ноды есть
+            # отозванная identity, а последняя ротация не довершена (dead, failed или её нет;
+            # решение заказчика 2026-11-21, H-1). composition импортирует этот модуль — импорт на
+            # месте.
+            from app.domain.composition import CompositionService
+
+            composition = CompositionService(self._pool)
+            if revoked or await composition.rotation_unfinished(conn, node_id):
+                await composition.enqueue_rotate_node(conn, node_id)
             # Статус события identity — строка §4.6 (statuses.py; импорт на месте — см. enroll).
             from app.domain.statuses import ON_REVOCATION
 

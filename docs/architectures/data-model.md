@@ -223,8 +223,10 @@ nodes
   manual_cleared_at      timestamptz NULL         — момент снятия ручного статуса: окно
                                                      held_reports_suspend начинается не раньше
                                                      него (В-5; колонка и запись — 001.30c)
-  last_heartbeat_at      timestamptz NULL
-  missed_heartbeats      int                      — счётчик для Н-15
+  last_heartbeat_at      timestamptz NULL         — обмен нового bootstrap-токена сбрасывает в
+                                                     NULL (новый агент начинает с нуля, 001.29d)
+  missed_heartbeats      int                      — счётчик для Н-15; обмен нового токена
+                                                     сбрасывает в 0 (001.29d)
   agent_version          text NULL
   xray_version           text NULL
   billing_group_id       uuid FK billing_groups NOT NULL   — денормализация действующего назначения
@@ -236,7 +238,8 @@ nodes
                                                      и applied_users_seq ≥ resync_seq; каждый
                                                      взвод сбрасывает колонку в NULL (миграция —
                                                      001.75)
-  ok_heartbeats          int                      — подряд успешных интервалов, для Н-15 и §4.7
+  ok_heartbeats          int                      — подряд успешных интервалов, для Н-15 и §4.7;
+                                                     обмен нового токена сбрасывает в 0 (001.29d)
   bandwidth_mbps         int                      — порог аномалии (§5.9); 1…100 000 Мбит/с:
                                                      граница держит списание в bigint (001.34)
   max_conn_per_ip        int                      — Н-29
@@ -247,10 +250,12 @@ nodes
                                                      поле обязательно; колонка и раздел agent
                                                      — 001.27; правило — 001.86
   desired_config_version int
-  applied_config_version int
+  applied_config_version int                      — обмен нового токена сбрасывает в 0: курсоры
+                                                     applied_* подтверждает агент, и прежний к
+                                                     новому не относится (001.29d)
   desired_users_seq      bigint
-  applied_users_seq      bigint
-  applied_at             timestamptz NULL
+  applied_users_seq      bigint                   — обмен нового токена сбрасывает в 0 (001.29d)
+  applied_at             timestamptz NULL         — обмен нового токена сбрасывает в NULL
   monthly_cost           numeric(12,2) NULL
   currency               char(3) NULL
   provider_account       text NULL
@@ -363,7 +368,9 @@ node_user_credentials
   xray_email             text                     — устойчивый тег u{user_id} (§5.9)
   vless_uuid_enc         bytea
   trojan_password_enc    bytea
-  version                int
+  version                int                      — растёт при ротации (Н-32, AC-35; 001.29d);
+                                                     после снятия пары запись удаляется,
+                                                     повторная выдача начинает с 1
   rotated_at             timestamptz
   UNIQUE (user_id, node_id), INDEX (node_id)
 
@@ -1099,7 +1106,7 @@ erDiagram
 | `traffic_gaps`, `reconciliation_runs` | по суткам | 90 дней | темп роста разрывов задаёт нода (§11.3): срок обязателен; PK включает ключ партиционирования |
 | `traffic_daily` | нет | 24 месяца | Н-21 |
 | `auth_events` | по суткам | 90 дней | §16.2 |
-| `jobs` со статусом `done` | нет | 7 дней | обслуживание индекса |
+| `jobs` со статусом `done` | нет | 7 дней, кроме последней по `id` задачи `composition.rotate_node_credentials` каждой ноды, пока она в `done`: она хранится до более поздней задачи ротации этой ноды | обслуживание индекса; по статусу последней задачи ротации повторный отзыв identity решает перезапуск (001.29d, решение заказчика 2026-11-21); удаление — 001.37 |
 | `jobs` со статусами `failed`, `dead` | нет | 30 дней | разбор отказов; удаление — 001.37 |
 | `events`, `email_deliveries`, `webhook_deliveries` | нет | 90 дней | разбор доставок; период тарифа может быть длиннее срока, поэтому однократность за период держат колонки `subscription_periods` `notified_80_at`, `notified_95_at`, а не наличие строки `events`; повтор 100 % — новое значение `exhausted_at` в ключе события при каждом исчерпании (001.35, 001.51; В-7) |
 | `commands` завершённые | нет | 90 дней | разбор инцидентов |

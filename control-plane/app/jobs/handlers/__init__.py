@@ -2,7 +2,8 @@
 
 Задача 001.11 регистрирует ``noop``; 001.14 — ``ensure_partitions`` (обслуживание партиций
 §4.5); 001.28 — ``composition.publish_user`` (с 001.29 — исполнитель публикации состава),
-001.29b — ``composition.publish_node`` (состав ноды порциями);
+001.29b — ``composition.publish_node`` (состав ноды порциями); 001.29d —
+``composition.rotate_node_credentials`` (ротация credentials пар ноды после отзыва identity);
 001.33 — ``limits.check`` (``limits.py``) и три типа обслуживания хранения
 (``maintenance.py``); 001.21 —
 ``subscription.expire`` и ``subscription.notify_expiring`` (``subscriptions.py``) — заглушки, в
@@ -19,7 +20,14 @@ from collections.abc import Awaitable, Callable
 
 import asyncpg
 
-from app.jobs.handlers.composition import PUBLISH_NODE, PUBLISH_USER, publish_node, publish_user
+from app.jobs.handlers.composition import (
+    PUBLISH_NODE,
+    PUBLISH_USER,
+    ROTATE_NODE,
+    publish_node,
+    publish_user,
+    rotate_node_credentials,
+)
 from app.jobs.handlers.limits import LIMITS_CHECK, check_limits
 from app.jobs.handlers.maintenance import (
     PARTITIONS_DROP_EXPIRED,
@@ -50,6 +58,7 @@ HANDLERS: dict[str, Handler] = {
     "ensure_partitions": ensure_partitions,
     PUBLISH_USER: publish_user,
     PUBLISH_NODE: publish_node,
+    ROTATE_NODE: rotate_node_credentials,
     LIMITS_CHECK: check_limits,
     PARTITIONS_ENSURE: ensure,
     PARTITIONS_DROP_EXPIRED: drop_expired,

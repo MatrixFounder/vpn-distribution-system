@@ -19,7 +19,7 @@ from unittest import mock
 
 import pytest
 from app.api.admin.nodes import set_manual_status
-from app.domain import nodes
+from app.domain import composition, nodes
 from app.domain.statuses import ON_REENROLLMENT, ON_REVOCATION, StatusService
 from app.errors import ApiError
 from app.security.ca import InternalCA
@@ -208,6 +208,10 @@ SOURCE = ipaddress.ip_address("198.51.100.7")
 def answers(query: str) -> object:
     if query == nodes._LOCK_NODE:
         return {"gone": False, "status": "pending"}
+    if query == composition._ROTATION_UNFINISHED:
+        # Ротация ноды довершена: отзыв, не отозвавший identity, её не ставит. Постановку при
+        # отзыве проверяют сквозные тесты (``tests/e2e/test_credentials_rotation.py``).
+        return False
     if query == nodes._MOMENT:
         return MOMENT
     if query.startswith("insert into bootstrap_tokens"):
@@ -420,8 +424,6 @@ async def test_approval_publishes_the_config_in_its_transaction_and_wakes_after_
     отказом; публикация отдельной транзакцией после коммита оставила бы подтверждённую ноду без
     конфигурации при сбое между ними. ``PUBLISH node:{id}`` — после коммита: пробуждение до него
     застало бы удержанный запрос без строки версии."""
-    from app.domain import composition
-
     node_id = uuid.uuid4()
     card = {**nodes.stub_node(status="provisioning", node_id=node_id).model_dump()}
     card["legal_profile"] = json.dumps(card["legal_profile"])
