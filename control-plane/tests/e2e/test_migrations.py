@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncpg
 import psycopg
+import pytest
 from app.cli import migrate_dsn
 
 from ._cli import MIGRATIONS_DIR, clear_test_reports, migration_count, rollback_through, run_cli
@@ -258,8 +259,17 @@ def test_migrate_break_lock(migrate_env: dict[str, str]) -> None:
             conn.execute("DELETE FROM yoyo_lock")
 
 
+@pytest.mark.parametrize(
+    ("target", "kind", "key"),
+    [
+        ("090_schema_ops", "table", "control_plane.events"),
+        # L-3: миграция, которая только добавляет колонку, — ключ колонка, а не таблица.
+        ("150_node_agent_section_version", "column", "control_plane.nodes.agent_section_version"),
+    ],
+    ids=["table", "column"],
+)
 def test_migrate_detects_mark_without_objects_and_unmark_repairs(
-    migrate_env: dict[str, str],
+    migrate_env: dict[str, str], target: str, kind: str, key: str
 ) -> None:
     """WI-3: клиент, умерший между транзакцией отката и снятием отметки yoyo, оставляет миграцию
     «применённой» без объектов; прежняя ``migrate`` считала бы это нормой («применено — 0»).
@@ -268,7 +278,6 @@ def test_migrate_detects_mark_without_objects_and_unmark_repairs(
     воспроизводится так же, как оно возникает: откат миграции, затем отметка без объектов."""
     from yoyo import get_backend, read_migrations
 
-    target = "090_schema_ops"
     assert run_cli(migrate_env, "migrate").returncode == 0
     steps = rollback_through(migrate_env, target)
     dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
@@ -279,38 +288,50 @@ def test_migrate_detects_mark_without_objects_and_unmark_repairs(
         for direction in ((), ("--rollback",)):
             broken = run_cli(migrate_env, "migrate", *direction)
             assert broken.returncode == 65, (direction, broken.stdout, broken.stderr)
-            assert target in broken.stderr and "control_plane.events" in broken.stderr, (
-                broken.stderr
-            )
+            assert target in broken.stderr and key in broken.stderr, broken.stderr
             assert f"--unmark {target}" in broken.stderr, broken.stderr
-        with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
-            assert conn.execute("SELECT to_regclass('control_plane.events')").fetchone() == (
-                None,
-            ), "самопроверка ничего не применяет и не откатывает"
+        assert not _present(dsn, kind, key), "самопроверка ничего не применяет и не откатывает"
         unknown = run_cli(migrate_env, "migrate", "--unmark", "999_nope")
         assert unknown.returncode == 64 and "нет в источнике" in unknown.stderr, unknown.stderr
         repaired = run_cli(migrate_env, "migrate", "--unmark", target)
         assert repaired.returncode == 0 and "отметка снята" in repaired.stdout, repaired
         applied = run_cli(migrate_env, "migrate")
         assert applied.returncode == 0 and f"применено — {steps}" in applied.stdout, applied
+        assert _present(dsn, kind, key)
     finally:
         # Стенд не остаётся полуразобранным, но ремонтируется только состояние, созданное тестом:
-        # отметка 090 без её таблиц. Отказ migrate по иной причине оставляет отметку (Q-1): снятая
-        # при живых таблицах, она ломает общий стенд — каждый migrate падает на DuplicateTable.
-        if run_cli(migrate_env, "migrate").returncode != 0 and _marked_without_relation(
-            dsn, target, "control_plane.events"
-        ):
+        # отметка без ключевого объекта — по самому состоянию, а не по коду migrate: самопроверка,
+        # не заметившая отметку (L-3), отвечает 0 и оставила бы её. Отказ migrate по иной причине
+        # оставляет отметку (Q-1): снятая при живых объектах, она ломает общий стенд — каждый
+        # migrate падает на повторном создании объекта (DuplicateTable).
+        if _marked_without_object(dsn, target, kind, key):
             run_cli(migrate_env, "migrate", "--unmark", target)
             assert run_cli(migrate_env, "migrate").returncode == 0
+        else:
+            run_cli(migrate_env, "migrate")  # отметка, снятая тестом, применяется заново
     assert run_cli(migrate_env, "migrate").returncode == 0
 
 
-def _marked_without_relation(dsn: str, migration_id: str, relation: str) -> bool:
-    """Миграция ``migration_id`` отмечена применённой yoyo, а её таблицы ``relation`` нет."""
+def _present(dsn: str, kind: str, key: str) -> bool:
+    """Ключевой объект в базе: таблица по ``to_regclass``, колонка ``схема.таблица.колонка`` — по
+    ``information_schema.columns`` (не тем путём, которым ищет сама самопроверка)."""
+    with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        if kind == "column":
+            schema, table, column = key.split(".")
+            row = conn.execute(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s AND column_name = %s",
+                (schema, table, column),
+            ).fetchone()
+            return row == (1,)
+        return conn.execute("SELECT to_regclass(%s)", (key,)).fetchone() != (None,)
+
+
+def _marked_without_object(dsn: str, migration_id: str, kind: str, key: str) -> bool:
+    """Миграция ``migration_id`` отмечена применённой yoyo, а её ключевого объекта ``key`` нет."""
     with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
         marked = conn.execute(
             "SELECT count(*) FROM control_plane._yoyo_migration WHERE migration_id = %s",
             (migration_id,),
         ).fetchone()
-        present = conn.execute("SELECT to_regclass(%s)", (relation,)).fetchone()
-    return marked == (1,) and present == (None,)
+    return marked == (1,) and not _present(dsn, kind, key)

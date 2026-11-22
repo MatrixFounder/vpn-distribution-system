@@ -6,7 +6,8 @@
   клиента, умершего посреди миграции (после него ``migrate`` падает по таймауту замка).
   Перед применением и откатом — самопроверка учёта (WI-3): у каждой применённой по учёту yoyo
   миграции должен существовать её ключевой объект (первый ``CREATE TABLE``/``CREATE TYPE``
-  файла); отметка без объектов — след клиента, умершего между откатом и снятием отметки, —
+  файла, а у миграции без них — первая колонка ``ALTER TABLE … ADD COLUMN``, L-3); отметка без
+  объектов — след клиента, умершего между откатом и снятием отметки, —
   завершает команду кодом ``EX_MARK_WITHOUT_OBJECTS`` (65) с подсказкой, а ``--unmark <id>``
   снимает такую отметку, после чего ``migrate`` применяет миграцию заново. Миграции без
   создаваемых объектов (только данные) самопроверкой не охватываются.
@@ -42,27 +43,40 @@ EX_USAGE = 64
 EX_MARK_WITHOUT_OBJECTS = 65  # EX_DATAERR: учёт yoyo расходится с содержимым базы
 EX_NOT_IMPLEMENTED = 69
 
-# Ключевой объект миграции — первый CREATE TABLE / CREATE TYPE её apply-файла; схема — из
-# SET LOCAL search_path миграции (объекты создаются в ней, а не в search_path подключения).
+# Ключевой объект миграции — первый CREATE TABLE / CREATE TYPE её apply-файла, а у миграции без
+# них — первая колонка ALTER TABLE … ADD COLUMN (L-3: миграции, которые только добавляют колонки);
+# схема — из SET LOCAL search_path миграции (объекты создаются в ней, а не в search_path
+# подключения). Откат снимает всё созданное миграцией, поэтому одного объекта достаточно.
 _KEY_OBJECT = re.compile(
     r"^\s*CREATE\s+(TABLE|TYPE)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w.]*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_KEY_COLUMN = re.compile(
+    r"^\s*ALTER\s+TABLE\s+([A-Za-z_][\w.]*)\s+ADD\s+COLUMN\s+([A-Za-z_]\w*)",
     re.IGNORECASE | re.MULTILINE,
 )
 _SEARCH_PATH = re.compile(r"^\s*SET\s+(?:LOCAL\s+)?search_path\s+TO\s+([A-Za-z_]\w*)", re.I | re.M)
 
 
 def key_object(sql: str) -> tuple[str, str] | None:
-    """(``table`` | ``type``, имя со схемой) первого создаваемого объекта миграции или ``None``
-    для миграции без объектов (только данные)."""
+    """(``table`` | ``type``, имя со схемой) первой создаваемой таблицы или типа миграции, без
+    них — (``column``, ``схема.таблица.колонка``) первой добавляемой колонки, или ``None`` для
+    миграции без объектов (только данные)."""
     match = _KEY_OBJECT.search(sql)
-    if match is None:
-        return None
-    kind, name = match.group(1).lower(), match.group(2)
-    if "." not in name:
-        schema = _SEARCH_PATH.search(sql)
-        if schema is not None:
-            name = f"{schema.group(1)}.{name}"
-    return kind, name
+    if match is not None:
+        return match.group(1).lower(), _qualified(match.group(2), sql)
+    column = _KEY_COLUMN.search(sql)
+    if column is not None:
+        return "column", f"{_qualified(column.group(1), sql)}.{column.group(2)}"
+    return None
+
+
+def _qualified(name: str, sql: str) -> str:
+    """Имя объекта со схемой: без схемы в имени — схема ``SET LOCAL search_path`` миграции."""
+    if "." in name:
+        return name
+    schema = _SEARCH_PATH.search(sql)
+    return name if schema is None else f"{schema.group(1)}.{name}"
 
 
 def marks_without_objects(backend: Any, migrations: Any) -> list[tuple[str, str]]:
@@ -77,8 +91,18 @@ def marks_without_objects(backend: Any, migrations: Any) -> list[tuple[str, str]
             if key is None:
                 continue
             kind, name = key
-            lookup = "to_regclass" if kind == "table" else "to_regtype"
-            cursor.execute(f"SELECT {lookup}(%s)", (name,))  # noqa: S608 — имя функции из двух констант
+            if kind == "column":
+                # Удалённая колонка остаётся в pg_attribute с именем «........pg.dropped.N........»:
+                # поиск по имени её не находит.
+                relation, column = name.rsplit(".", 1)
+                cursor.execute(
+                    "SELECT attname FROM pg_attribute WHERE attrelid = to_regclass(%s) "
+                    "AND attname = %s",
+                    (relation, column),
+                )
+            else:
+                lookup = "to_regclass" if kind == "table" else "to_regtype"
+                cursor.execute(f"SELECT {lookup}(%s)", (name,))  # noqa: S608 — функция из двух констант
             row = cursor.fetchone()
             if row is None or row[0] is None:
                 broken.append((migration.id, name))
