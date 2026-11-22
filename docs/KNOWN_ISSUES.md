@@ -89,7 +89,7 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 
 ## quality
 
-- **Q-1** [test_migrations: finally снимает отметку 090 при живых объектах и ломает общий стенд](issues/q-1-test-migrations-finally-090.md) — severity `SEV-3`, status `open`, opened 2026-11-22
+- **Q-1** [test_migrations: finally снимает отметку 090 при живых объектах и ломает общий стенд](issues/q-1-test-migrations-finally-090.md) — severity `SEV-3`, status `fixed`, opened 2026-11-22, resolved 2026-11-22
 
 ## test-flake
 
