@@ -294,7 +294,23 @@ def test_migrate_detects_mark_without_objects_and_unmark_repairs(
         applied = run_cli(migrate_env, "migrate")
         assert applied.returncode == 0 and f"применено — {steps}" in applied.stdout, applied
     finally:
-        if run_cli(migrate_env, "migrate").returncode != 0:  # стенд не остаётся полуразобранным
+        # Стенд не остаётся полуразобранным, но ремонтируется только состояние, созданное тестом:
+        # отметка 090 без её таблиц. Отказ migrate по иной причине оставляет отметку (Q-1): снятая
+        # при живых таблицах, она ломает общий стенд — каждый migrate падает на DuplicateTable.
+        if run_cli(migrate_env, "migrate").returncode != 0 and _marked_without_relation(
+            dsn, target, "control_plane.events"
+        ):
             run_cli(migrate_env, "migrate", "--unmark", target)
             assert run_cli(migrate_env, "migrate").returncode == 0
     assert run_cli(migrate_env, "migrate").returncode == 0
+
+
+def _marked_without_relation(dsn: str, migration_id: str, relation: str) -> bool:
+    """Миграция ``migration_id`` отмечена применённой yoyo, а её таблицы ``relation`` нет."""
+    with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        marked = conn.execute(
+            "SELECT count(*) FROM control_plane._yoyo_migration WHERE migration_id = %s",
+            (migration_id,),
+        ).fetchone()
+        present = conn.execute("SELECT to_regclass(%s)", (relation,)).fetchone()
+    return marked == (1,) and present == (None,)
