@@ -47,6 +47,7 @@ from app.jobs.handlers import HANDLERS
 from app.jobs.handlers.composition import PUBLISH_USER
 from app.main import create_app
 
+from tests import _agent as agent_layout
 from tests._agent import (
     FINGERPRINT,
     HEADERS,
@@ -626,10 +627,11 @@ async def test_tc_e2e_02_the_agent_section_lies_outside_the_config_checksum(
         multiplier_milli=2500,
         disconnect_strategy="route_block",
     )
-    # Новые значения — новая версия раздела, и сервер объявляет её же своей текущей: иначе он
-    # выдавал бы версию, которую сам считает опережающей (README, «Раздел `agent`»).
+    # Новые значения — новая версия раздела (колонка ноды раскладки, 001.29f) и новые значения
+    # колонки лимита и заглушки остальных полей; версия конфигурации та же.
     monkeypatch.setattr(composition, "STUB_AGENT", changed)
-    monkeypatch.setattr(composition, "STUB_AGENT_VERSION", changed.version)
+    monkeypatch.setattr(agent_layout, "LAYOUT_AGENT_VERSION", changed.version)
+    monkeypatch.setattr(agent_layout, "LAYOUT_MAX_CONN", changed.max_conn_per_ip)
     async with agent() as client:
         after = (await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)).json()
     assert before["agent"] == STUB_AGENT_BODY

@@ -19,14 +19,21 @@ from app.jobs import queue as jobs
 from app.jobs.handlers import composition as handlers
 from app.security.crypto import FieldCipher
 
-from tests._agent import LAYOUT, LAYOUT_SEQ, layout_credentials
+from tests._agent import (
+    LAYOUT,
+    LAYOUT_AGENT_VERSION,
+    LAYOUT_MAX_CONN,
+    LAYOUT_SEQ,
+    layout_credentials,
+)
 from tests.e2e._catalog import access_group, plan
 from tests.e2e._reporting import AGENT_IP, ReportingStand, insert_user
 
 
 async def seed_layout(conn: asyncpg.Connection, node_id: uuid.UUID, cipher: FieldCipher) -> None:
     """Раскладка фикстур на ноде: пользователи с идентификаторами раскладки, строки состава с
-    номерами 1…4, credentials пар, которым публикация их создала бы, и курсор ноды — 4."""
+    номерами 1…4, credentials пар, которым публикация их создала бы, курсор ноды — 4, версия
+    раздела ``agent`` и ``max_conn_per_ip`` ноды — значения раскладки (001.29f)."""
     for user_id, state, seq, blocked in LAYOUT:
         await insert_user(conn, None, wanted_id=user_id)
         await conn.execute(
@@ -57,7 +64,14 @@ async def seed_layout(conn: asyncpg.Connection, node_id: uuid.UUID, cipher: Fiel
                 ),
                 keys.version,
             )
-    await conn.execute("update nodes set desired_users_seq = $2 where id = $1", node_id, LAYOUT_SEQ)
+    await conn.execute(
+        "update nodes set desired_users_seq = $2, agent_section_version = $3, "
+        "max_conn_per_ip = $4 where id = $1",
+        node_id,
+        LAYOUT_SEQ,
+        LAYOUT_AGENT_VERSION,
+        LAYOUT_MAX_CONN,
+    )
 
 
 async def group_of(conn: asyncpg.Connection, *node_ids: uuid.UUID) -> uuid.UUID:
@@ -143,11 +157,12 @@ async def set_status(conn: asyncpg.Connection, node_id: uuid.UUID, status: str) 
 
 
 def cursors(users_seq: int, *, full: bool = False) -> dict[str, Any]:
-    """Курсоры запроса: конфигурация и раздел ``agent`` — текущие (их поток в этой задаче не
-    меняется), состав — ``users_seq``."""
+    """Курсоры запроса: конфигурация и раздел ``agent`` — текущие у ноды стенда (их поток в этой
+    задаче не меняется; версия раздела ноды стенда — ``LAYOUT_AGENT_VERSION``, как у раскладки),
+    состав — ``users_seq``."""
     params: dict[str, Any] = {
         "config_version": 1,
-        "agent_section_version": 1,
+        "agent_section_version": LAYOUT_AGENT_VERSION,
         "users_seq": users_seq,
         "generation": 1,
     }

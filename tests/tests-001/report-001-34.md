@@ -514,7 +514,7 @@ tests/e2e/test_reports.py tests/e2e/test_schema_accounting.py`, 24,03 с) — в
 (`history_sections`). Совпадения вне истории — объяснены:
 
 - `control-plane/migrations/140_report_acceptance.rollback.sql:10` и
-  `control-plane/tests/e2e/test_schema_accounting.py:535` — откат 140 и его страж возвращают
+  `control-plane/tests/e2e/test_schema_accounting.py:535@5d532fb` — откат 140 и его страж возвращают
   прежнее `CHECK (bandwidth_mbps > 0)`: так и должно быть;
 - `docs/tasks/task-001-77-…:125` — исходная передача 001.23 («без верхней границы»); поправка
   001.34 — в блоке «Найдено при 001.34» того же файла;

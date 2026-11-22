@@ -119,7 +119,8 @@ inbound ноды по отзыву identity (`composition.rotate_node_credential
 node:{id}` — после коммита.
 
 Параметры агента вне документа Xray — раздел `agent` ответа состояния рядом с `config`, вне
-`config.json` и его контрольной суммы, со своим курсором версии: `max_conn_per_ip` (001.27),
+`config.json` и его контрольной суммы, со своим курсором версии (колонка
+`nodes.agent_section_version`, 001.29f): `max_conn_per_ip` (колонка ноды, 001.29f),
 `new_conn_rate_per_ip` — частота новых соединений с одного адреса клиента (001.27, В-10),
 `multiplier_milli` (001.36), `disconnect_strategy` — константа со стратегией, выбранной PoC-1а
 (001.40, 001.88; В-11). Смена раздела применяется без

@@ -24,10 +24,12 @@ from app.domain.composition import (
     config_checksum,
     credentials_bound,
     next_users_seq,
+    node_agent,
     xray_email,
 )
 from app.domain.inbounds import stub_private_key, xray_key
 from app.domain.nodes import stub_node
+from app.domain.statuses import INT4_MAX
 from app.errors import ApiError
 from app.security.crypto import CipherMismatch, FieldCipher
 from cryptography.exceptions import InvalidTag
@@ -226,6 +228,8 @@ class TrailingRemoval(RecordedComposition):
             rows=[*base.rows, *extra],
             config_version=base.config_version,
             config=base.config,
+            agent_version=base.agent_version,
+            max_conn_per_ip=base.max_conn_per_ip,
         )
 
 
@@ -562,3 +566,27 @@ async def test_publishing_for_a_missing_node_is_a_lookup_error(pg_dsn: str) -> N
             )
             == 0
         )
+
+
+def test_the_agent_section_passes_the_model_bounds() -> None:
+    """``node_agent`` (001.29f) собирает раздел проверкой модели ``StateAgent``: значения колонок
+    ноды проходят те же границы, что поля заглушки. Версия или лимит вне границ —
+    ``ValidationError``, а не раздел, который маршрут отдал бы агенту (ответ сериализуется без
+    ``response_model``)."""
+
+    def stored(version: int, limit: int) -> NodeComposition:
+        return NodeComposition(
+            users_seq=0,
+            resync_required=False,
+            rows=[],
+            config_version=1,
+            config=None,
+            agent_version=version,
+            max_conn_per_ip=limit,
+        )
+
+    section = node_agent(stored(3, 8))
+    assert (section.version, section.max_conn_per_ip) == (3, 8)
+    for version, limit in ((0, 8), (INT4_MAX + 1, 8), (3, 0), (3, -5), (3, INT4_MAX + 1)):
+        with pytest.raises(ValidationError):
+            node_agent(stored(version, limit))

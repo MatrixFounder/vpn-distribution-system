@@ -198,7 +198,7 @@ async def test_rollback_130_refuses_while_identities_exist(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-fp", "RB130")
-        rollback_through(migrate_env, ABOVE_IDENTITY)  # 131 и новее (140) — до самой 130
+        rollback_through(migrate_env, ABOVE_IDENTITY)  # 131 и новее (140, 150) — до самой 130
         refused = run_cli(migrate_env, "migrate", "--rollback")
         assert refused.returncode != 0, refused.stdout
         assert "непустой node_identities" in refused.stdout + refused.stderr, refused.stderr
@@ -240,7 +240,7 @@ async def test_rollback_130_checks_under_the_table_lock(
             "insert into billing_groups (name) values ($1) returning id", billing
         )
         node_id = await insert_node(conn, code, billing_id)
-        # 131 и новее (140) таблицу identity не трогают — до самой 130.
+        # 131 и новее (140, 150) таблицу identity не трогают — до самой 130.
         rollback_through(migrate_env, ABOVE_IDENTITY)
         insert = writer.transaction()
         await insert.start()
@@ -302,7 +302,7 @@ async def test_rollback_through_130_clears_test_identities_first(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-left", "RB130L")
-        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 3, "140, 131 и сама 130"
+        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 4, "150, 140, 131 и сама 130"
         assert await conn.fetchval("select count(*) from node_identities") == 0
     finally:
         await conn.execute("delete from node_identities where cert_fingerprint = 'rb-130-left'")
@@ -623,3 +623,66 @@ async def test_node_metrics_insert_as_app_rw(pg_dsn: str, migrate_env: dict[str,
                 await conn.close()
         finally:
             owner.execute("DROP TABLE node_metrics_probe")
+
+
+AGENT_SECTION_MIGRATION = "150_node_agent_section_version"
+PRE_AGENT_SECTION_NODE = (
+    "insert into nodes (code, name, country, city, provider, public_ipv4, billing_group_id, "
+    "bandwidth_mbps, max_conn_per_ip) values ($1, $1, 'JP', 'Tokyo', 'probe', $2, $3, 1000, $4) "
+    "returning id"
+)
+
+
+async def test_tc_mig_01_29f_the_initial_agent_section_version(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """TC-MIG-01 (001.29f): миграция 150 даёт ноде с ``max_conn_per_ip`` заглушки (32) версию
+    раздела ``agent`` 1, а нодам с другим лимитом — 2: нода, применившая версию 1 со значениями
+    заглушки, иначе не получила бы свой лимит. Лимиты 8 и 64 — по обе стороны от 32: условие
+    «меньше» или «больше» вместо «не равно» отличается от правила. Нода, вставленная после
+    миграции, — 2 (умолчание): версию 1 со значениями заглушки выдаёт и предыдущий образ, который
+    работает поверх этой схемы при откате кода. Версия меньше 1 отвергается CHECK. Откат снимает
+    колонку, повторное применение вычисляет значения заново."""
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    conn = await asyncpg.connect(pg_dsn)
+    names = {"billing": f"mig-29f-{uuid.uuid4().hex[:8]}"}
+    codes = {"stub": "MIG-29F-32", "own": "MIG-29F-08", "big": "MIG-29F-64", "fresh": "MIG-29F-NEW"}
+    try:
+        billing_id = await conn.fetchval(
+            "insert into billing_groups (name) values ($1) returning id", names["billing"]
+        )
+        rollback_through(migrate_env, AGENT_SECTION_MIGRATION)
+        await conn.fetchval(PRE_AGENT_SECTION_NODE, codes["stub"], "203.0.113.201", billing_id, 32)
+        await conn.fetchval(PRE_AGENT_SECTION_NODE, codes["own"], "203.0.113.202", billing_id, 8)
+        await conn.fetchval(PRE_AGENT_SECTION_NODE, codes["big"], "203.0.113.204", billing_id, 64)
+        assert run_cli(migrate_env, "migrate").returncode == 0
+        versions = {
+            row["code"]: row["agent_section_version"]
+            for row in await conn.fetch(
+                "select code, agent_section_version from nodes where code = any($1::text[])",
+                [codes["stub"], codes["own"], codes["big"]],
+            )
+        }
+        assert versions == {codes["stub"]: 1, codes["own"]: 2, codes["big"]: 2}, versions
+        fresh = await conn.fetchval(
+            PRE_AGENT_SECTION_NODE, codes["fresh"], "203.0.113.203", billing_id, 8
+        )
+        assert (
+            await conn.fetchval("select agent_section_version from nodes where id = $1", fresh) == 2
+        ), "новая нода: версия 1 закреплена за значениями заглушки"
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute("update nodes set agent_section_version = 0 where id = $1", fresh)
+        rollback_through(migrate_env, AGENT_SECTION_MIGRATION)
+        assert "agent_section_version" not in {
+            row["column_name"]
+            for row in await conn.fetch(
+                "select column_name from information_schema.columns "
+                "where table_schema = 'control_plane' and table_name = 'nodes'"
+            )
+        }
+    finally:
+        reapplied = run_cli(migrate_env, "migrate")
+        await conn.execute("delete from nodes where code = any($1::text[])", list(codes.values()))
+        await conn.execute("delete from billing_groups where name = $1", names["billing"])
+        await conn.close()
+    assert reapplied.returncode == 0, reapplied.stderr

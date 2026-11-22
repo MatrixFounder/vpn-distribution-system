@@ -29,6 +29,8 @@ from app.agent_api import deps
 from app.agent_api.deps import CurrentNode
 from app.domain.commands import CommandService
 from app.domain.composition import (
+    STUB_AGENT,
+    STUB_AGENT_VERSION,
     STUB_QUOTA_GRANT_BYTES,
     CompositionService,
     Credentials,
@@ -86,6 +88,10 @@ def node_as(
 
 LAYOUT_SEQ = 4  # ``nodes.desired_users_seq`` раскладки: номер последнего изменения
 LAYOUT_CONFIG_VERSION = 1  # ``nodes.desired_config_version`` раскладки: первая версия
+# ``nodes.agent_section_version`` и ``nodes.max_conn_per_ip`` раскладки (001.29f): значения
+# заглушки — раздел без базы совпадает с ``STUB_AGENT``; тест, которому нужны другие, подменяет их.
+LAYOUT_AGENT_VERSION = STUB_AGENT_VERSION
+LAYOUT_MAX_CONN = STUB_AGENT.max_conn_per_ip
 USER_ACTIVE = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
 USER_SUSPENDED = uuid.UUID("00000000-0000-7000-8000-0000000000a2")
 USER_REMOVED = uuid.UUID("00000000-0000-7000-8000-0000000000a3")
@@ -207,6 +213,8 @@ class RecordedComposition(CompositionService):
             rows=selected,
             config_version=LAYOUT_CONFIG_VERSION,
             config=config,
+            agent_version=LAYOUT_AGENT_VERSION,
+            max_conn_per_ip=LAYOUT_MAX_CONN,
         )
 
     async def _mark_resync(self, node_id: uuid.UUID) -> None:

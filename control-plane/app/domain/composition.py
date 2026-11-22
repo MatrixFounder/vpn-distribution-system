@@ -266,9 +266,23 @@ STUB_AGENT = StateAgent(
 )
 
 
-def stub_agent() -> StateAgent:
-    """Раздел ``agent`` заглушки: фиксированные значения (копия — ответ не делит объект)."""
-    return STUB_AGENT.model_copy()
+def node_agent(stored: NodeComposition) -> StateAgent:
+    """Раздел ``agent`` ноды (001.29f): версия — ``nodes.agent_section_version``, лимит —
+    ``nodes.max_conn_per_ip``; ``new_conn_rate_per_ip`` (001.27), ``multiplier_milli`` (001.36)
+    и ``disconnect_strategy`` (001.40) — значения ``STUB_AGENT`` до своих владельцев. Колонку
+    повышает смена значения поля во время работы (001.87, смена коэффициента — 001.29g); перевод
+    поля с заглушки на источник — эпоха раскладки в номере версии (001.29g).
+
+    Раздел собирается проверкой модели, а не ``model_copy``: тот значений не проверяет, а маршрут
+    сериализует ответ без ``response_model`` — значения колонок проходят те же границы, что поля
+    заглушки, и выход за них — ``ValidationError``, а не раздел, который агент отвергнет."""
+    return StateAgent.model_validate(
+        {
+            **STUB_AGENT.model_dump(),
+            "version": stored.agent_version,
+            "max_conn_per_ip": stored.max_conn_per_ip,
+        }
+    )
 
 
 # Отказы раздела несут ``Retry-After``: иначе частоту повторов определяет только агент, а
@@ -348,13 +362,16 @@ class StoredConfig:
 class NodeComposition:
     """Состояние ноды в одном снимке базы: ``nodes.desired_users_seq``, ``nodes.resync_required``
     и выбранные строки состава; ``nodes.desired_config_version`` и выданная конфигурация этой
-    версии (``None`` — не запрошена, нечего выдавать или выдача отказала)."""
+    версии (``None`` — не запрошена, нечего выдавать или выдача отказала); версия раздела
+    ``agent`` (``nodes.agent_section_version``) и лимит ``nodes.max_conn_per_ip`` (001.29f)."""
 
     users_seq: int
     resync_required: bool
     rows: list[StoredRow]
     config_version: int
     config: StateConfig | None
+    agent_version: int
+    max_conn_per_ip: int
 
 
 async def next_users_seq(conn: Any, node_id: uuid.UUID) -> int:
@@ -516,7 +533,8 @@ select exists (select 1 from node_identities where node_id = $2 and revoked_at i
 
 
 _READ_NODE = (
-    "select desired_users_seq, resync_required, desired_config_version from nodes where id = $1"
+    "select desired_users_seq, resync_required, desired_config_version, agent_section_version, "
+    "max_conn_per_ip from nodes where id = $1"
 )
 _READ_CONFIG = (
     "select config_json, checksum from node_config_versions "
@@ -811,7 +829,9 @@ class CompositionService:
         В том же снимке — версия конфигурации ноды и, если она больше ``config_after``
         (``None`` — конфигурация не выдаётся), её строка с ключами ноды (``_issue_config``):
         ключ читается тем же снимком, что и строка, и ротация ключевой пары, закоммиченная между
-        чтениями, не выглядит сменой ключа без новой версии."""
+        чтениями, не выглядит сменой ключа без новой версии. Версия раздела ``agent`` и лимит
+        ``max_conn_per_ip`` — той же строкой ноды (001.29f): смена лимита вместе с версией не
+        попадёт в ответ наполовину."""
         async with (
             self._pool.acquire() as conn,
             conn.transaction(isolation="repeatable_read", readonly=True),
@@ -858,6 +878,8 @@ class CompositionService:
             ],
             config_version=version,
             config=config,
+            agent_version=int(node["agent_section_version"]),
+            max_conn_per_ip=int(node["max_conn_per_ip"]),
         )
 
     async def _keyed(
@@ -1054,7 +1076,7 @@ class CompositionService:
         # тем же отказом.
         if not full and (
             config_version > stored.config_version
-            or agent_section_version > STUB_AGENT_VERSION
+            or agent_section_version > stored.agent_version
             or users_seq > current
         ):
             raise cursor_ahead()
@@ -1063,8 +1085,8 @@ class CompositionService:
         # ответ — 204, а не пустой 200, на который нода тут же спросила бы снова.
         config = stored.config
         agent = (
-            stub_agent()
-            if gate.config and (full or agent_section_version < STUB_AGENT_VERSION)
+            node_agent(stored)
+            if gate.config and (full or agent_section_version < stored.agent_version)
             else None
         )
         behind = composition_open and (full or users_seq < current)

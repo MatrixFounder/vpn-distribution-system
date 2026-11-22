@@ -23,7 +23,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from ._cli import rollback_through, run_cli
+from ._cli import migration_ids, rollback_through, run_cli
 from ._db import existing_tables, insert_node, insert_plan, insert_user, owner_connection
 from ._spec import ACCOUNTING_TABLES, NODES_TABLES, SUBSCRIPTIONS_TABLES
 
@@ -516,6 +516,11 @@ async def test_migration_140_apply_rollback_reapply(
     finally:
         await conn.close()
     try:
+        # Миграции новее 140 (150, 001.29f) снимаются заранее: следующий шаг отката — сама 140.
+        ids = migration_ids()
+        newer = ids[ids.index("140_report_acceptance") + 1 :]
+        if newer:
+            rollback_through(migrate_env, newer[0])
         blocked = run_cli(migrate_env, "migrate", "--rollback")
         assert blocked.returncode != 0, "откат не приводит отказанную часть к старому типу молча"
         assert "interval_closed" in blocked.stderr, blocked.stderr

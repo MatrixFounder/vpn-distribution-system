@@ -59,6 +59,7 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("legal_profile", "jsonb", False, "'{}'::jsonb"),
         ("created_at", "timestamptz", False, "now()"),
         ("decommissioned_at", "timestamptz", True, None),
+        ("agent_section_version", "int4", False, "2"),  # 001.29f, миграция 150
     ],
     "node_ip_history": [
         ("id", "int8", False, None),
@@ -181,6 +182,7 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
     "nodes": {
         ("c", "CHECK (((bandwidth_mbps >= 1) AND (bandwidth_mbps <= 100000)))"),  # 140 (001.34)
         ("c", "CHECK ((max_conn_per_ip > 0))"),
+        ("c", "CHECK ((agent_section_version >= 1))"),  # 001.29f
         (
             "c",
             "CHECK ((((multiplier_milli >= 0) AND (multiplier_milli <= 10000)) AND "
