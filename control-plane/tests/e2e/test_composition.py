@@ -46,14 +46,15 @@ from app.redis import get_redis
 from app.security import crypto as crypto_module
 from app.security.crypto import Binding, CipherMismatch, FieldCipher
 from cryptography.exceptions import InvalidTag
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from tests._agent import LAYOUT_CONFIG_VERSION, LAYOUT_SEQ
 from tests.e2e._composition import (
+    REDIS_FAILURE_IDS,
+    REDIS_FAILURES,
     cursors,
     group_of,
     plan_of,
+    refuse_redis,
     row_of,
     seed_layout,
     set_status,
@@ -623,9 +624,7 @@ async def test_publications_of_one_user_run_one_after_another(
         assert new is not None and new["state"] == "active"
 
 
-@pytest.mark.parametrize(
-    "failure", [RedisConnectionError, RedisTimeoutError], ids=["connection", "timeout"]
-)
+@pytest.mark.parametrize("failure", REDIS_FAILURES, ids=REDIS_FAILURE_IDS)
 async def test_a_redis_outage_does_not_stop_the_publication(
     pg_dsn: str,
     migrate_env: dict[str, str],
@@ -633,18 +632,13 @@ async def test_a_redis_outage_does_not_stop_the_publication(
     caplog: pytest.LogCaptureFixture,
     failure: type[Exception],
 ) -> None:
-    """Redis недоступен или завис (``socket_timeout`` клиента — ``TimeoutError``, не подкласс
-    ``ConnectionError``): строки обеих нод закоммичены, публикация завершается без ошибки, в
-    журнале — отказ пробуждения и пропуск остальных (пробуждение стоит до 30 с удержания, а не
-    доставку; повтор задачи выдал бы строкам новые номера без нужды)."""
-
-    attempts: list[int] = []
-
-    async def down() -> None:
-        attempts.append(1)
-        raise failure("Redis недоступен (подставлено тестом)")
-
-    monkeypatch.setattr(composition_module, "get_redis", down)
+    """Redis оборвал соединение, завис (``socket_timeout`` клиента — ``TimeoutError``, не подкласс
+    ``ConnectionError``) или ответил ошибкой (``ResponseError``): строки обеих нод закоммичены,
+    публикация завершается без ошибки, в журнале — отказ пробуждения и пропуск остальных
+    (пробуждение стоит до 30 с удержания, а не доставку; повтор задачи выдал бы строкам новые
+    номера без нужды). Клиент строится без ошибки и отказывает на ``publish``, как живой Redis:
+    обработка, охватывающая только получение клиента, здесь краснеет (Q-2)."""
+    client = refuse_redis(monkeypatch, failure)
     async with reporting(pg_dsn, migrate_env, users=0) as stand:
         conn = stand.conn
         other = await insert_node(conn, like=stand.node_id)
@@ -658,7 +652,7 @@ async def test_a_redis_outage_does_not_stop_the_publication(
         messages = [record.getMessage() for record in caplog.records]
         assert any("пробуждение не отправлено" in m for m in messages), messages
         assert any("пробуждения ещё 1 нод пропущены" in m for m in messages), messages
-        assert len(attempts) == 1, "после первого отказа Redis пробуждения не повторяются"
+        assert len(client.attempts) == 1, "после первого отказа Redis пробуждения не повторяются"
 
 
 async def test_a_subscription_without_state_shares_no_group(

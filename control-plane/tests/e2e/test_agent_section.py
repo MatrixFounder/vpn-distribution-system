@@ -35,12 +35,9 @@ from app.domain.nodes import STUB_NODE_IN, NodeIn, NodeService, stub_node
 from app.errors import ApiError
 from app.redis import get_redis
 from app.security.audit import AuditContext
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import ResponseError as RedisResponseError
-from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from tests.e2e._catalog import PREFIX, RecordingHours, billing_group, catalog, node, unique_name
-from tests.e2e._composition import state
+from tests.e2e._composition import REDIS_FAILURE_IDS, REDIS_FAILURES, refuse_redis, state
 from tests.e2e._reporting import ReportingStand, reporting, wait_blocked_by
 from tests.e2e.test_composition import _ProbePool
 
@@ -534,37 +531,6 @@ async def test_tc_e2e_03_29g_a_reassignment_on_the_callers_connection(pg_dsn: st
             assert kept.agent_section_column == before + 1
             assert await conn.fetchval(COLUMN, moved) == before + 1
             assert await drain(0.5) == {moved: []}, "публикует вызывающий после своего коммита"
-
-
-# Отказы живого Redis на команде: обрыв соединения, зависание (``socket_timeout`` даёт
-# ``TimeoutError``, не подкласс ``ConnectionError``) и ответ-ошибка (``-BUSY`` занятого скриптом
-# сервера — ``ResponseError``; скрипты на том же Redis держит ``app/security/ratelimit.py``).
-REDIS_FAILURES = [RedisConnectionError, RedisTimeoutError, RedisResponseError]
-REDIS_FAILURE_IDS = ["connection", "timeout", "busy"]
-
-
-class RefusingRedis:
-    """Клиент Redis, который строится без ошибки и отказывает на ``publish``: так отказывает живой
-    Redis — подключение устанавливается при первой команде (``app.redis.get_redis``), а не при
-    получении клиента. ``attempts`` — каналы, в которые пытались опубликовать."""
-
-    def __init__(self, failure: type[Exception]) -> None:
-        self.failure = failure
-        self.attempts: list[str] = []
-
-    async def publish(self, channel: str, message: str) -> int:
-        self.attempts.append(channel)
-        raise self.failure("Redis отказал на команде (подставлено тестом)")
-
-
-def refuse_redis(monkeypatch: pytest.MonkeyPatch, failure: type[Exception]) -> RefusingRedis:
-    client = RefusingRedis(failure)
-
-    async def refusing() -> RefusingRedis:
-        return client
-
-    monkeypatch.setattr(composition, "get_redis", refusing)
-    return client
 
 
 @pytest.mark.parametrize("failure", REDIS_FAILURES, ids=REDIS_FAILURE_IDS)
