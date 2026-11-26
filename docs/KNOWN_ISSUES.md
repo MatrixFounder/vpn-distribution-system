@@ -91,7 +91,7 @@ frontmatter above (body preserved verbatim — never drop a clause); ③ add one
 ## quality
 
 - **Q-1** [test_migrations: finally снимает отметку 090 при живых объектах и ломает общий стенд](issues/q-1-test-migrations-finally-090.md) — severity `SEV-3`, status `fixed`, opened 2026-11-22, resolved 2026-11-22
-- **Q-2** [test_composition: отказ Redis подставляется в get_redis, а не в publish](issues/q-2-test-composition-redis-get-redis-publish.md) — severity `LOW`, status `open`, opened 2026-11-26
+- **Q-2** [test_composition: отказ Redis подставляется в get_redis, а не в publish](issues/q-2-test-composition-redis-get-redis-publish.md) — severity `LOW`, status `fixed`, opened 2026-11-26, resolved 2026-11-26
 
 ## test-flake
 
