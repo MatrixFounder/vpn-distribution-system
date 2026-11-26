@@ -72,7 +72,10 @@
 либо модуль харнесса со списком ``PLANTS`` (его запуск — под ``if __name__ == "__main__"``). Поля
 посадки: ``label``, ``file`` (путь от корня репозитория), ``old`` (образец), ``count`` (сколько
 раз, по умолчанию 1), ``expect`` (``путь[::имя[::…]][параметры]`` от ``--tests-root``),
-``inputs`` (необязательно), ``what``; ``spec`` — отпечаток всего описания, включая замену ``new``.
+``inputs`` (необязательно), ``what``; ``extra`` (необязательно) — ещё правки той же посадки,
+объекты ``{"file", "old", "new", "count"}`` (``file`` по умолчанию — файл посадки): образец и код
+вокруг каждой проверяются, как у основной (WI-42); ``spec`` — отпечаток всего описания, включая
+замену ``new``.
 """
 
 from __future__ import annotations
@@ -1063,6 +1066,16 @@ class Closure:
 
 
 @dataclass
+class Edit:
+    """Правка посадки: образец ``old`` в файле ``file`` ``count`` раз, замена ``new``."""
+
+    file: str
+    old: str
+    count: int = 1
+    new: str | None = None  # замена харнесса: блок сравнивается и после неё
+
+
+@dataclass
 class Planting:
     label: str
     file: str
@@ -1073,6 +1086,12 @@ class Planting:
     spec: str = ""
     inputs: list[str] = field(default_factory=list)
     new: str | None = None  # замена харнесса: блок сравнивается и после неё
+    extra: list[Edit] = field(default_factory=list)  # ещё правки той же посадки (WI-42)
+
+    @property
+    def edits(self) -> list[Edit]:
+        """Все правки: основная — первой."""
+        return [Edit(self.file, self.old, self.count, self.new), *self.extra]
 
 
 def _relative(path: str, what: str) -> str:
@@ -1083,17 +1102,24 @@ def _relative(path: str, what: str) -> str:
 
 
 def load_plantings(path: Path) -> list[Planting]:
+    return parse_plantings(_read_plantings(path), path)
+
+
+def _read_plantings(path: Path) -> Any:
     if path.suffix == ".py":
         spec = importlib.util.spec_from_file_location("_plantings_harness", path)
         if spec is None or spec.loader is None:
             raise InputError(f"{path}: модуль харнесса не загружается")
         harness = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(harness)
-        data = getattr(harness, "PLANTS", None)
-    else:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            data = data.get("plantings")
+        return getattr(harness, "PLANTS", None)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("plantings") if isinstance(data, dict) else data
+
+
+def parse_plantings(data: Any, path: Path) -> list[Planting]:
+    """Посадки из уже прочитанного списка (``path`` — для сообщений); харнесс исполняет модуль
+    посадок один раз и разбирает его ``PLANTS`` этой функцией."""
     if not isinstance(data, list):
         raise InputError(f"{path}: нет списка посадок (PLANTS или plantings)")
     out: list[Planting] = []
@@ -1102,6 +1128,9 @@ def load_plantings(path: Path) -> list[Planting]:
             raise InputError(f"{path}: посадка {raw!r:.80}: нужен объект со списком expect")
         if not isinstance(raw.get("inputs", []), list):
             raise InputError(f"{path}: посадка {raw!r:.80}: inputs — список путей")
+        extra = raw.get("extra", [])
+        if not isinstance(extra, list) or not all(isinstance(e, dict) for e in extra):
+            raise InputError(f"{path}: посадка {raw!r:.80}: extra — список объектов правок")
         try:
             planting = Planting(
                 label=str(raw["label"]),
@@ -1113,12 +1142,21 @@ def load_plantings(path: Path) -> list[Planting]:
                 spec=spec_hash(raw),
                 inputs=[_relative(str(p), "inputs") for p in raw.get("inputs", [])],
                 new=raw["new"] if isinstance(raw.get("new"), str) else None,
+                extra=[
+                    Edit(
+                        file=_relative(str(e.get("file", raw["file"])), "file"),
+                        old=str(e["old"]),
+                        count=int(e.get("count", 1)),
+                        new=e["new"] if isinstance(e.get("new"), str) else None,
+                    )
+                    for e in extra
+                ],
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise InputError(f"{path}: посадка {raw!r:.80}: {exc}") from exc
         for test in planting.expect:
             _relative(test.split("::")[0].split("[")[0], f"{planting.label}: expect")
-        if not planting.old or planting.count < 1:
+        if any(not e.old or e.count < 1 for e in planting.edits):
             raise InputError(f"{path}: {planting.label}: пустой образец или count < 1")
         out.append(planting)
     labels = [p.label for p in out]
@@ -1161,14 +1199,15 @@ class Verdict:
     reasons: list[str]
     found: int
     expected: int
+    extra_mismatch: bool = False  # образец одной из правок ``extra`` не совпал
 
     @property
     def mismatch(self) -> bool:
-        return self.found != self.expected
+        return self.found != self.expected or self.extra_mismatch
 
 
-def code_reasons(planting: Planting, base: Source, current: Source) -> list[str]:
-    """Образец и код вокруг него; вызывается, когда образец в дереве совпал по числу."""
+def code_reasons(planting: Planting | Edit, base: Source, current: Source) -> list[str]:
+    """Образец правки и код вокруг него; вызывается, когда образец в дереве совпал по числу."""
     if base.read_bytes(planting.file) is None:
         return [f"файла {planting.file} нет в базе"]
     before, now = base.read(planting.file) or "", current.read(planting.file) or ""
@@ -1305,6 +1344,16 @@ def _compare(
         reasons: list[str] = []
         if found != planting.count:
             reasons.append(f"образец в дереве {found} раз вместо {planting.count}")
+        matched: list[tuple[str, Edit]] = []  # правки ``extra`` с совпавшим образцом
+        for number, edit in enumerate(planting.extra, 2):
+            where = f"правка {number} ({edit.file})"
+            extra_text = current.read(edit.file)
+            extra_found = extra_text.count(edit.old) if extra_text is not None else 0
+            if extra_found != edit.count:
+                reasons.append(f"{where}: образец в дереве {extra_found} раз вместо {edit.count}")
+            else:
+                matched.append((where, edit))
+        extra_mismatch = len(matched) != len(planting.extra)
         run = runs.get(planting.label)
         if run is None:
             reasons.append("не измерялась")
@@ -1321,9 +1370,13 @@ def _compare(
             assert pair is not None  # noqa: S101 — проверено строкой выше
             if found == planting.count:
                 reasons += code_reasons(planting, pair[0], current)
+            for where, edit in matched:
+                reasons += [f"{where}: {r}" for r in code_reasons(edit, pair[0], current)]
             reasons += test_reasons(planting, pair[1], current_closure)
             reasons += input_reasons(planting, pair[0], current)
-        verdicts.append(Verdict(planting.label, planting.what, reasons, found, planting.count))
+        verdicts.append(
+            Verdict(planting.label, planting.what, reasons, found, planting.count, extra_mismatch)
+        )
     return verdicts
 
 
@@ -1379,6 +1432,7 @@ def main(argv: list[str] | None = None) -> int:
                 "reasons": v.reasons,
                 "found": v.found,
                 "expected": v.expected,
+                "mismatch": v.mismatch,
             }
             for v in verdicts
         ]

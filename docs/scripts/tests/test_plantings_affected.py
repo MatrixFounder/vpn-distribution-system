@@ -1088,6 +1088,90 @@ class ImportTimeCode(Repo):
         self.assertIn("s", self.changed("nopkg"))
 
 
+class ExtraEdits(Repo):
+    """Правки ``extra`` посадки (WI-42): образец и код вокруг каждой проверяются, как у
+    основной; без этого правка во втором файле перемера не вызывала."""
+
+    MOD2 = CP + "app/mod2.py"
+    RAW = plant(
+        "multi",
+        [E + "test_other"],
+        old="return x > 0",
+        new="return x >= 0",
+        extra=[{"file": CP + "app/mod2.py", "old": "return 1", "new": "return 2"}],
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.measure([self.RAW])
+
+    def verdict(self) -> pa.Verdict:
+        [verdict] = pa.compare(self.plantings([self.RAW]), self.repo, "control-plane", self.runs)
+        return verdict
+
+    def test_an_unchanged_extra_edit_is_dry(self) -> None:
+        verdict = self.verdict()
+        self.assertEqual((verdict.reasons, verdict.mismatch), ([], False))
+
+    def test_code_around_an_extra_pattern_is_a_change(self) -> None:
+        self.edit(self.MOD2, "def ok():\n    return 1", "def ok():\n    y = 0\n    return 1")
+        verdict = self.verdict()
+        self.assertEqual(verdict.reasons, [f"правка 2 ({self.MOD2}): код ok"])
+        self.assertFalse(verdict.mismatch)
+
+    def test_a_missing_extra_pattern_is_a_mismatch(self) -> None:
+        self.edit(self.MOD2, "return 1", "return 3")
+        verdict = self.verdict()
+        self.assertTrue(verdict.mismatch)
+        self.assertEqual(
+            verdict.reasons, [f"правка 2 ({self.MOD2}): образец в дереве 0 раз вместо 1"]
+        )
+        out = io.StringIO()
+        log = self.aside / "runs.jsonl"
+        log.write_text(
+            json.dumps({"label": "multi", "verdict": "RED", "tree": self.runs["multi"].tree}) + "\n"
+        )
+        path = self.aside / "plants.json"
+        path.write_text(json.dumps([self.RAW], ensure_ascii=False))
+        with redirect_stdout(out):
+            code = pa.main(
+                [
+                    "--repo-root",
+                    str(self.repo),
+                    "compare",
+                    "--plantings",
+                    str(path),
+                    "--log",
+                    str(log),
+                    "--json",
+                ]
+            )
+        self.assertEqual(code, 1, out.getvalue())
+        [row] = json.loads(out.getvalue())
+        self.assertEqual((row["mismatch"], row["found"], row["expected"]), (True, 1, 1))
+
+    def test_an_extra_pattern_found_too_often_is_a_mismatch(self) -> None:
+        self.edit(self.MOD2, "def ok():\n    return 1", "def ok():\n    return 1\n    return 1")
+        verdict = self.verdict()
+        self.assertTrue(verdict.mismatch)
+        self.assertEqual(
+            verdict.reasons, [f"правка 2 ({self.MOD2}): образец в дереве 2 раз вместо 1"]
+        )
+
+    def test_an_extra_edit_defaults_to_the_planting_file(self) -> None:
+        raw = {**self.RAW, "extra": [{"old": "return 2", "new": "return 3"}]}
+        [planting] = self.plantings([raw])
+        self.assertEqual(
+            [(e.file, e.old, e.count) for e in planting.edits],
+            [(MOD, "return x > 0", 1), (MOD, "return 2", 1)],
+        )
+
+    def test_a_malformed_extra_is_refused(self) -> None:
+        for extra in ("x", [{"new": "x"}], [{"old": ""}], [{"old": "a", "count": 0}], ["x"]):
+            with self.subTest(extra=extra), self.assertRaises(pa.InputError):
+                self.plantings([{**self.RAW, "extra": extra}])
+
+
 class Inputs(Repo):
     def test_files_the_test_reads_outside_its_directory_are_its_inputs(self) -> None:
         self.edit("contracts/agent.json", '"v": 1', '"v": 2')
