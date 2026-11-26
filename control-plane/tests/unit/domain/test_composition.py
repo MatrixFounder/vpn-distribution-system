@@ -3,24 +3,28 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 import asyncpg
 import pytest
 from app.config import SecretError
+from app.domain import composition
 from app.domain.composition import (
     REVOKING_STATES,
-    STUB_AGENT_VERSION,
     STUB_GENERATION,
     CompositionService,
     NodeComposition,
     RowsRead,
     StoredRow,
     UserRow,
+    agent_section_number,
+    check_layout_epoch,
     config_checksum,
     credentials_bound,
     next_users_seq,
@@ -37,6 +41,7 @@ from pydantic import ValidationError
 
 from tests._agent import (
     LAYOUT,
+    LAYOUT_AGENT_VERSION,
     LAYOUT_CONFIG_VERSION,
     LAYOUT_SEQ,
     USER_ACTIVE,
@@ -110,8 +115,11 @@ async def test_a_withheld_config_alone_is_no_reason_to_answer() -> None:
     составу, получает состав без раздела ``config``."""
     service = RecordedComposition(reality_key=_foreign_key)
     node = stub_node(node_id=NODE)
-    assert await service.state_for(node, 0, LAYOUT_SEQ, STUB_GENERATION, False, 1) is None
-    answer = await service.state_for(node, 0, 0, STUB_GENERATION, False, STUB_AGENT_VERSION)
+    assert (
+        await service.state_for(node, 0, LAYOUT_SEQ, STUB_GENERATION, False, LAYOUT_AGENT_VERSION)
+        is None
+    )
+    answer = await service.state_for(node, 0, 0, STUB_GENERATION, False, LAYOUT_AGENT_VERSION)
     assert answer is not None and answer.config is None
     assert [row.updated_seq for row in answer.users.rows] == [1, 2, 3, 4]
 
@@ -228,7 +236,7 @@ class TrailingRemoval(RecordedComposition):
             rows=[*base.rows, *extra],
             config_version=base.config_version,
             config=base.config,
-            agent_version=base.agent_version,
+            agent_column=base.agent_column,
             max_conn_per_ip=base.max_conn_per_ip,
         )
 
@@ -570,23 +578,69 @@ async def test_publishing_for_a_missing_node_is_a_lookup_error(pg_dsn: str) -> N
 
 def test_the_agent_section_passes_the_model_bounds() -> None:
     """``node_agent`` (001.29f) собирает раздел проверкой модели ``StateAgent``: значения колонок
-    ноды проходят те же границы, что поля заглушки. Версия или лимит вне границ —
+    ноды проходят те же границы, что поля заглушки. Номер версии вне ``int4`` или лимит вне границ —
     ``ValidationError``, а не раздел, который маршрут отдал бы агенту (ответ сериализуется без
-    ``response_model``)."""
+    ``response_model``). Номер — эпоха раскладки и колонка (001.29g): колонка 3 под эпохой 1 —
+    10 000 003; колонка, выводящая номер за ``int4``, — отказ."""
 
-    def stored(version: int, limit: int) -> NodeComposition:
+    def stored(column: int, limit: int) -> NodeComposition:
         return NodeComposition(
             users_seq=0,
             resync_required=False,
             rows=[],
             config_version=1,
             config=None,
-            agent_version=version,
+            agent_column=column,
             max_conn_per_ip=limit,
         )
 
     section = node_agent(stored(3, 8))
-    assert (section.version, section.max_conn_per_ip) == (3, 8)
-    for version, limit in ((0, 8), (INT4_MAX + 1, 8), (3, 0), (3, -5), (3, INT4_MAX + 1)):
+    assert (section.version, section.max_conn_per_ip) == (10_000_003, 8)
+    over_int4 = 2_147_483_648 - 10_000_000
+    for column, limit in ((over_int4, 8), (3, 0), (3, -5), (3, INT4_MAX + 1)):
         with pytest.raises(ValidationError):
-            node_agent(stored(version, limit))
+            node_agent(stored(column, limit))
+
+
+def test_tc_unit_01_29g_the_layout_epoch_keeps_the_number_in_int4(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TC-UNIT-01 (001.29g): номер версии раздела ``agent`` — эпоха раскладки × 10 000 000 +
+    колонка ``nodes.agent_section_version`` (решение заказчика 2026-11-25). Номер и курсор
+    контракта — ``int4``, поэтому эпоха — от 1 до 213: 213 × 10⁷ + 9 999 999 = 2 139 999 999 ≤
+    2 147 483 647, а эпоха 214 даёт 2 149 999 999. Проверка отвергает 214 и 0; эпоха образа её
+    проходит, и модуль вызывает проверку при импорте — образ с эпохой вне предела не стартует, а не
+    отвечает 500 на каждый запрос состояния. Множитель, предел колонки и ``INT4_MAX`` сверены
+    литералами: страж не выводит входы из констант, которые он проверяет."""
+    assert composition.AGENT_SECTION_EPOCH_FACTOR == 10_000_000
+    assert composition.AGENT_SECTION_COLUMN_MAX == 9_999_999
+    assert INT4_MAX == 2_147_483_647
+    assert check_layout_epoch(1) == 1
+    assert check_layout_epoch(213) == 213
+    for epoch in (214, 0, -1):
+        with pytest.raises(ValueError, match="эпоха раскладки"):
+            check_layout_epoch(epoch)
+    epoch = composition.AGENT_SECTION_LAYOUT_EPOCH
+    assert 1 <= epoch and epoch * 10_000_000 + 9_999_999 <= 2_147_483_647
+    assert check_layout_epoch(epoch) == epoch
+    # Вызов при импорте: на уровне модуля после определения константы стоит
+    # ``check_layout_epoch(AGENT_SECTION_LAYOUT_EPOCH)``.
+    tree = ast.parse(Path(composition.__file__).read_text(encoding="utf-8"))
+    calls = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "check_layout_epoch"
+    ]
+    assert [ast.unparse(call) for call in calls] == [
+        "check_layout_epoch(AGENT_SECTION_LAYOUT_EPOCH)"
+    ], "проверка эпохи при импорте модуля"
+    assert agent_section_number(3) == epoch * 10_000_000 + 3
+    monkeypatch.setattr(composition, "AGENT_SECTION_LAYOUT_EPOCH", 1)
+    assert agent_section_number(3) == 10_000_003
+    monkeypatch.setattr(composition, "AGENT_SECTION_LAYOUT_EPOCH", 2)
+    assert agent_section_number(3) == 20_000_003
+    monkeypatch.setattr(composition, "AGENT_SECTION_LAYOUT_EPOCH", 213)
+    assert agent_section_number(9_999_999) == 2_139_999_999

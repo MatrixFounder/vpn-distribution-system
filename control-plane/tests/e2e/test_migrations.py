@@ -265,8 +265,14 @@ def test_migrate_break_lock(migrate_env: dict[str, str]) -> None:
         ("090_schema_ops", "table", "control_plane.events"),
         # L-3: миграция, которая только добавляет колонку, — ключ колонка, а не таблица.
         ("150_node_agent_section_version", "column", "control_plane.nodes.agent_section_version"),
+        # 001.29g: миграция, которая только меняет ограничение, — ключ ограничение.
+        (
+            "160_node_agent_section_version_limit",
+            "constraint",
+            "control_plane.nodes.nodes_agent_section_version_range",
+        ),
     ],
-    ids=["table", "column"],
+    ids=["table", "column", "constraint"],
 )
 def test_migrate_detects_mark_without_objects_and_unmark_repairs(
     migrate_env: dict[str, str], target: str, kind: str, key: str
@@ -314,8 +320,17 @@ def test_migrate_detects_mark_without_objects_and_unmark_repairs(
 
 def _present(dsn: str, kind: str, key: str) -> bool:
     """Ключевой объект в базе: таблица по ``to_regclass``, колонка ``схема.таблица.колонка`` — по
-    ``information_schema.columns`` (не тем путём, которым ищет сама самопроверка)."""
+    ``information_schema.columns``, ограничение ``схема.таблица.имя`` — по
+    ``information_schema.table_constraints`` (не тем путём, которым ищет сама самопроверка)."""
     with psycopg.connect(dsn.replace("postgresql+psycopg://", "postgresql://", 1)) as conn:
+        if kind == "constraint":
+            schema, table, constraint = key.split(".")
+            row = conn.execute(
+                "SELECT count(*) FROM information_schema.table_constraints "
+                "WHERE table_schema = %s AND table_name = %s AND constraint_name = %s",
+                (schema, table, constraint),
+            ).fetchone()
+            return row == (1,)
         if kind == "column":
             schema, table, column = key.split(".")
             row = conn.execute(
@@ -335,3 +350,44 @@ def _marked_without_object(dsn: str, migration_id: str, kind: str, key: str) -> 
             (migration_id,),
         ).fetchone()
     return marked == (1,) and not _present(dsn, kind, key)
+
+
+LIMIT_MIGRATION = "160_node_agent_section_version_limit"
+LIMIT_KEY = "control_plane.nodes.nodes_agent_section_version_range"
+DECOY = "control_plane.t29g_constraint_decoy"
+
+
+def test_migrate_finds_a_constraint_key_on_its_own_table(migrate_env: dict[str, str]) -> None:
+    """001.29g: ключ ``constraint`` ищется на своей таблице, а не по одному имени. Отметка 160
+    без её ограничения у ``nodes`` при одноимённом ограничении на другой таблице схемы —
+    по-прежнему отметка без объекта: код 65. Ограничения ``CHECK`` уникальны по имени только в
+    пределах таблицы, и поиск по имени принял бы чужое за ключ 160."""
+    from yoyo import get_backend, read_migrations
+
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    dsn = migrate_dsn(migrate_env["MIGRATE_DSN"], migrate_env.get("MIGRATE_PASSWORD_FILE"))
+    plain = dsn.replace("postgresql+psycopg://", "postgresql://", 1)
+    rollback_through(migrate_env, LIMIT_MIGRATION)
+    try:
+        with psycopg.connect(plain, autocommit=True) as owner:
+            owner.execute("SET ROLE app_owner")
+            owner.execute(
+                f"CREATE TABLE {DECOY} (x int CONSTRAINT nodes_agent_section_version_range "
+                "CHECK (x > 0))"
+            )
+        backend = get_backend(dsn)
+        backend.mark_migrations(
+            read_migrations(str(MIGRATIONS_DIR)).filter(lambda m: m.id == LIMIT_MIGRATION)
+        )
+        backend.connection.close()
+        broken = run_cli(migrate_env, "migrate")
+        assert broken.returncode == 65, (broken.stdout, broken.stderr)
+        assert LIMIT_MIGRATION in broken.stderr and LIMIT_KEY in broken.stderr, broken.stderr
+    finally:
+        with psycopg.connect(plain, autocommit=True) as owner:
+            owner.execute("SET ROLE app_owner")
+            owner.execute(f"DROP TABLE IF EXISTS {DECOY}")
+        if _marked_without_object(dsn, LIMIT_MIGRATION, "constraint", LIMIT_KEY):
+            run_cli(migrate_env, "migrate", "--unmark", LIMIT_MIGRATION)
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    assert _present(dsn, "constraint", LIMIT_KEY)

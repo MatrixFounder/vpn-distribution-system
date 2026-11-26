@@ -1,0 +1,68 @@
+{
+  "task": "001.29g",
+  "history_markers": [
+    "прежн",
+    "раунд",
+    "было",
+    "Найдено при",
+    "до 001.29g",
+    "образ 001.29f",
+    "образа 001.29f"
+  ],
+  "history_sections": {
+    "tests/tests-001/report-001-29g.md": "^## Раунд 1 — роаст",
+    "tests/tests-001/report-001-29f.md": "^## Тесты"
+  },
+  "patterns": [
+    {
+      "name": "номер версии раздела agent равен колонке",
+      "regex": "(agent\\.version`?|версия раздела|версии раздела)[^.;\\n]{0,30}(—|из) колонк|курсор[^.;\\n]{0,40}(?<!не )с колонкой|из колонки `?nodes\\.agent_section_version|версия раздела — `?nodes\\.agent_section_version",
+      "current": "номер — эпоха раскладки × 10 000 000 + колонка (001.29g)"
+    },
+    {
+      "name": "CHECK колонки версии раздела — только нижняя граница",
+      "regex": "agent_section_version[^\\n]{0,60}CHECK \\(>= ?1\\)|CHECK \\(\\(agent_section_version >= 1\\)\\)",
+      "current": "CHECK (agent_section_version BETWEEN 1 AND 9999999), миграция 160"
+    },
+    {
+      "name": "откат через 130 — четыре шага",
+      "regex": "над 130 уже три|(?<!160, )150, 140, 131 и сама 130",
+      "current": "160, 150, 140, 131 и 130"
+    },
+    {
+      "name": "повышение колонки при смене коэффициента — 001.36",
+      "regex": "выпуск вводит 001\\.36|001\\.36 — смена коэффициента",
+      "current": "смена коэффициента — 001.29g"
+    },
+    {
+      "name": "NodeComposition.agent_version — колонка",
+      "regex": "NodeComposition\\.agent_version`, `\\.max_conn_per_ip",
+      "current": "NodeComposition.agent_column"
+    },
+    {
+      "name": "параметр conn у set_billing_group — 001.87",
+      "regex": "set_billing_group` получает необязательное подключение",
+      "current": "параметр conn ввела 001.29g"
+    },
+    {
+      "name": "имена до раунда 1: колонка под именем версии, номер под именем версии ПО (роаст, раунд 1)",
+      "regex": "Assignment\\.agent_section_version|NodeComposition\\.agent_version|assignment\\.agent_section_version",
+      "current": "Assignment.agent_section_column, NodeComposition.agent_number"
+    },
+    {
+      "name": "вход берёт строку группы до первой записи (роаст, раунд 1)",
+      "regex": "последовательное переназначение|блокировки берутся до первой записи|FOR NO KEY UPDATE`{0,2} до первой записи",
+      "current": "вход — после записи назначения и до записи строки ноды; одновременные назначения — 409 от EXCLUDE"
+    },
+    {
+      "name": "две смены одной группы «друг друга не ждут» (роаст, раунд 1)",
+      "regex": "друг друга не ждут|её не ждёт — как до 001\\.29g",
+      "current": "на строке группы не выстраиваются"
+    },
+    {
+      "name": "раздел agent — заглушка версии 1 (роаст, раунд 3)",
+      "regex": "раздел ``agent`` версии 1|раздел `agent` версии 1|раздел без базы совпадает с ``STUB_AGENT``;",
+      "current": "заглушкой остались поля new_conn_rate_per_ip, multiplier_milli, disconnect_strategy; номер — эпоха и колонка"
+    }
+  ]
+}

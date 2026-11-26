@@ -39,6 +39,7 @@ from app.domain.composition import (
     StoredConfig,
     StoredRow,
     UserState,
+    agent_section_number,
     config_checksum,
     credentials_bound,
 )
@@ -89,8 +90,12 @@ def node_as(
 LAYOUT_SEQ = 4  # ``nodes.desired_users_seq`` раскладки: номер последнего изменения
 LAYOUT_CONFIG_VERSION = 1  # ``nodes.desired_config_version`` раскладки: первая версия
 # ``nodes.agent_section_version`` и ``nodes.max_conn_per_ip`` раскладки (001.29f): значения
-# заглушки — раздел без базы совпадает с ``STUB_AGENT``; тест, которому нужны другие, подменяет их.
-LAYOUT_AGENT_VERSION = STUB_AGENT_VERSION
+# заглушки — раздел без базы совпадает с ``STUB_AGENT`` во всех полях, кроме ``version``: его
+# номер — ``agent_section_number(LAYOUT_AGENT_COLUMN)``; тест, которому нужны другие, подменяет их.
+# ``LAYOUT_AGENT_VERSION`` — выдаваемый номер версии раздела: эпоха раскладки образа и колонка
+# (001.29g); его присылают курсоры агента, применившего раздел раскладки.
+LAYOUT_AGENT_COLUMN = STUB_AGENT_VERSION
+LAYOUT_AGENT_VERSION = agent_section_number(LAYOUT_AGENT_COLUMN)
 LAYOUT_MAX_CONN = STUB_AGENT.max_conn_per_ip
 USER_ACTIVE = uuid.UUID("00000000-0000-7000-8000-0000000000a1")
 USER_SUSPENDED = uuid.UUID("00000000-0000-7000-8000-0000000000a2")
@@ -213,7 +218,7 @@ class RecordedComposition(CompositionService):
             rows=selected,
             config_version=LAYOUT_CONFIG_VERSION,
             config=config,
-            agent_version=LAYOUT_AGENT_VERSION,
+            agent_column=LAYOUT_AGENT_COLUMN,
             max_conn_per_ip=LAYOUT_MAX_CONN,
         )
 

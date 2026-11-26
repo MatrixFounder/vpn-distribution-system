@@ -53,6 +53,8 @@ from tests._agent import (
     HEADERS,
     IDENTITY,
     LAYOUT,
+    LAYOUT_AGENT_COLUMN,
+    LAYOUT_AGENT_VERSION,
     LAYOUT_CONFIG_VERSION,
     LAYOUT_SEQ,
     layout_config,
@@ -75,11 +77,16 @@ BODY_SCHEMAS = ("AckIn", "HeartbeatIn", "NodeMetrics", "CommandResultIn")
 BEHIND = {"config_version": 0, "agent_section_version": 0, "users_seq": 0, "generation": 1}
 CURRENT = {
     "config_version": LAYOUT_CONFIG_VERSION,
-    "agent_section_version": composition.STUB_AGENT_VERSION,
+    "agent_section_version": LAYOUT_AGENT_VERSION,
     "users_seq": LAYOUT_SEQ,
     "generation": 1,
 }
-STUB_AGENT_BODY = composition.STUB_AGENT.model_dump(mode="json")
+# Раздел раскладки: значения заглушки под выдаваемым номером колонки раскладки (эпоха раскладки
+# образа и колонка, 001.29g).
+STUB_AGENT_BODY = {
+    **composition.STUB_AGENT.model_dump(mode="json"),
+    "version": LAYOUT_AGENT_VERSION,
+}
 SNAPSHOT = {**CURRENT, "full": 1}
 VALID_HEARTBEAT: dict[str, Any] = {
     "agent_version": "0.1.0",
@@ -621,16 +628,17 @@ async def test_tc_e2e_02_the_agent_section_lies_outside_the_config_checksum(
     async with agent() as client:
         before = (await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)).json()
     changed = composition.StateAgent(
-        version=composition.STUB_AGENT_VERSION + 1,
+        version=composition.agent_section_number(LAYOUT_AGENT_COLUMN + 1),
         max_conn_per_ip=7,
         new_conn_rate_per_ip=3,
         multiplier_milli=2500,
         disconnect_strategy="route_block",
     )
-    # Новые значения — новая версия раздела (колонка ноды раскладки, 001.29f) и новые значения
-    # колонки лимита и заглушки остальных полей; версия конфигурации та же.
+    # Новые значения — новая версия раздела (колонка ноды раскладки + 1, 001.29f; номер — с эпохой
+    # раскладки, 001.29g) и новые значения колонки лимита и заглушки остальных полей; версия
+    # конфигурации та же.
     monkeypatch.setattr(composition, "STUB_AGENT", changed)
-    monkeypatch.setattr(agent_layout, "LAYOUT_AGENT_VERSION", changed.version)
+    monkeypatch.setattr(agent_layout, "LAYOUT_AGENT_COLUMN", LAYOUT_AGENT_COLUMN + 1)
     monkeypatch.setattr(agent_layout, "LAYOUT_MAX_CONN", changed.max_conn_per_ip)
     async with agent() as client:
         after = (await client.get("/agent/v1/state", params=BEHIND, headers=HEADERS)).json()
@@ -651,7 +659,7 @@ async def test_a_provisioning_node_that_applied_the_config_is_held() -> None:
     async with agent("provisioning") as client:
         applied = {
             "config_version": LAYOUT_CONFIG_VERSION,
-            "agent_section_version": composition.STUB_AGENT_VERSION,
+            "agent_section_version": LAYOUT_AGENT_VERSION,
             "users_seq": 0,
             "generation": 1,
         }
@@ -674,7 +682,7 @@ async def test_a_cursor_ahead_of_the_server_is_refused_not_answered_with_204() -
             {**CURRENT, "config_version": LAYOUT_CONFIG_VERSION + 1},
             {**CURRENT, "users_seq": 2**63 - 1},
             {**CURRENT, "config_version": 2**31 - 1},
-            {**CURRENT, "agent_section_version": composition.STUB_AGENT_VERSION + 1},
+            {**CURRENT, "agent_section_version": LAYOUT_AGENT_VERSION + 1},
             {**CURRENT, "agent_section_version": 2**31 - 1},
         ):
             response = await client.get("/agent/v1/state", params=params, headers=HEADERS)

@@ -55,19 +55,29 @@ _KEY_COLUMN = re.compile(
     r"^\s*ALTER\s+TABLE\s+([A-Za-z_][\w.]*)\s+ADD\s+COLUMN\s+([A-Za-z_]\w*)",
     re.IGNORECASE | re.MULTILINE,
 )
+_KEY_CONSTRAINT = re.compile(
+    r"^\s*ALTER\s+TABLE\s+([A-Za-z_][\w.]*)\s+ADD\s+CONSTRAINT\s+([A-Za-z_]\w*)",
+    re.IGNORECASE | re.MULTILINE,
+)
 _SEARCH_PATH = re.compile(r"^\s*SET\s+(?:LOCAL\s+)?search_path\s+TO\s+([A-Za-z_]\w*)", re.I | re.M)
 
 
 def key_object(sql: str) -> tuple[str, str] | None:
     """(``table`` | ``type``, имя со схемой) первой создаваемой таблицы или типа миграции, без
-    них — (``column``, ``схема.таблица.колонка``) первой добавляемой колонки, или ``None`` для
-    миграции без объектов (только данные)."""
+    них — (``column``, ``схема.таблица.колонка``) первой добавляемой колонки, без колонок —
+    (``constraint``, ``схема.таблица.имя``) первого добавляемого ограничения (001.29g: миграция,
+    меняющая только ограничение, добавляет его под своим именем), или ``None`` для миграции без
+    объектов (только данные)."""
     match = _KEY_OBJECT.search(sql)
     if match is not None:
         return match.group(1).lower(), _qualified(match.group(2), sql)
-    column = _KEY_COLUMN.search(sql)
-    if column is not None:
-        return "column", f"{_qualified(column.group(1), sql)}.{column.group(2)}"
+    for kind, pattern in (("column", _KEY_COLUMN), ("constraint", _KEY_CONSTRAINT)):
+        found = pattern.search(sql)
+        if found is not None:
+            # Имя без кавычек PostgreSQL складывает в нижний регистр, а самопроверка сравнивает
+            # его с каталогом как строку (``pg_attribute``, ``pg_constraint``); таблицу же ищет
+            # ``to_regclass``, который складывает регистр сам.
+            return kind, f"{_qualified(found.group(1), sql)}.{found.group(2).lower()}"
     return None
 
 
@@ -99,6 +109,13 @@ def marks_without_objects(backend: Any, migrations: Any) -> list[tuple[str, str]
                     "SELECT attname FROM pg_attribute WHERE attrelid = to_regclass(%s) "
                     "AND attname = %s",
                     (relation, column),
+                )
+            elif kind == "constraint":
+                relation, constraint = name.rsplit(".", 1)
+                cursor.execute(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = to_regclass(%s) "
+                    "AND conname = %s",
+                    (relation, constraint),
                 )
             else:
                 lookup = "to_regclass" if kind == "table" else "to_regtype"

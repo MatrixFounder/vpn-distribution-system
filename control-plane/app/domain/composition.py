@@ -19,7 +19,9 @@ UC-01, UC-07, UC-11).
 ``config.checksum``: его смена применяется агентом без перезапуска Xray (перезагрузка набора
 nftables, запись в хранилище агента), а перезапуск — только при смене контрольной суммы
 документа (interfaces.md §5.2). Значения заполняют 001.27 (лимиты), 001.36 (коэффициент), 001.40
-(стратегия).
+(стратегия). Номер версии раздела (001.29g) — эпоха раскладки образа × 10 000 000 + колонка
+``nodes.agent_section_version`` (``agent_section_number``): перевод поля с заглушки на источник
+повышает эпоху, смена значения во время работы — колонку.
 
 Задача 001.29c — поток конфигурации на строках базы: ``publish_config`` в транзакции
 вызывающего выделяет версию (``nodes.desired_config_version``) и пишет строку
@@ -30,8 +32,10 @@ identity (``with_reality_keys``) и сверяет сумму документа
 отказ источника ключа — раздела ``config`` нет, состав и команды выдаются, ошибка в журнале
 (решения заказчика 2026-11-04 и 2026-11-05).
 
-Что остаётся заглушкой: раздел ``agent`` версии 1 (001.29f) и поколение 1 (001.75b) — «что
-нового» по ним выводится из курсоров запроса; документ конфигурации собирается по inbound
+Что остаётся заглушкой: поля ``new_conn_rate_per_ip``, ``multiplier_milli`` и
+``disconnect_strategy`` раздела ``agent`` (001.27, 001.36, 001.40; номер версии раздела — эпоха
+раскладки и колонка ноды, 001.29g) и поколение 1 (001.75b) — «что нового» по поколению выводится
+из курсоров запроса; документ конфигурации собирается по inbound
 заглушки (``inbounds.stub_inbounds``), ключ REALITY — ``xray_config.stub_reality_key`` (оба
 заменяет 001.27). Вентиль по статусу берётся из ``domain.statuses``
 (§4.6 — единственный источник правил), тег пользователя выводится из его идентификатора
@@ -266,12 +270,54 @@ STUB_AGENT = StateAgent(
 )
 
 
+# --- номер версии раздела ``agent``: эпоха раскладки и колонка (001.29g) -----------------------
+
+# Эпоха раскладки раздела ``agent`` — номер набора правил, по которым этот образ собирает раздел из
+# источников. Задача, переводящая поле раздела с заглушки на источник (001.27, 001.36, 001.40),
+# увеличивает её на 1, а не повышает колонку миграцией: после отката кода значение колонки выдавал
+# бы и предыдущий образ — со значениями заглушки, и агент после возврата нового образа получал бы
+# 204 на том же номере. Первая эпоха — 1 (решение заказчика 2026-11-25).
+AGENT_SECTION_LAYOUT_EPOCH = 1
+# Номер версии — эпоха × 10 000 000 + колонка ``nodes.agent_section_version`` (решение заказчика
+# 2026-11-25). Колонка не больше 9 999 999 (``CHECK`` миграции 160) и в разряд эпохи не переходит;
+# номер и курсор контракта — ``int4``, поэтому эпоха — от 1 до 213.
+AGENT_SECTION_EPOCH_FACTOR = 10_000_000
+AGENT_SECTION_COLUMN_MAX = AGENT_SECTION_EPOCH_FACTOR - 1
+
+
+def check_layout_epoch(epoch: int) -> int:
+    """Эпоха раскладки, при которой номер версии раздела любой колонки укладывается в ``int4``
+    (``StateAgent.version``, курсор ``agent_section_version``): 1…213. Иначе ``ValueError`` —
+    модуль вызывает проверку при импорте, и образ с эпохой вне предела не стартует, а не отвечает
+    500 (``ValidationError`` модели) на каждый запрос состояния."""
+    if epoch < 1 or epoch * AGENT_SECTION_EPOCH_FACTOR + AGENT_SECTION_COLUMN_MAX > INT4_MAX:
+        raise ValueError(
+            f"эпоха раскладки раздела agent {epoch} вне 1…"
+            f"{(INT4_MAX - AGENT_SECTION_COLUMN_MAX) // AGENT_SECTION_EPOCH_FACTOR}: номер версии "
+            "вышел бы за int4"
+        )
+    return epoch
+
+
+check_layout_epoch(AGENT_SECTION_LAYOUT_EPOCH)
+
+
+def agent_section_number(column: int) -> int:
+    """Выдаваемый номер версии раздела ``agent`` для значения колонки ``column``: эпоха
+    раскладки образа × 10 000 000 + колонка. Образ с большей эпохой выдаёт номер больше любого
+    номера образа с меньшей: после отката кода курсор агента выше номера — 409 ``cursor_ahead`` и
+    снапшот, после возврата номер снова выше применённого — раздел выдаётся. Эпоха читается при
+    вызове, а не при импорте: тест подменяет её как откат и возврат образа."""
+    return AGENT_SECTION_LAYOUT_EPOCH * AGENT_SECTION_EPOCH_FACTOR + column
+
+
 def node_agent(stored: NodeComposition) -> StateAgent:
-    """Раздел ``agent`` ноды (001.29f): версия — ``nodes.agent_section_version``, лимит —
+    """Раздел ``agent`` ноды (001.29f): номер версии — эпоха раскладки и колонка
+    ``nodes.agent_section_version`` (``NodeComposition.agent_number``, 001.29g), лимит —
     ``nodes.max_conn_per_ip``; ``new_conn_rate_per_ip`` (001.27), ``multiplier_milli`` (001.36)
     и ``disconnect_strategy`` (001.40) — значения ``STUB_AGENT`` до своих владельцев. Колонку
     повышает смена значения поля во время работы (001.87, смена коэффициента — 001.29g); перевод
-    поля с заглушки на источник — эпоха раскладки в номере версии (001.29g).
+    поля с заглушки на источник — эпоха раскладки (``AGENT_SECTION_LAYOUT_EPOCH``).
 
     Раздел собирается проверкой модели, а не ``model_copy``: тот значений не проверяет, а маршрут
     сериализует ответ без ``response_model`` — значения колонок проходят те же границы, что поля
@@ -279,7 +325,7 @@ def node_agent(stored: NodeComposition) -> StateAgent:
     return StateAgent.model_validate(
         {
             **STUB_AGENT.model_dump(),
-            "version": stored.agent_version,
+            "version": stored.agent_number,
             "max_conn_per_ip": stored.max_conn_per_ip,
         }
     )
@@ -362,16 +408,23 @@ class StoredConfig:
 class NodeComposition:
     """Состояние ноды в одном снимке базы: ``nodes.desired_users_seq``, ``nodes.resync_required``
     и выбранные строки состава; ``nodes.desired_config_version`` и выданная конфигурация этой
-    версии (``None`` — не запрошена, нечего выдавать или выдача отказала); версия раздела
-    ``agent`` (``nodes.agent_section_version``) и лимит ``nodes.max_conn_per_ip`` (001.29f)."""
+    версии (``None`` — не запрошена, нечего выдавать или выдача отказала); колонка версии раздела
+    ``agent`` (``nodes.agent_section_version``) и лимит ``nodes.max_conn_per_ip`` (001.29f).
+    ``agent_number`` — выдаваемый номер версии раздела: эпоха раскладки и колонка (001.29g); с
+    ним сверяется курсор ``agent_section_version``, а не с колонкой. Имя — не ``agent_version``:
+    так называется версия ПО агента у ``nodes`` и ``Node``."""
 
     users_seq: int
     resync_required: bool
     rows: list[StoredRow]
     config_version: int
     config: StateConfig | None
-    agent_version: int
+    agent_column: int
     max_conn_per_ip: int
+
+    @property
+    def agent_number(self) -> int:
+        return agent_section_number(self.agent_column)
 
 
 async def next_users_seq(conn: Any, node_id: uuid.UUID) -> int:
@@ -645,8 +698,9 @@ class CompositionService:
 
     async def _wake(self, node_id: uuid.UUID, mark: int | str) -> bool:
         """``PUBLISH node:{id}`` после коммита — пробуждение удержанного запроса состояния (§5.2
-        «Long-poll»); ``mark`` — номер строки состава или ``config:{версия}``: удержание читает
-        состояние заново, метка — для журнала и отладки. ``False`` — Redis недоступен. Потеря
+        «Long-poll»); ``mark`` — номер строки состава, ``config:{версия}`` или ``agent:{номер}``
+        (раздел ``agent``, 001.29g): удержание читает состояние заново, метка — для журнала и
+        отладки. ``False`` — Redis недоступен. Потеря
         сообщения стоит до 30 с таймаута удержания, а не доставки (раскладка Н-13, interfaces.md
         §5.4), поэтому сбой Redis пишется в журнал и публикацию не валит: строки уже
         закоммичены, и повтор задачи выдал бы им новые номера без нужды."""
@@ -878,7 +932,7 @@ class CompositionService:
             ],
             config_version=version,
             config=config,
-            agent_version=int(node["agent_section_version"]),
+            agent_column=int(node["agent_section_version"]),
             max_conn_per_ip=int(node["max_conn_per_ip"]),
         )
 
@@ -1043,7 +1097,10 @@ class CompositionService:
 
         Раздел ``agent`` (001.26) ведёт свой курсор ``agent_section_version`` по тем же правилам,
         что ``config_version``: отставание — повод ответить, опережение — 409 ``cursor_ahead``,
-        снапшот отдаёт раздел целиком. Вентиль у раздела — вентиль потока конфигурации: это
+        снапшот отдаёт раздел целиком. Курсор сверяется с выдаваемым номером
+        (``NodeComposition.agent_number`` — эпоха раскладки и колонка, 001.29g), а не с колонкой:
+        после отката кода на образ с меньшей эпохой курсор агента выше номера, и агент берёт
+        снапшот. Вентиль у раздела — вентиль потока конфигурации: это
         параметры той же природы (структура ноды, а не состав), и нода в ``disabled`` без
         стратегии разрыва не смогла бы применить отзывы, которые ей ещё доставляются.
         """
@@ -1076,7 +1133,7 @@ class CompositionService:
         # тем же отказом.
         if not full and (
             config_version > stored.config_version
-            or agent_section_version > stored.agent_version
+            or agent_section_version > stored.agent_number
             or users_seq > current
         ):
             raise cursor_ahead()
@@ -1086,7 +1143,7 @@ class CompositionService:
         config = stored.config
         agent = (
             node_agent(stored)
-            if gate.config and (full or agent_section_version < stored.agent_version)
+            if gate.config and (full or agent_section_version < stored.agent_number)
             else None
         )
         behind = composition_open and (full or users_seq < current)
@@ -1196,6 +1253,13 @@ class CompositionService:
         """``PUBLISH node:{id}`` после коммита версии ``version`` (``_wake``: Redis недоступен —
         ``False`` и запись в журнал, версия уже закоммичена)."""
         return await self._wake(node_id, f"config:{version}")
+
+    async def wake_agent_section(self, node_id: uuid.UUID, column: int) -> bool:
+        """``PUBLISH node:{id}`` после коммита повышения колонки версии раздела ``agent`` до
+        ``column`` (001.29g): метка — ``agent:{номер}``, номер — ``agent_section_number``. Повышение
+        во время работы будит удержание только этим каналом (001.75c); повышение эпохи при выпуске
+        будить не нужно — выпуск перезапускает процессы ``api``."""
+        return await self._wake(node_id, f"agent:{agent_section_number(column)}")
 
     async def enqueue_publish_user(self, conn: Any, user_id: uuid.UUID) -> None:
         """Поставить ``composition.publish_user`` в транзакции бизнес-операции ``conn`` (§5.4,

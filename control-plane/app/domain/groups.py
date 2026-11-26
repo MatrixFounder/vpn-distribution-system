@@ -36,11 +36,21 @@ Audit Log (§4.16, UC-09 шаг 7) требует записывать преж�
 значение — из закрытой строки истории, 001.23): изменение и его запись атомарны. Коэффициенты в
 записи — десятичной строкой, как в API (``"2.0"``), действия — «раздел.действие», как имена
 разрешений.
+
+Смена коэффициента ноды доходит до агента разделом ``agent`` ответа состояния (001.29g): обе
+операции истории повышают колонку версии раздела ``nodes.agent_section_version`` затронутых нод
+в своей транзакции и после коммита публикуют в ``node:{id}``. Смена коэффициента группы и вход
+ноды в эту группу упорядочены строкой группы (``_LOCK_GROUP_CHANGE``, ``_LOCK_GROUP_JOIN``):
+иначе нода, вошедшая между выборкой нод смены и её коммитом, осталась бы без повышения, и агент
+применил бы прежний коэффициент под последним номером. Порядок блокировок — строка группы, затем
+строки нод по возрастанию ``id`` (как у других писателей нескольких строк ``nodes``,
+``rotate_user_credentials``).
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
 from decimal import Decimal
 from typing import Annotated, Any, NamedTuple, Protocol
@@ -59,6 +69,8 @@ from app.domain.multiplier import (
 from app.errors import ApiError
 from app.security import audit
 from app.security.audit import AuditContext
+
+log = logging.getLogger(__name__)
 
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
@@ -144,6 +156,10 @@ class Assignment(NamedTuple):
     previous_billing_group_id: uuid.UUID | None
     previous_override_milli: int | None
     valid_from: dt.datetime
+    # Колонка версии раздела ``agent`` ноды после повышения (001.29g) — колонка, а не выдаваемый
+    # номер: вызывающий, передавший своё подключение, публикует по ней после своего коммита
+    # (``wake_agent_section`` сам переводит её в номер).
+    agent_section_column: int
 
 
 def _decimal_text(milli: int | None) -> str | None:
@@ -209,6 +225,33 @@ _OPEN_AHEAD_ASSIGNMENT = (
 _GROUP_MULTIPLIER_AT = (
     "select multiplier_milli from billing_group_multipliers "
     "where billing_group_id = $1 and tstzrange(valid_from, valid_to) @> $2::timestamptz"
+)
+# Строка группы упорядочивает смену её коэффициента и вход ноды в неё (001.29g). Смена берёт
+# ``FOR SHARE`` до выборки нод группы; вход — ``FOR NO KEY UPDATE`` целевой группы после записи
+# назначения (одновременные назначения одной ноды по-прежнему разбирает ``EXCLUDE``: вторая группа
+# и та же группа повторно — 409, UC-09 A1) и до записи строки ноды. Режимы конфликтуют, и порядок
+# решает не момент начала операции, а то, кто первым взял строку группы: смена, взявшая её первой,
+# выбирает ноды без входящей, а вход ждёт её коммита и повышает свою ноду сам — уже при новом
+# коэффициенте; вход, взявший её первым, коммитится до выборки смены, и смена повышает и его ноду.
+# Входы разных нод в одну группу выстраиваются друг за другом (``NO KEY UPDATE`` с ``NO KEY
+# UPDATE`` несовместим; до 001.29g они шли параллельно), и транзакция, держащая вход, держит и
+# смены коэффициента этой группы. Две смены одной группы на строке группы не выстраиваются
+# (``SHARE`` с ``SHARE`` совместим): вторая, как до 001.29g, ждёт строку интервала, которую
+# закрывает первая, или её незакоммиченный интервал и получает 409 от ``EXCLUDE``. Ключевые
+# блокировки внешних ключей (``KEY SHARE``), которые берёт вставка назначения или ноды, совместимы
+# с обоими режимами: создание ноды в группе входа не ждёт.
+_LOCK_GROUP_CHANGE = "select true from billing_groups where id = $1 for share"
+_LOCK_GROUP_JOIN = "select true from billing_groups where id = $1 for no key update"
+# Ноды, чей коэффициент задаёт группа (без собственного переопределения, ``nodes.multiplier_milli``
+# пуст): смена коэффициента группы повышает их колонку версии раздела ``agent`` (001.29g). Строки
+# блокируются по возрастанию ``id`` — тем же порядком, что у других писателей нескольких строк
+# нод: без порядка скан ``UPDATE`` идёт в порядке расположения версий строк, и встречный писатель,
+# берущий строки по возрастанию, ловил бы с ним взаимную блокировку.
+_RAISE_GROUP_NODES = (
+    "update nodes set agent_section_version = agent_section_version + 1 "
+    "where id in (select id from nodes where billing_group_id = $1 and multiplier_milli is null "
+    "order by id for no key update) "
+    "returning id, agent_section_version"
 )
 
 
@@ -429,11 +472,18 @@ class GroupService:
         Момент смены — ``now()`` транзакции (``_now``): ни задним числом, ни на будущее.
         Действующий интервал, начатый не раньше этого момента, — 409 с моментом его начала
         (``_open_is_ahead``); одновременная смена той же группы — 409 от ``EXCLUDE``. Прежнее
-        значение — из закрываемой строки (``returning``), а не отдельным чтением до записи."""
+        значение — из закрываемой строки (``returning``), а не отдельным чтением до записи.
+
+        Ноды, чей коэффициент задаёт группа, получают новую версию раздела ``agent`` (001.29g):
+        колонка ``nodes.agent_section_version`` растёт в этой транзакции, ``PUBLISH node:{id}`` —
+        после коммита (``_wake_agent_sections``). Строка группы берётся ``FOR SHARE`` до выборки
+        нод (``_LOCK_GROUP_CHANGE``): вход ноды в группу, взявший строку группы раньше,
+        коммитится до выборки, и смена повышает и его ноду; взявший позже ждёт коммита смены и
+        повышает свою ноду сам."""
         validate_multiplier(milli)
         async with transaction(self._pool) as conn:
             at = await self._now(conn)
-            if not await conn.fetchval("select true from billing_groups where id = $1", group_id):
+            if not await conn.fetchval(_LOCK_GROUP_CHANGE, group_id):
                 raise _not_found("тарифицируемая группа")
             if (ahead := await conn.fetchval(_OPEN_AHEAD_MULTIPLIER, group_id, at)) is not None:
                 raise _open_is_ahead(ahead)
@@ -457,6 +507,10 @@ class GroupService:
                 )
             except asyncpg.ExclusionViolationError as exc:
                 raise _conflict("интервал коэффициента пересекается с уже записанным") from exc
+            raised = sorted(
+                (r["id"], int(r["agent_section_version"]))
+                for r in await conn.fetch(_RAISE_GROUP_NODES, group_id)
+            )
             await self._close_hours(conn, group_id, at)
             await audit.record(
                 conn,
@@ -469,6 +523,7 @@ class GroupService:
                 new={"multiplier": str(from_milli(milli))},
                 result="success",
             )
+        await self._wake_agent_sections(raised)
         return Multiplier(
             id=row["id"],
             billing_group_id=row["billing_group_id"],
@@ -485,6 +540,7 @@ class GroupService:
         override_milli: int | None = None,
         *,
         ctx: AuditContext,
+        conn: Any = None,
     ) -> Assignment:
         """Назначить ноде тарифицируемую группу и, необязательно, собственный коэффициент
         (UC-09 шаг 6). Действующее назначение закрывается, открывается новое, денормализация
@@ -511,74 +567,112 @@ class GroupService:
         моментом его начала (``_open_is_ahead``). Прежние группа и переопределение — из
         закрываемой строки истории (``returning``), а не из ``nodes``: строка ноды не
         блокируется, и денормализация, прочитанная до закрытия, могла описывать уже не то, что
-        закрыто."""
+        закрыто.
+
+        Версия раздела ``agent`` (001.29g): колонка ``nodes.agent_section_version`` ноды растёт
+        в той же транзакции — коэффициент ноды мог смениться, и агент получает раздел заново.
+        Целевая группа блокируется ``FOR NO KEY UPDATE`` (``_LOCK_GROUP_JOIN``) после записи
+        назначения и до записи строки ноды: одновременные назначения одной ноды разбирает
+        ``EXCLUDE``, как прежде; смена коэффициента этой группы, взявшая строку группы раньше,
+        коммитится до записи строки ноды, взявшая позже — выбирает ноды после коммита назначения.
+        Назначения разных нод в одну группу на строке группы выстраиваются друг за другом.
+        Вставка назначения берёт на
+        строке ноды только ключевую блокировку внешнего ключа: смена, ждущая строку ноды для
+        повышения, её не ждёт, и взаимной блокировки нет.
+
+        ``conn`` — подключение вызывающего (001.87: транзакция ``PATCH /admin/nodes/{id}``):
+        операция идёт в его транзакции (вне транзакции — ``RuntimeError`` до записи) и не
+        публикует — коммитом владеет вызывающий, он и будит ``wake_agent_section`` по
+        ``Assignment.agent_section_column`` после коммита. Вызывающий не пишет строку ноды до этой
+        операции: порядок блокировок — группа, затем ноды, как у ``set_group_multiplier``. Без
+        ``conn`` — своя транзакция и ``PUBLISH node:{id}`` после её коммита."""
         if override_milli is not None:
             validate_multiplier(override_milli)
-        async with transaction(self._pool) as conn:
-            at = await self._now(conn)
-            if not await conn.fetchval("select true from nodes where id = $1", node_id):
-                raise _not_found("нода")
-            if not await conn.fetchval("select true from billing_groups where id = $1", group_id):
-                raise _not_found("тарифицируемая группа")
-            if (ahead := await conn.fetchval(_OPEN_AHEAD_ASSIGNMENT, node_id, at)) is not None:
-                raise _open_is_ahead(ahead)
-            try:
-                closed = await conn.fetchrow(
-                    "update node_billing_assignments set valid_to = $2 "
-                    "where node_id = $1 and valid_to is null "
-                    "returning billing_group_id, multiplier_override_milli",
-                    node_id,
-                    at,
-                )
-            except asyncpg.CheckViolationError as exc:
-                raise _open_is_ahead(None) from exc
-            try:
-                await conn.execute(
-                    "insert into node_billing_assignments "
-                    "(node_id, billing_group_id, multiplier_override_milli, valid_from) "
-                    "values ($1, $2, $3, $4)",
-                    node_id,
-                    group_id,
-                    override_milli,
-                    at,
-                )
-            except asyncpg.ExclusionViolationError as exc:
-                raise _conflict("у ноды уже есть действующая тарифицируемая группа") from exc
+        if conn is not None:
+            if not conn.is_in_transaction():
+                raise RuntimeError("назначение на подключении вызывающего идёт в его транзакции")
+            return await self._assign(conn, node_id, group_id, override_milli, ctx)
+        async with transaction(self._pool) as own:
+            assignment = await self._assign(own, node_id, group_id, override_milli, ctx)
+        await self._wake_agent_sections([(node_id, assignment.agent_section_column)])
+        return assignment
+
+    async def _assign(
+        self,
+        conn: Any,
+        node_id: uuid.UUID,
+        group_id: uuid.UUID,
+        override_milli: int | None,
+        ctx: AuditContext,
+    ) -> Assignment:
+        """Назначение в транзакции ``conn`` (``set_billing_group``)."""
+        at = await self._now(conn)
+        if not await conn.fetchval("select true from nodes where id = $1", node_id):
+            raise _not_found("нода")
+        if not await conn.fetchval("select true from billing_groups where id = $1", group_id):
+            raise _not_found("тарифицируемая группа")
+        if (ahead := await conn.fetchval(_OPEN_AHEAD_ASSIGNMENT, node_id, at)) is not None:
+            raise _open_is_ahead(ahead)
+        try:
+            closed = await conn.fetchrow(
+                "update node_billing_assignments set valid_to = $2 "
+                "where node_id = $1 and valid_to is null "
+                "returning billing_group_id, multiplier_override_milli",
+                node_id,
+                at,
+            )
+        except asyncpg.CheckViolationError as exc:
+            raise _open_is_ahead(None) from exc
+        try:
             await conn.execute(
-                "update nodes set billing_group_id = $2, multiplier_milli = $3 where id = $1",
+                "insert into node_billing_assignments "
+                "(node_id, billing_group_id, multiplier_override_milli, valid_from) "
+                "values ($1, $2, $3, $4)",
                 node_id,
                 group_id,
                 override_milli,
+                at,
             )
-            await self._accounting.close_hour(conn, node_id, at)
-            await audit.record(
-                conn,
-                ctx,
-                action="nodes.billing_group",
-                entity=("node", str(node_id)),
-                old=None
-                if closed is None
-                else {
-                    "billing_group_id": str(closed["billing_group_id"]),
-                    "multiplier_override": _decimal_text(closed["multiplier_override_milli"]),
-                    "multiplier": _decimal_text(
-                        await _effective_milli(
-                            conn,
-                            closed["billing_group_id"],
-                            closed["multiplier_override_milli"],
-                            at,
-                        )
-                    ),
-                },
-                new={
-                    "billing_group_id": str(group_id),
-                    "multiplier_override": _decimal_text(override_milli),
-                    "multiplier": _decimal_text(
-                        await _effective_milli(conn, group_id, override_milli, at)
-                    ),
-                },
-                result="success",
-            )
+        except asyncpg.ExclusionViolationError as exc:
+            raise _conflict("у ноды уже есть действующая тарифицируемая группа") from exc
+        await conn.fetchval(_LOCK_GROUP_JOIN, group_id)
+        agent_section_column = await conn.fetchval(
+            "update nodes set billing_group_id = $2, multiplier_milli = $3, "
+            "agent_section_version = agent_section_version + 1 where id = $1 "
+            "returning agent_section_version",
+            node_id,
+            group_id,
+            override_milli,
+        )
+        await self._accounting.close_hour(conn, node_id, at)
+        await audit.record(
+            conn,
+            ctx,
+            action="nodes.billing_group",
+            entity=("node", str(node_id)),
+            old=None
+            if closed is None
+            else {
+                "billing_group_id": str(closed["billing_group_id"]),
+                "multiplier_override": _decimal_text(closed["multiplier_override_milli"]),
+                "multiplier": _decimal_text(
+                    await _effective_milli(
+                        conn,
+                        closed["billing_group_id"],
+                        closed["multiplier_override_milli"],
+                        at,
+                    )
+                ),
+            },
+            new={
+                "billing_group_id": str(group_id),
+                "multiplier_override": _decimal_text(override_milli),
+                "multiplier": _decimal_text(
+                    await _effective_milli(conn, group_id, override_milli, at)
+                ),
+            },
+            result="success",
+        )
         return Assignment(
             node_id=node_id,
             billing_group_id=group_id,
@@ -586,7 +680,24 @@ class GroupService:
             previous_billing_group_id=None if closed is None else closed["billing_group_id"],
             previous_override_milli=None if closed is None else closed["multiplier_override_milli"],
             valid_from=at,
+            agent_section_column=int(agent_section_column),
         )
+
+    async def _wake_agent_sections(self, raised: list[tuple[uuid.UUID, int]]) -> None:
+        """``PUBLISH node:{id}`` после коммита повышения колонки версии раздела ``agent``
+        (``wake_agent_section``; 001.29g). Первый отказ Redis прекращает пробуждения: каждое
+        следующее ждало бы того же отказа, а потеря пробуждения стоит до 30 с таймаута удержания,
+        а не доставки (interfaces.md §5.4) — смена уже закоммичена, и ответ администратору ею не
+        задерживается."""
+        for position, (node_id, column) in enumerate(raised):
+            if not await self._composition.wake_agent_section(node_id, column):
+                skipped = len(raised) - position - 1
+                if skipped:
+                    log.warning(
+                        "раздел agent: Redis недоступен, пробуждения ещё %d нод пропущены",
+                        skipped,
+                    )
+                return
 
     @staticmethod
     async def _now(conn: asyncpg.Connection) -> dt.datetime:

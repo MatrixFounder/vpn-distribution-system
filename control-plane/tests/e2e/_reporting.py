@@ -33,7 +33,7 @@ from app.main import create_app
 from app.security.ca import InternalCA, serial_hex
 from cryptography import x509
 
-from tests._agent import LAYOUT_AGENT_VERSION
+from tests._agent import LAYOUT_AGENT_COLUMN
 from tests._pki import escaped, make_ca
 
 from ._catalog import PREFIX, billing_group, catalog, unique_name
@@ -264,10 +264,10 @@ async def _stand(
     await conn.fetchval("select ensure_partitions(1)")
     introduced = await db_now(conn) - age
     group = await billing_group(conn, "r34")
-    # Версия раздела ``agent`` ноды стенда — та же, что у раскладки (``LAYOUT_AGENT_VERSION``), и
-    # её присылают курсоры ``cursors()``: агент стенда раздел уже применил, и раздел — повод
-    # ответить только там, где тест его двигает. Умолчание колонки для новой ноды (2) проверяет
-    # TC-MIG-01 (001.29f).
+    # Колонка версии раздела ``agent`` ноды стенда — та же, что у раскладки
+    # (``LAYOUT_AGENT_COLUMN``), и её выдаваемый номер присылают курсоры ``cursors()``: агент стенда
+    # раздел уже применил, и раздел — повод ответить только там, где тест его двигает. Умолчание
+    # колонки для новой ноды (2) проверяет TC-MIG-01 (001.29f).
     node_id: uuid.UUID = await conn.fetchval(
         "insert into nodes (id, code, name, country, city, provider, public_ipv4, "
         "billing_group_id, bandwidth_mbps, max_conn_per_ip, status, created_at, "
@@ -280,7 +280,7 @@ async def _stand(
         status,
         introduced,
         fixed_node,
-        LAYOUT_AGENT_VERSION,
+        LAYOUT_AGENT_COLUMN,
     )
     await conn.execute(
         "insert into node_billing_assignments (node_id, billing_group_id, valid_from) "

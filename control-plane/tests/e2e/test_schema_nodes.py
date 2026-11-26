@@ -302,7 +302,9 @@ async def test_rollback_through_130_clears_test_identities_first(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-left", "RB130L")
-        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 4, "150, 140, 131 и сама 130"
+        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 5, (
+            "160, 150, 140, 131 и сама 130"
+        )
         assert await conn.fetchval("select count(*) from node_identities") == 0
     finally:
         await conn.execute("delete from node_identities where cert_fingerprint = 'rb-130-left'")
@@ -684,5 +686,55 @@ async def test_tc_mig_01_29f_the_initial_agent_section_version(
         reapplied = run_cli(migrate_env, "migrate")
         await conn.execute("delete from nodes where code = any($1::text[])", list(codes.values()))
         await conn.execute("delete from billing_groups where name = $1", names["billing"])
+        await conn.close()
+    assert reapplied.returncode == 0, reapplied.stderr
+
+
+AGENT_SECTION_LIMIT_MIGRATION = "160_node_agent_section_version_limit"
+
+
+async def test_tc_mig_01_29g_the_agent_section_column_limit(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """TC-MIG-01 (001.29g): после миграции 160 ``CHECK`` колонки ``agent_section_version``
+    отвергает 10 000 000 и 0 и принимает 9 999 999 и 1 — значение колонки не переходит в разряд
+    эпохи номера версии раздела (эпоха × 10 000 000 + колонка). Откат 160 возвращает ``CHECK``
+    001.29f (не меньше 1: 10 000 000 принимается, 0 — нет); повторное применение снова
+    отвергает 10 000 000."""
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    conn = await asyncpg.connect(pg_dsn)
+    name = f"mig-29g-{uuid.uuid4().hex[:8]}"
+    code = "MIG-29G-LIMIT"
+    set_column = "update nodes set agent_section_version = $2 where id = $1"
+    try:
+        billing_id = await conn.fetchval(
+            "insert into billing_groups (name) values ($1) returning id", name
+        )
+        node_id = await conn.fetchval(PRE_AGENT_SECTION_NODE, code, "203.0.113.205", billing_id, 8)
+        for rejected in (10_000_000, 0):
+            with pytest.raises(asyncpg.CheckViolationError):
+                await conn.execute(set_column, node_id, rejected)
+        for accepted in (9_999_999, 1):
+            await conn.execute(set_column, node_id, accepted)
+            assert (
+                await conn.fetchval(
+                    "select agent_section_version from nodes where id = $1", node_id
+                )
+                == accepted
+            )
+        rollback_through(migrate_env, AGENT_SECTION_LIMIT_MIGRATION)
+        await conn.execute(set_column, node_id, 10_000_000)
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(set_column, node_id, 0)
+        await conn.execute(set_column, node_id, 9_999_999)
+        assert run_cli(migrate_env, "migrate").returncode == 0
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(set_column, node_id, 10_000_000)
+    finally:
+        # Нода — до применения: значение выше предела, оставленное упавшим тестом, не даёт
+        # миграции 160 пройти проверку ``CHECK``, и стенд остался бы без неё.
+        await conn.execute("delete from nodes where code = $1", code)
+        reapplied = run_cli(migrate_env, "migrate")
+        await conn.execute("delete from billing_groups where name = $1", name)
         await conn.close()
     assert reapplied.returncode == 0, reapplied.stderr

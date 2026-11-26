@@ -21,6 +21,7 @@ from app.security.crypto import FieldCipher
 
 from tests._agent import (
     LAYOUT,
+    LAYOUT_AGENT_COLUMN,
     LAYOUT_AGENT_VERSION,
     LAYOUT_MAX_CONN,
     LAYOUT_SEQ,
@@ -69,7 +70,7 @@ async def seed_layout(conn: asyncpg.Connection, node_id: uuid.UUID, cipher: Fiel
         "max_conn_per_ip = $4 where id = $1",
         node_id,
         LAYOUT_SEQ,
-        LAYOUT_AGENT_VERSION,
+        LAYOUT_AGENT_COLUMN,
         LAYOUT_MAX_CONN,
     )
 
@@ -158,7 +159,8 @@ async def set_status(conn: asyncpg.Connection, node_id: uuid.UUID, status: str) 
 
 def cursors(users_seq: int, *, full: bool = False) -> dict[str, Any]:
     """Курсоры запроса: конфигурация и раздел ``agent`` — текущие у ноды стенда (их поток в этой
-    задаче не меняется; версия раздела ноды стенда — ``LAYOUT_AGENT_VERSION``, как у раскладки),
+    задаче не меняется; колонка раздела ноды стенда — ``LAYOUT_AGENT_COLUMN``, как у раскладки,
+    курсор — её выдаваемый номер ``LAYOUT_AGENT_VERSION``, 001.29g),
     состав — ``users_seq``."""
     params: dict[str, Any] = {
         "config_version": 1,

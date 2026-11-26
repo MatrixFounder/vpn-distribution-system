@@ -9,7 +9,7 @@
     "path": "/agent/v1/state",
     "query": {
       "config_version": "1",
-      "agent_section_version": "1",
+      "agent_section_version": "10000001",
       "users_seq": "0",
       "generation": "1"
     },

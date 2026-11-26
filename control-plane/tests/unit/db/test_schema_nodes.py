@@ -182,7 +182,11 @@ EXPECTED_CONSTRAINTS: dict[str, set[tuple[str, str]]] = {
     "nodes": {
         ("c", "CHECK (((bandwidth_mbps >= 1) AND (bandwidth_mbps <= 100000)))"),  # 140 (001.34)
         ("c", "CHECK ((max_conn_per_ip > 0))"),
-        ("c", "CHECK ((agent_section_version >= 1))"),  # 001.29f
+        # 001.29f, предел 9 999 999 — 001.29g (миграция 160)
+        (
+            "c",
+            "CHECK (((agent_section_version >= 1) AND (agent_section_version <= 9999999)))",
+        ),
         (
             "c",
             "CHECK ((((multiplier_milli >= 0) AND (multiplier_milli <= 10000)) AND "
