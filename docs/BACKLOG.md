@@ -75,13 +75,13 @@ resolution.
 
 <!-- feedback:discovered-issues -->
 - **WI-42** [Харнесс посадок проекта в docs/scripts вместо скрипта сессии](backlog/wi-42-project-plantings-harness.md) — effort `M`, status `open`, opened 2026-11-26
-- **WI-41** [Правило 1 цикла задачи: механизм согласованности до кода проходит сценарий одновременных операций](backlog/wi-41-task-cycle-rule-1-concurrency-scenario.md) — effort `S`, status `open`, opened 2026-11-26
 - **WI-39** [Оценка задержки для решения заказчика — по всем шагам пути через очередь](backlog/wi-39-latency-estimate-counts-every-queue-hop.md) — effort `S`, status `done`, opened 2026-11-06, resolved 2026-11-06
 - **WI-34** [Оставленная заявка retro другой задачи — не вложенность](backlog/wi-34-stale-retro-claim-is-not-nesting.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 - **WI-33** [Два решателя, один вход: разбор, декодирование и сравнение — одинаковы на обоих слоях](backlog/wi-33-two-deciders-one-input.md) — effort `S`, status `done`, opened 2026-09-27, resolved 2026-09-27
 
 ## Closed
 
+- **WI-41** [Правило 1 цикла задачи: механизм согласованности до кода проходит сценарий одновременных операций](backlog/wi-41-task-cycle-rule-1-concurrency-scenario.md) — effort `S`, status `done`, opened 2026-11-26, resolved 2026-11-26
 - **WI-40** [Скрипт отбора затронутых посадок по правилу 3 «Цикла задачи»](backlog/wi-40-rule-3-affected-plantings-script.md) — effort `S`, status `done`, opened 2026-11-21, resolved 2026-11-21
 - **WI-38** [FieldCipher: привязать контейнеры AES-GCM к их записи связанными данными](backlog/wi-38-fieldcipher-aad-binding.md) — effort `S`, status `done`, opened 2026-11-05, resolved 2026-11-05
 - **WI-37** [Пересмотр закреплённой версии: Xray-core v26.10.31 (исправление MPTCP)](backlog/wi-37-xray-26-10-31-pin-revision.md) — effort `S`, status `done`, opened 2026-11-03, resolved 2026-11-03
