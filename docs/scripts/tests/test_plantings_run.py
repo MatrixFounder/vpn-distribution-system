@@ -1031,6 +1031,41 @@ class Judge(unittest.TestCase):
         )
 
 
+class Watch(unittest.TestCase):
+    """Наблюдатель исключений — в отдельном процессе: импорт с ``PLANTINGS_PROBE_ROOT`` включает
+    ``sys.monitoring`` в процессе, который его импортировал."""
+
+    def test_only_files_of_the_run_outside_tests_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "app").mkdir()
+            names = [
+                "<frozen importlib._bootstrap>",
+                "<string>",
+                str(root / "app/web.py"),
+                str(root / "tests/t.py"),
+                str(root / "conftest.py"),
+                "/elsewhere/web.py",
+            ]
+            probe = f"import plantings_watch as w; print(w.ACTIVE, *map(w.app_path, {names!r}))"
+            env = {
+                **os.environ,
+                "PLANTINGS_PROBE_ROOT": str(root),
+                "PYTHONPATH": str(HARNESS.parent),
+            }
+            # Аргументы — фиксированный список без оболочки.
+            done = subprocess.run(  # noqa: S603
+                [sys.executable, "-c", probe],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        expected = ["True", "None", "None", "app/web.py", "None", "None", "None"]
+        self.assertEqual(done.stdout.split(), expected, done.stderr)
+
+
 class Load(Harness):
     def refused(self, plants: list[dict[str, Any]], extra: str = "") -> str:
         path = self.harness(plants, extra)

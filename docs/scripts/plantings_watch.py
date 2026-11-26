@@ -43,11 +43,14 @@ _app: dict[str, str | None] = {}
 
 
 def app_path(filename: str) -> str | None:
-    """Путь файла кода прогона вне тестов от ``ROOT``; ``None`` — не код прогона."""
+    """Путь файла кода прогона вне тестов от ``ROOT``; ``None`` — не код прогона. Псевдоимена
+    кода без файла (``<frozen importlib._bootstrap>``, ``<string>``) — не код прогона:
+    ``realpath`` разрешил бы их относительно текущего каталога, то есть внутрь копии, и
+    исключения машинерии импорта засчитались бы ошибкой посадки."""
     if filename in _app:
         return _app[filename]
-    path = os.path.realpath(filename)
     rel = None
+    path = "" if filename.startswith("<") else os.path.realpath(filename)
     if ROOT is not None and path.startswith(ROOT + os.sep):
         parts = path[len(ROOT) + 1 :].split(os.sep)
         name = parts[-1]
