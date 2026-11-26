@@ -21,6 +21,7 @@ from app.accounting.stats import GIB, STUB_STATS
 from app.domain.profile import STUB_EMAIL
 from app.security.sessions import SessionStore
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from ._auth import auth_stand, logged_in
 from ._me import ME_OPERATIONS, MUTATIONS, REQUEST_BODY
@@ -288,14 +289,22 @@ async def test_onboarding_wizard(pg_dsn: str, redis_url: str) -> None:
         assert "/" not in query, "процентное кодирование ссылки в параметре импорта"
 
 
+# Отказы Redis посреди запроса, которым положен 503: обрыв соединения и зависание
+# (``socket_timeout`` клиента даёт ``TimeoutError``, не подкласс ``ConnectionError``, — у каждого
+# свой обработчик в ``app/errors.py``).
+REDIS_UNAVAILABLE = [RedisConnectionError, RedisTimeoutError]
+
+
+@pytest.mark.parametrize("failure", REDIS_UNAVAILABLE, ids=["connection", "timeout"])
 async def test_redis_failure_mid_request_is_503_not_500(
-    pg_dsn: str, redis_url: str, monkeypatch: pytest.MonkeyPatch
+    pg_dsn: str, redis_url: str, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
-    """Вторая линия fail-closed (§9.1): Redis ответил на ping первой линии, но упал при чтении
-    сессии — 503 с ``Retry-After`` от обработчика ошибок, а не 500 (ревью раунда 2, C-1)."""
+    """Вторая линия fail-closed (§9.1): Redis ответил на ping первой линии, но оборвал
+    соединение или завис при чтении сессии — 503 с ``Retry-After`` от обработчика ошибок, а не
+    500 (ревью раунда 2, C-1)."""
 
     async def broken(self: SessionStore, sid: str) -> None:
-        raise RedisConnectionError("Redis ушёл посреди запроса")
+        raise failure("Redis ушёл посреди запроса")
 
     async with logged_in(pg_dsn, redis_url) as cabinet:
         monkeypatch.setattr(SessionStore, "get", broken)
