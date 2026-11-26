@@ -7,8 +7,10 @@
 001.33 — ``limits.check`` (``limits.py``) и три типа обслуживания хранения
 (``maintenance.py``); 001.21 —
 ``subscription.expire`` и ``subscription.notify_expiring`` (``subscriptions.py``) — заглушки, в
-расписание не входят. LOGIC-задачи (отзыв доступа, публикация состава, уведомления —
-``send_email`` в 001.52, агрегация, сверки — §5.4) добавляют свои обработчики сюда. Задачи
+расписание не входят; 001.51 — ``notify.email`` и ``notify.webhook`` (``notifications.py``) —
+заглушки доставки уведомлений, задачи ставит ``app.notifications.events.emit``. LOGIC-задачи
+(отзыв доступа, публикация состава, уведомления — ``send_email`` в 001.52, агрегация, сверки —
+§5.4) добавляют свои обработчики сюда. Задачи
 типов, которых здесь нет, исполнитель не выбирает — они ждут выпуска с обработчиком.
 Обработчик выполняется после выборки задачи, вне транзакции выборки; свои транзакции он
 открывает сам.
@@ -37,6 +39,7 @@ from app.jobs.handlers.maintenance import (
     ensure,
     purge,
 )
+from app.jobs.handlers.notifications import notify_email, notify_webhook
 from app.jobs.handlers.partitions import ensure_partitions
 from app.jobs.handlers.subscriptions import (
     SUBSCRIPTION_EXPIRE,
@@ -45,6 +48,7 @@ from app.jobs.handlers.subscriptions import (
     notify_expiring,
 )
 from app.jobs.queue import Job
+from app.notifications.delivery import NOTIFY_EMAIL, NOTIFY_WEBHOOK
 
 Handler = Callable[[asyncpg.Connection, Job], Awaitable[None]]
 
@@ -65,4 +69,6 @@ HANDLERS: dict[str, Handler] = {
     RETENTION_PURGE: purge,
     SUBSCRIPTION_EXPIRE: expire,
     SUBSCRIPTION_NOTIFY_EXPIRING: notify_expiring,
+    NOTIFY_EMAIL: notify_email,
+    NOTIFY_WEBHOOK: notify_webhook,
 }

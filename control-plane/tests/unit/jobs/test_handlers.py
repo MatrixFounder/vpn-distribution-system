@@ -1,5 +1,6 @@
-"""Реестр обработчиков очереди после задач 001.33 и 001.21: `limits.check`, три типа обслуживания
-хранения и два типа подписки зарегистрированы (иначе задачи копились бы в `pending` —
+"""Реестр обработчиков очереди после задач 001.33, 001.21 и 001.51: `limits.check`, три типа
+обслуживания хранения, два типа подписки и два типа доставки уведомлений (`notify.email`,
+`notify.webhook`) зарегистрированы (иначе задачи копились бы в `pending` —
 исполнитель выбирает только известные типы, §5.4), заглушки отказывают без повторов и не трогают
 подключение — зелёный «успех» отзыва, удаления или истечения, которых не было, хуже красной
 задачи, — и ни один из них не стоит в расписании планировщика, пока он заглушка."""
@@ -34,6 +35,11 @@ from app.jobs.handlers.maintenance import (
     drop_expired,
     ensure,
     purge,
+)
+from app.jobs.handlers.notifications import (
+    NOTIFICATION_TYPES,
+    notify_email,
+    notify_webhook,
 )
 from app.jobs.handlers.partitions import ensure_partitions
 from app.jobs.handlers.subscriptions import (
@@ -78,6 +84,9 @@ def test_the_new_job_types_are_registered_with_their_own_handlers() -> None:
     assert SUBSCRIPTION_TYPES == {"subscription.expire", "subscription.notify_expiring"}
     assert HANDLERS[SUBSCRIPTION_EXPIRE] is expire
     assert HANDLERS[SUBSCRIPTION_NOTIFY_EXPIRING] is notify_expiring
+    assert NOTIFICATION_TYPES == {"notify.email", "notify.webhook"}  # 001.51, §5.4
+    assert HANDLERS["notify.email"] is notify_email
+    assert HANDLERS["notify.webhook"] is notify_webhook
     assert HANDLERS["ensure_partitions"] is ensure_partitions, "обработчик 001.14 остаётся"
 
 
@@ -91,6 +100,8 @@ async def test_the_stubs_refuse_without_retries_and_without_touching_the_connect
         (RETENTION_PURGE, purge, "001.33"),
         (SUBSCRIPTION_EXPIRE, expire, "001.21"),
         (SUBSCRIPTION_NOTIFY_EXPIRING, notify_expiring, "001.21"),
+        ("notify.email", notify_email, "001.51"),
+        ("notify.webhook", notify_webhook, "001.51"),
     ):
         with pytest.raises(NonRetryableError, match=re.escape(f"{type_}: заглушка {task}")):
             await handler(NoConnection(), job(type_))
@@ -104,7 +115,8 @@ def test_the_stub_types_stay_off_the_schedule_until_they_are_real() -> None:
     ставит в расписание 001.83 — заглушка в расписании отчитывалась бы об истечении, которого не
     было."""
     scheduled = {periodic.type for periodic in scheduler.SCHEDULE}
-    assert not scheduled & (MAINTENANCE_TYPES | SUBSCRIPTION_TYPES | {LIMITS_CHECK}), scheduled
+    stubs = MAINTENANCE_TYPES | SUBSCRIPTION_TYPES | NOTIFICATION_TYPES | {LIMITS_CHECK}
+    assert not scheduled & stubs, scheduled
     assert "ensure_partitions" in scheduled
 
 

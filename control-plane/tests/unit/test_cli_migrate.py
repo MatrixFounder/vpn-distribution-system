@@ -33,6 +33,7 @@ EXPECTED_KEYS: dict[str, tuple[str, str] | None] = {
         "constraint",
         "control_plane.nodes.nodes_agent_section_version_range",
     ),
+    "170_users_email_undeliverable": ("column", "control_plane.users.email_undeliverable_at"),
 }
 
 _DDL = re.compile(r"^\s*(CREATE|ALTER|DROP)\b", re.IGNORECASE | re.MULTILINE)

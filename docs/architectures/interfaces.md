@@ -308,7 +308,8 @@ p95 ≤ 200 мс считается по времени апстрима, ни �
 | Окно обслуживания | API Alertmanager v2 (`silence` на приоритет «Отложенный») из C-01 по действию в панели; другого обращения C-01 к Alertmanager нет | создание и снятие — в Audit Log; Alertmanager недоступен — 503 (001.85, В-50) |
 
 Ключи идемпотентности задач: `notify:email:{event_id}`, `notify:webhook:{event_id}:{получатель}`
-(почта и каждый получатель webhook — своя задача), `aggregate:{day}` (тип
+(почта и каждый получатель webhook — своя задача; получатель — SHA-256 `url` элемента
+`settings.webhooks`, 001.51), `aggregate:{day}` (тип
 `traffic.aggregate_day`, полезная нагрузка `{"day"}`), `publish_user:{user_id}:{xid}` (xid —
 транзакция бизнес-операции: повторы внутри одной операции сливаются),
 `publish_node:{node_id}:{xid}` (тип `composition.publish_node`, исполнитель, ключ и постановка

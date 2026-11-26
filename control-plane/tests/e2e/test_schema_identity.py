@@ -285,3 +285,51 @@ async def test_auth_events_insert_as_app_rw(pg_dsn: str, migrate_env: dict[str, 
                 await conn.close()
         finally:
             owner.execute("DROP TABLE auth_events_probe")  # уносит и пробные строки
+
+
+UNDELIVERABLE_MIGRATION = "170_users_email_undeliverable"
+UNDELIVERABLE_COLUMN = (
+    "select data_type, is_nullable, column_default from information_schema.columns "
+    "where table_schema = 'control_plane' and table_name = 'users' "
+    "and column_name = 'email_undeliverable_at'"
+)
+UNDELIVERABLE_OF = "select email_undeliverable_at from users where id = $1"
+
+
+async def test_tc_mig_01_51_the_undeliverable_mark(
+    pg_dsn: str, migrate_env: dict[str, str]
+) -> None:
+    """TC-MIG-01 (001.51, В-37): миграция 170 заводит ``users.email_undeliverable_at timestamptz
+    NULL`` без умолчания — у существующего пользователя пометки нет; откат снимает колонку вместе
+    с поставленной пометкой (ровно один шаг), повторное применение возвращает её пустой."""
+    assert run_cli(migrate_env, "migrate").returncode == 0
+    email = f"mig-51-{uuid.uuid4().hex[:8]}@example.test"
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        user_id = await insert_user(conn, email=email)
+        column = await conn.fetchrow(UNDELIVERABLE_COLUMN)
+        assert column is not None
+        assert (column["data_type"], column["is_nullable"], column["column_default"]) == (
+            "timestamp with time zone",
+            "YES",
+            None,
+        )
+        assert await conn.fetchval(UNDELIVERABLE_OF, user_id) is None
+        await conn.execute("update users set email_undeliverable_at = now() where id = $1", user_id)
+    finally:
+        await conn.close()
+    try:
+        assert rollback_through(migrate_env, UNDELIVERABLE_MIGRATION) == 1
+        conn = await asyncpg.connect(pg_dsn)  # свежее подключение: форма таблицы сменилась
+        try:
+            assert await conn.fetchrow(UNDELIVERABLE_COLUMN) is None
+        finally:
+            await conn.close()
+    finally:
+        assert run_cli(migrate_env, "migrate").returncode == 0
+    conn = await asyncpg.connect(pg_dsn)
+    try:
+        assert await conn.fetchval(UNDELIVERABLE_OF, user_id) is None, "пометка снята с колонкой"
+    finally:
+        await conn.execute("delete from users where email = $1", email)
+        await conn.close()

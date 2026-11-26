@@ -884,6 +884,8 @@ events
   payload                jsonb
   dedup_key              text UNIQUE              — подавление повторов; формула ключа по
                                                      типу события — 001.51
+                                                     (app/notifications/events.py,
+                                                     dedup_key)
   created_at             timestamptz
 
 email_deliveries

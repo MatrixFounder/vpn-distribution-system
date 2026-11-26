@@ -109,6 +109,46 @@ async def composition_jobs_under_test_types(monkeypatch: pytest.MonkeyPatch) -> 
             await conn.close()
 
 
+# Типы задач доставки уведомлений, которые ставит emit под тестом (001.51): живой исполнитель
+# стенда знает notify.* (заглушки, отказ без повторов) и забрал бы задачи теста.
+TEST_NOTIFY_EMAIL = "test-notify.email"
+TEST_NOTIFY_WEBHOOK = "test-notify.webhook"
+
+
+@pytest.fixture(autouse=True)
+async def notification_jobs_under_test_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[None]:
+    """Задачи ``notify.email`` и ``notify.webhook``, поставленные ``emit`` под тестом, — под
+    типами ``test-notify.*``; после теста удаляются ровно они (по ``id``), а не все задачи этих
+    типов на общем стенде: стоящая задача растила бы ожидание очереди ``background``, а чужие
+    задачи параллельного прогона трогать нельзя."""
+    from app.jobs.queue import enqueue as real_enqueue
+    from app.notifications import events
+
+    monkeypatch.setattr(events, "EMAIL_JOB", TEST_NOTIFY_EMAIL)
+    monkeypatch.setattr(events, "WEBHOOK_JOB", TEST_NOTIFY_WEBHOOK)
+    placed: list[int] = []
+
+    async def recording(conn: Any, *args: Any, **kwargs: Any) -> Any:
+        enqueued = await real_enqueue(conn, *args, **kwargs)
+        placed.append(enqueued.id)
+        return enqueued
+
+    monkeypatch.setattr(events, "enqueue", recording)
+    yield
+    if placed:
+        conn = await asyncpg.connect(os.environ["PG_DSN"])
+        try:
+            await conn.execute(
+                "delete from jobs where id = any($1::bigint[]) and type = any($2::text[])",
+                placed,
+                [TEST_NOTIFY_EMAIL, TEST_NOTIFY_WEBHOOK],
+            )
+        finally:
+            await conn.close()
+
+
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
     """DSN PostgreSQL стенда разработки под ролью `app_rw` (роли создаёт bootstrap 001.03)."""

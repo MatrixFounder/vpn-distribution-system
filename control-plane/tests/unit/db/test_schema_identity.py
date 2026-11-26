@@ -39,6 +39,8 @@ EXPECTED_COLUMNS: dict[str, list[Column]] = {
         ("created_at", "timestamptz", False, "now()"),
         ("updated_at", "timestamptz", False, "now()"),
         ("deleted_at", "timestamptz", True, None),
+        # Миграция 170 (001.51, В-37): пометка недоставляемого адреса — изменение схемы 001.04.
+        ("email_undeliverable_at", "timestamptz", True, None),
     ],
     "admin_users": [
         ("id", "uuid", False, "uuidv7()"),

@@ -1,0 +1,57 @@
+{
+  "task": "001.51",
+  "history_markers": [
+    "прежн",
+    "раунд",
+    "было",
+    "уточнение 001.51",
+    "уточнения задачи 2026-11-26",
+    "роаст, раунд"
+  ],
+  "history_sections": {
+    "tests/tests-001/report-001-51.md": "^## Раунд 1 — роаст",
+    "tests/tests-001/report-001-29g.md": "^## Тесты"
+  },
+  "patterns": [
+    {
+      "name": "ключ node_address_changed без вида изменения",
+      "regex": "\\{type\\}:\\{user_id\\}:\\{node_id\\}:\\{(верс|version)|\\{node_id\\}:\\{(верс|version)",
+      "current": "{type}:{user_id}:{node_id}:{kind}:{version} — вид address | params входит в ключ (001.51)"
+    },
+    {
+      "name": "откат через 130 — пять шагов",
+      "regex": "(?<!170, )160, 150, 140, 131 и сама 130|IDENTITY_MIGRATION\\) == 5",
+      "current": "170, 160, 150, 140, 131 и 130 — шесть шагов"
+    },
+    {
+      "name": "колонки пометки недоставляемого адреса нет",
+      "regex": "email_undeliverable_at[^\\n]{0,40}(не заведен|нет в схеме|заведёт 001\\.78)",
+      "current": "users.email_undeliverable_at заводит миграция 170 (001.51)"
+    },
+    {
+      "name": "адрес получателя целиком в ключе задачи webhook",
+      "regex": "notify:webhook:\\{event_id\\}:\\{url\\}",
+      "current": "notify:webhook:{event_id}:{sha256(url)} (001.51, роаст, раунд 1)"
+    },
+    {
+      "name": "эпизод reconciliation_mismatch — сутки у всех видов сверки",
+      "regex": "день и вид сверки",
+      "current": "межисточниковая — нода и сутки, непрерывность — нода и начало разрыва, арифметическая — сутки без ноды (001.51)"
+    },
+    {
+      "name": "ключ событий подписки — на период, без конца периода",
+      "regex": "subscription_activated:\\{user_id\\}:\\{period_id\\}(?!:)|`\\{type\\}:\\{user_id\\}:\\{period_id\\}`, повтор в периоде",
+      "current": "{type}:{user_id}:{period_id}:{period_end} (решение заказчика 2026-11-26)"
+    },
+    {
+      "name": "channels_for в модуле обработчиков",
+      "regex": "jobs/handlers/notifications\\.py::channels_for",
+      "current": "channels_for в app/notifications/ (001.51, роаст, раунд 3)"
+    },
+    {
+      "name": "арифметическая сверка с нодой",
+      "regex": "сутки у арифметической и межисточниковой",
+      "current": "арифметическая — по всей системе, без ноды (решение заказчика 2026-11-26)"
+    }
+  ]
+}

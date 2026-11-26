@@ -45,7 +45,9 @@
   транзакции — `emit(conn, node_address_changed, user_id, node_id, payload={"kind": "address"})`
   строкой на каждого пользователя ноды. Пользователь ноды — строка `node_user_state` ноды в
   состоянии, отличном от `removed` (001.29), тот же набор, что у замены ключевой пары (001.27).
-  Ключ `dedup_key` — формула 001.51, версия — `id` новой строки `node_ip_history`. Смена
+  Ключ `dedup_key` — формула 001.51, версия — `id` новой строки `node_ip_history`, вид — `address`
+  (`dedup_key(node_address_changed, user_id=…, node_id=…, kind="address", version=…)`: вид входит
+  в ключ, уточнение 001.51 2026-11-26). Смена
   `public_ipv6` и `fqdn` истории и события не порождает: история адреса задана для `public_ipv4`
   (idea §4.4), а ссылки профилей MVP — REALITY по `public_ipv4` (001.43); ключевой материал REALITY
   смена адреса не меняет (idea §4.7)

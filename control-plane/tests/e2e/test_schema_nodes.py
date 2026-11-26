@@ -302,8 +302,8 @@ async def test_rollback_through_130_clears_test_identities_first(
         )
         node_id = await insert_node(conn, code, billing_id)
         await conn.execute(IDENTITY_ROW, node_id, "rb-130-left", "RB130L")
-        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 5, (
-            "160, 150, 140, 131 и сама 130"
+        assert rollback_through(migrate_env, IDENTITY_MIGRATION) == 6, (
+            "170, 160, 150, 140, 131 и сама 130"
         )
         assert await conn.fetchval("select count(*) from node_identities") == 0
     finally:

@@ -33,10 +33,11 @@
 #### Файл: `control-plane/app/notifications/events.py`
 
 - `emit` ставит задачи доставки по `channels_for` (заглушка 001.51 ставила обе задачи на каждое событие); язык получателя из профиля; ключ подавления `dedup_key` — 001.51
+- `channels_for` — в `app/notifications/` (рядом с `events`, например `delivery.py`), а не в модуле обработчиков: `app.notifications.events` никогда не импортирует `app.jobs.handlers` — пакет грузит все обработчики, а обработчики-источники (001.83, 001.35, 001.30, 001.37d) импортируют `emit`, обратное ребро даёт цикл (страж `tests/unit/notifications/test_events.py::test_events_never_import_the_handler_package`, 001.51); типы и очередь задач доставки — `app/notifications/delivery.py`; `channels_for` получает тип события и вид (`payload.kind`): у `reconciliation_mismatch` с видом `arithmetic` ноды нет (решение заказчика 2026-11-26)
 
 #### Файл: `control-plane/app/jobs/handlers/notifications.py`
 
-- `channels_for(type)` — каналы постановки `notify.email` и `notify.webhook` по таблице §4.17 с ключами 001.51 (`notify:email:{event_id}`, `notify:webhook:{event_id}:{получатель}`): пользовательские события — почта и webhook; `node_suspended_by_provider` — webhook приложения с идентификатором события: это однократное событие перехода в ручной статус, а правила Alertmanager ноды в ручных статусах исключают (§17.4); остальные операторские события — только строка `events`, доставку, группировку по ноде и типу и окно обслуживания (`silence`) выполняет Alertmanager (001.68)
+- (уточнение 001.51: функция живёт в `app/notifications/`, см. выше) `channels_for(type)` — каналы постановки `notify.email` и `notify.webhook` по таблице §4.17 с ключами 001.51 (`notify:email:{event_id}`, `notify:webhook:{event_id}:{получатель}`): пользовательские события — почта и webhook; `node_suspended_by_provider` — webhook приложения с идентификатором события: это однократное событие перехода в ручной статус, а правила Alertmanager ноды в ручных статусах исключают (§17.4); остальные операторские события — только строка `events`, доставку, группировку по ноде и типу и окно обслуживания (`silence`) выполняет Alertmanager (001.68)
 - проверка по расписанию: нода, у которой возраст `period_end` последнего принятого интервала больше порога из `settings` (ключ `report_buffer_threshold_hours` и миграция-сид со значением по умолчанию 20 ч — эта задача; тот же порог использует правило 001.68), → `emit(node_report_buffer_full, node_id)`; ноды в ручных статусах исключены; источник — данные Control Plane, а не метрики агента: буфер растёт, когда отчёты ноды до Control Plane не доходят, и метрика агента пришла бы только после восстановления связи
 
 ### Интеграция компонентов
@@ -81,7 +82,7 @@
 ### Модульные тесты
 
 1. **TC-UNIT-01:** Каналы события
-   - Проверяемая функция: `jobs/handlers/notifications.py::channels_for`
+   - Проверяемая функция: `notifications/delivery.py::channels_for` (место — уточнение 001.51)
    - Входные данные: `traffic_80`; `node_offline`; `node_suspended_by_provider`
    - Ожидаемый результат: почта и webhook; нет каналов; webhook
 
