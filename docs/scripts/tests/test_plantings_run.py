@@ -394,6 +394,7 @@ HOOKED = planting("hooked", SIGN, "return 1", [T + "test_sign"], after="note")
 HOOK_FAILS = planting("hook_fails", SIGN, "return 1", [T + "test_sign"], after="fail")
 BROKEN = planting("b", SIGN, "return 1", ["tests/test_broken.py::test_broken"], subset="broken")
 ORPHAN = "plantings-orphan-"
+HANG_LIFETIME = 180  # с, больше предела самого долгого сценария (120 с)
 
 
 def hanging(
@@ -409,7 +410,10 @@ def hanging(
     lines.append(f"    subprocess.Popen([sys.executable, '-c', {child!r}, {mark!r}])")
     if stubborn:
         lines.append("    signal.signal(signal.SIGTERM, signal.SIG_IGN)")
-    lines += ["    while True:", "        pass"]
+    # Занятый цикл ограничен сроком: посадки проверяют сторожа и снятие группы, выключая их, и
+    # тогда зависший pytest переживает тест. Без срока он часами держал ядро (RF-5, 2026-11-26).
+    lines += ["    import time", f"    end = time.monotonic() + {HANG_LIFETIME}"]
+    lines += ["    while time.monotonic() < end:", "        pass"]
     return planting("hang", SLOW, "\n".join(lines), [T + "test_slow"], timeout=timeout)
 
 
