@@ -59,6 +59,12 @@ TREE = {
 
         def mode():
             return "clean"
+
+
+        def checked(x):
+            if x < 0:
+                raise ValueError("отрицательное")
+            return x
         """
     ),
     "proj/fmt.py": textwrap.dedent(
@@ -154,6 +160,18 @@ TREE = {
 
         def test_with_fixture(checked):
             assert checked
+
+
+        def test_refuses_negative():
+            from calc import checked as check
+
+            with pytest.raises(ValueError):
+                check(-1)
+
+
+        def test_fails_explicitly():
+            if sign(0) != -1:
+                pytest.fail("ноль — не отрицательный знак")
         """
     ),
     "proj/tests/test_fmt.py": textwrap.dedent(
@@ -347,6 +365,15 @@ WHOLE = {
     "file": FMT,
 }
 SETUP = planting("setup", SIGN, "return 1", [T + "test_with_fixture"])
+# Провалы pytest: «DID NOT RAISE» у pytest.raises и pytest.fail — проверка (их класс pytest
+# объявляет в модуле builtins).
+NO_RAISE = planting(
+    "no_raise",
+    '        raise ValueError("отрицательное")',
+    "        pass",
+    [T + "test_refuses_negative"],
+)
+EXPLICIT = planting("explicit", SIGN, "return 1 if x > 0 else 0", [T + "test_fails_explicitly"])
 ELSEWHERE = planting(  # ошибка сбора test_fmt.py не останавливает прогон test_sign
     "elsewhere",
     SIGN,
@@ -491,7 +518,7 @@ class Verdicts(Harness):
     def test_each_verdict_on_a_real_pytest_run(self) -> None:
         plants = [
             RED, EXC, RAISES, BASE, PARTIAL, PARAMS, MIXED, COLLECT, OTHER, GREEN, DATA, MULTI,
-            SAME, PREFIX, WHOLE, SETUP, ELSEWHERE,
+            SAME, PREFIX, WHOLE, SETUP, ELSEWHERE, NO_RAISE, EXPLICIT,
         ]  # fmt: skip
         self.assertEqual(self.run_plants(plants), 1, self.output)
         self.assertEqual(
@@ -514,6 +541,8 @@ class Verdicts(Harness):
                 "whole": "RED",
                 "setup": "EXCEPTION",
                 "elsewhere": "RED",
+                "no_raise": "RED",
+                "explicit": "RED",
             },
             self.output,
         )
@@ -774,7 +803,7 @@ class Selection(Harness):
         twice = planting("twice", "return", "yield", [T + "test_sign"])
         code, out = self.dry([twice])
         self.assertEqual(code, 1)
-        self.assertIn("образец 5 раз вместо 1", out)
+        self.assertIn("образец 6 раз вместо 1", out)  # sign, zero_sign, double, slow, mode, checked
 
     def test_an_edit_that_breaks_the_next_one_fails_dry(self) -> None:
         clash = {

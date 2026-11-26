@@ -59,10 +59,18 @@ def _watch() -> Any:
     return module if getattr(module, "PLANTINGS_WATCH", False) is True else None
 
 
+def _name(kind: type) -> str:
+    # pytest ставит своим исключениям исхода __module__ = "builtins" ради вывода «Failed: …», и
+    # имя по модулю дало бы builtins.Failed — харнесс ждёт полное имя провала pytest.
+    if kind is pytest.fail.Exception:
+        return "_pytest.outcomes.Failed"
+    return f"{kind.__module__}.{kind.__qualname__}"
+
+
 def _types(excinfo: pytest.ExceptionInfo[BaseException] | None) -> list[str]:
     if excinfo is None:
         return []
-    return [f"{c.__module__}.{c.__qualname__}" for c in excinfo.type.__mro__]
+    return [_name(c) for c in excinfo.type.__mro__]
 
 
 def _message(excinfo: pytest.ExceptionInfo[BaseException] | None) -> str:
