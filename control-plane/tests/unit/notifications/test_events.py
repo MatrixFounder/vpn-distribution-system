@@ -48,7 +48,12 @@ DAY = dt.date(2026, 11, 25)
 
 # Части каждого типа: литералы, а не вывод из PARTS — тест сверяет таблицу с формулами задачи.
 SAMPLE: dict[EventType, dict[str, Any]] = {
-    EventType.SUBSCRIPTION_ACTIVATED: {"user_id": USER, "period_id": PERIOD, "period_end": AT},
+    EventType.SUBSCRIPTION_ACTIVATED: {
+        "user_id": USER,
+        "kind": "activated",
+        "period_id": PERIOD,
+        "period_end": AT,
+    },
     EventType.SUBSCRIPTION_EXPIRING: {"user_id": USER, "period_id": PERIOD, "period_end": AT},
     EventType.SUBSCRIPTION_EXPIRED: {"user_id": USER, "period_id": PERIOD, "period_end": AT},
     EventType.TRAFFIC_80: {"user_id": USER, "period_id": PERIOD},
@@ -68,7 +73,7 @@ SAMPLE: dict[EventType, dict[str, Any]] = {
 }
 STAMP = "2026-11-26T09:30:15.120000+00:00"
 EXPECTED_KEYS: dict[EventType, str] = {
-    EventType.SUBSCRIPTION_ACTIVATED: f"subscription_activated:{USER}:{PERIOD}:{STAMP}",
+    EventType.SUBSCRIPTION_ACTIVATED: f"subscription_activated:{USER}:activated:{PERIOD}:{STAMP}",
     EventType.SUBSCRIPTION_EXPIRING: f"subscription_expiring:{USER}:{PERIOD}:{STAMP}",
     EventType.SUBSCRIPTION_EXPIRED: f"subscription_expired:{USER}:{PERIOD}:{STAMP}",
     EventType.TRAFFIC_80: f"traffic_80:{USER}:{PERIOD}",
@@ -145,19 +150,38 @@ def test_tc_unit_01_episodes_and_revocations_get_their_own_keys() -> None:
 
 
 def test_tc_unit_01_an_extension_re_arms_the_subscription_events() -> None:
-    """Продление или смена тарифа, сдвинувшие конец того же периода, — новое «истекает» перед
-    новым концом и новое «активирована» (решение заказчика 2026-11-26): конец периода — эпизод
-    ключа событий подписки; тот же конец — тот же ключ."""
-    for event in (
-        EventType.SUBSCRIPTION_ACTIVATED,
-        EventType.SUBSCRIPTION_EXPIRING,
-        EventType.SUBSCRIPTION_EXPIRED,
+    """Сдвиг конца того же периода (бонус дней, смена тарифа) — новое «истекает» перед новым
+    концом и новое «истекла» (решение заказчика 2026-11-26): конец периода — эпизод ключа; тот же
+    конец — тот же ключ. Активация с тем же правилом — вид ``activated``."""
+    for event, kind in (
+        (EventType.SUBSCRIPTION_ACTIVATED, {"kind": "activated"}),
+        (EventType.SUBSCRIPTION_EXPIRING, {}),
+        (EventType.SUBSCRIPTION_EXPIRED, {}),
     ):
         keys = [
-            dedup_key(event, user_id=USER, period_id=PERIOD, period_end=end)
+            dedup_key(event, user_id=USER, period_id=PERIOD, period_end=end, **kind)
             for end in (AT, AT + dt.timedelta(days=60), AT)
         ]
         assert keys[0] != keys[1] and keys[0] == keys[2], event
+
+
+def test_tc_unit_01_every_plan_change_is_its_own_event() -> None:
+    """Смена тарифа (решение заказчика 2026-11-26) — вид ``plan_changed``, эпизод — момент смены:
+    две смены в одном периоде с тем же концом — два ключа; повтор одной смены — один ключ; смена и
+    активация в один момент — разные ключи (вид в ключе)."""
+    changes = [
+        dedup_key(
+            EventType.SUBSCRIPTION_ACTIVATED,
+            user_id=USER,
+            kind="plan_changed",
+            period_id=PERIOD,
+            changed_at=at,
+        )
+        for at in (AT, LATER, AT)
+    ]
+    assert changes[0] == f"subscription_activated:{USER}:plan_changed:{PERIOD}:{STAMP}"
+    assert changes[0] != changes[1] and changes[0] == changes[2]
+    assert changes[0] != EXPECTED_KEYS[EventType.SUBSCRIPTION_ACTIVATED]
 
 
 def test_tc_unit_01_each_continuity_gap_is_its_own_event() -> None:
@@ -209,6 +233,8 @@ def test_tc_unit_03_version_zero_is_a_version() -> None:
 
 
 ADDRESS = SAMPLE[EventType.NODE_ADDRESS_CHANGED]
+ACTIVATION = SAMPLE[EventType.SUBSCRIPTION_ACTIVATED]
+PLAN_CHANGE = {"user_id": USER, "kind": "plan_changed", "period_id": PERIOD, "changed_at": AT}
 RECONCILE = SAMPLE[EventType.RECONCILIATION_MISMATCH]
 
 
@@ -216,6 +242,11 @@ RECONCILE = SAMPLE[EventType.RECONCILIATION_MISMATCH]
     ("event", "parts"),
     [
         (EventType.TRAFFIC_80, {"user_id": USER}),  # нет периода
+        (EventType.SUBSCRIPTION_ACTIVATED, {**ACTIVATION, "kind": None}),  # нет вида
+        (EventType.SUBSCRIPTION_ACTIVATED, {**ACTIVATION, "kind": "address"}),
+        (EventType.SUBSCRIPTION_ACTIVATED, {**ACTIVATION, "kind": "plan_changed"}),  # конец
+        (EventType.SUBSCRIPTION_ACTIVATED, {**PLAN_CHANGE, "kind": "activated"}),  # момент смены
+        (EventType.SUBSCRIPTION_ACTIVATED, {**PLAN_CHANGE, "changed_at": DAY}),
         (EventType.TRAFFIC_EXHAUSTED, {"user_id": USER, "period_id": PERIOD}),  # нет момента
         (EventType.TRAFFIC_80, {"user_id": USER, "period_id": PERIOD, "node_id": NODE}),
         (EventType.NODE_OFFLINE, {"node_id": NODE, "status_changed_at": None}),
@@ -236,6 +267,11 @@ RECONCILE = SAMPLE[EventType.RECONCILIATION_MISMATCH]
     ],
     ids=[
         "missing-period",
+        "activation-without-kind",
+        "activation-foreign-kind",
+        "plan-change-by-end",
+        "activation-by-change-moment",
+        "plan-change-day",
         "missing-moment",
         "extra-node",
         "none-moment",

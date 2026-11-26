@@ -14,10 +14,14 @@
 ``dedup_key(type, **части)`` — формулы ключа по типам (решения заказчика 2026-10-25, В-7, В-41,
 и 2026-11-26; уточнения задачи 2026-11-26):
 
-- события подписки («активирована», «истекает», «истекла») —
-  ``{type}:{user_id}:{period_id}:{period_end}``: продление и смена тарифа, сдвинувшие конец
-  периода, дают новое событие, и предупреждение приходит перед новым концом, а не перед прежним
-  (решение заказчика 2026-11-26);
+- «истекает» и «истекла» — ``{type}:{user_id}:{period_id}:{period_end}``: продление и смена
+  тарифа, сдвинувшие конец периода, дают новое событие, и предупреждение приходит перед новым
+  концом, а не перед прежним (решение заказчика 2026-11-26);
+- «Подписка активирована или изменена» (``subscription_activated``; вид — ``payload.kind``, как у
+  смены адреса ноды, В-41): активация и продление — вид ``activated``,
+  ``{type}:{user_id}:activated:{period_id}:{period_end}``; смена тарифа — вид ``plan_changed``,
+  ``{type}:{user_id}:plan_changed:{period_id}:{changed_at}``: каждая смена даёт своё событие, и
+  письмо сообщает, что подписка изменена (решение заказчика 2026-11-26);
 - лимиты — ``{type}:{user_id}:{period_id}``; ``traffic_exhausted`` — ещё момент исчерпания:
   каждый новый отзыв доступа в периоде даёт новое событие, 80 и 95 % — одно за период;
 - ``node_address_changed`` — строка на каждого пользователя ноды,
@@ -38,7 +42,8 @@
 90 дней (data-model §4.5).
 
 ``emit`` сверяет ключ с событием до записи: тип, адресат (``user_id``, ``node_id``) и вид
-(``payload.kind`` у ``node_address_changed`` и ``reconciliation_mismatch``) — ключ чужого
+(``payload.kind`` у ``subscription_activated``, ``node_address_changed`` и
+``reconciliation_mismatch``) — ключ чужого
 пользователя или чужого вида иначе подавил бы его настоящее событие.
 
 Битый элемент ``settings.webhooks`` (не объект со строкой ``url``, повтор адреса) пропускается с
@@ -103,6 +108,11 @@ USER_EVENTS: frozenset[EventType] = frozenset(
 )
 OPERATOR_EVENTS: frozenset[EventType] = frozenset(EventType) - USER_EVENTS
 
+ACTIVATED = "activated"
+PLAN_CHANGED = "plan_changed"
+# payload.kind «Подписка активирована или изменена»: активация и продление — ``activated``, смена
+# тарифа — ``plan_changed`` (решение заказчика 2026-11-26).
+SUBSCRIPTION_KINDS = frozenset({ACTIVATED, PLAN_CHANGED})
 ADDRESS_CHANGE_KINDS = frozenset({"address", "params"})  # payload.kind, В-41
 ARITHMETIC = "arithmetic"
 CONTINUITY = "continuity"
@@ -110,6 +120,7 @@ CONTINUITY = "continuity"
 RECONCILIATION_KINDS = frozenset({ARITHMETIC, "cross_source", CONTINUITY})
 # Виды по типу: часть ключа ``kind`` и ``payload.kind`` события.
 KINDS: dict[EventType, frozenset[str]] = {
+    EventType.SUBSCRIPTION_ACTIVATED: SUBSCRIPTION_KINDS,
     EventType.NODE_ADDRESS_CHANGED: ADDRESS_CHANGE_KINDS,
     EventType.RECONCILIATION_MISMATCH: RECONCILIATION_KINDS,
 }
@@ -117,10 +128,12 @@ KINDS: dict[EventType, frozenset[str]] = {
 _USER_PERIOD = ("user_id", "period_id")
 _SUBSCRIPTION = (*_USER_PERIOD, "period_end")  # конец периода — эпизод (2026-11-26)
 _NODE_STATUS = ("node_id", "status_changed_at")
-# Части ключа по типу, в порядке ключа; у сверки — по виду (``parts_of``): межисточниковая —
-# эта строка, арифметическая — ``ARITHMETIC_PARTS``, непрерывность — ``CONTINUITY_PARTS``.
+# Части ключа по типу, в порядке ключа; вид — сразу после адресата. У сверки и у
+# «активирована или изменена» — по виду (``parts_of``): межисточниковая сверка и активация — эта
+# строка, арифметическая — ``ARITHMETIC_PARTS``, непрерывность — ``CONTINUITY_PARTS``, смена
+# тарифа — ``PLAN_CHANGE_PARTS``.
 PARTS: dict[EventType, tuple[str, ...]] = {
-    EventType.SUBSCRIPTION_ACTIVATED: _SUBSCRIPTION,
+    EventType.SUBSCRIPTION_ACTIVATED: ("user_id", "kind", "period_id", "period_end"),
     EventType.SUBSCRIPTION_EXPIRING: _SUBSCRIPTION,
     EventType.SUBSCRIPTION_EXPIRED: _SUBSCRIPTION,
     EventType.TRAFFIC_80: _USER_PERIOD,
@@ -133,13 +146,15 @@ PARTS: dict[EventType, tuple[str, ...]] = {
     EventType.RECONCILIATION_MISMATCH: ("node_id", "kind", "day"),
     EventType.NODE_REPORT_BUFFER_FULL: ("node_id", "period_end"),
 }
+# Каждая смена тарифа — своё событие (решение заказчика 2026-11-26): эпизод — момент смены.
+PLAN_CHANGE_PARTS = ("user_id", "kind", "period_id", "changed_at")
 CONTINUITY_PARTS = ("node_id", "kind", "gap_start")  # каждый разрыв — своё событие (2026-11-26)
 # Арифметическая сверка — по всей системе за сутки, без ноды (001.33 ``arithmetic(conn, day)``;
 # решение заказчика 2026-11-26).
 ARITHMETIC_PARTS = ("kind", "day")
 
 _IDS = frozenset({"user_id", "node_id", "period_id"})
-_MOMENTS = frozenset({"exhausted_at", "status_changed_at", "period_end", "gap_start"})
+_MOMENTS = frozenset({"exhausted_at", "status_changed_at", "period_end", "gap_start", "changed_at"})
 # Адресат по типу: пользовательским нужен пользователь, операторским — нода, смене адреса — оба.
 _SUBJECT: dict[EventType, tuple[bool, bool]] = {
     event: (
@@ -194,8 +209,11 @@ def _part(event: EventType, name: str, value: Any) -> str:
 
 def parts_of(type: EventType | str, kind: str | None = None) -> tuple[str, ...]:  # noqa: A002
     """Части ключа события ``type``; у сверки — по виду ``kind``: непрерывность — начало разрыва
-    вместо суток, арифметическая — без ноды."""
+    вместо суток, арифметическая — без ноды; у «активирована или изменена» смена тарифа — момент
+    смены вместо конца периода."""
     event = _event(type)
+    if event is EventType.SUBSCRIPTION_ACTIVATED and kind == PLAN_CHANGED:
+        return PLAN_CHANGE_PARTS
     if event is EventType.RECONCILIATION_MISMATCH and kind == CONTINUITY:
         return CONTINUITY_PARTS
     if event is EventType.RECONCILIATION_MISMATCH and kind == ARITHMETIC:

@@ -96,7 +96,13 @@ def subject_of(event: EventType) -> tuple[uuid.UUID | None, uuid.UUID | None, di
         return user, None, {"user_id": user, "period_id": period, "exhausted_at": AT}
     if event in (EventType.TRAFFIC_80, EventType.TRAFFIC_95):
         return user, None, {"user_id": user, "period_id": period}
-    if event in events.USER_EVENTS:  # события подписки: эпизод — конец периода
+    if event is EventType.SUBSCRIPTION_ACTIVATED:  # вид — активация, эпизод — конец периода
+        return (
+            user,
+            None,
+            {"user_id": user, "kind": "activated", "period_id": period, "period_end": AT},
+        )
+    if event in events.USER_EVENTS:  # «истекает», «истекла»: эпизод — конец периода
         return user, None, {"user_id": user, "period_id": period, "period_end": AT}
     if event is EventType.RECONCILIATION_MISMATCH:
         return None, node, {"node_id": node, "kind": "cross_source", "day": DAY}
@@ -435,6 +441,19 @@ async def test_the_key_must_belong_to_the_event(pg_dsn: str) -> None:
         (EventType.NODE_ADDRESS_CHANGED, owner, node, None, address_key),  # нет вида
         (EventType.NODE_ADDRESS_CHANGED, owner, uuid.uuid4(), {"kind": "address"}, address_key),
     ]
+    period = uuid.uuid4()
+    activated = EventType.SUBSCRIPTION_ACTIVATED
+    change_key = dedup_key(
+        activated, user_id=owner, kind="plan_changed", period_id=period, changed_at=AT
+    )
+    activation_key = dedup_key(
+        activated, user_id=owner, kind="activated", period_id=period, period_end=AT
+    )
+    # Вид нагрузки — не вид ключа: письмо «изменена» по ключу активации подавило бы настоящую
+    # активацию, письмо «активирована» по ключу смены — сообщило бы не то.
+    cases.append((activated, owner, None, {"kind": "activated"}, change_key))
+    cases.append((activated, owner, None, {"kind": "plan_changed"}, activation_key))
+    cases.append((activated, owner, None, None, activation_key))  # нет вида
     daily = dedup_key(EventType.RECONCILIATION_MISMATCH, kind="arithmetic", day=DAY)
     reconcile = EventType.RECONCILIATION_MISMATCH
     for wrong_kind in ({"kind": "cross_source"}, {"kind": "continuity"}, None):
@@ -453,6 +472,44 @@ async def test_the_key_must_belong_to_the_event(pg_dsn: str) -> None:
         assert await events_with(conn, key) == []
         assert await events_with(conn, address_key) == []
         assert await events_with(conn, daily) == []
+        assert await events_with(conn, change_key) == []
+        assert await events_with(conn, activation_key) == []
+
+
+async def test_every_plan_change_places_its_own_letter(pg_dsn: str) -> None:
+    """Смена тарифа (решение заказчика 2026-11-26): каждая смена — своё событие вида
+    ``plan_changed`` со своим письмом, даже при том же конце периода; повтор той же смены (тот же
+    момент) подавлен. Ключи выписаны по формуле задачи, а не вычислены ``dedup_key``."""
+    user, period = uuid.uuid4(), uuid.uuid4()
+    later = AT + dt.timedelta(minutes=7)
+    payload = {"kind": "plan_changed"}
+    keys = [
+        f"subscription_activated:{user}:plan_changed:{period}:2026-11-26T09:30:15.120000+00:00",
+        f"subscription_activated:{user}:plan_changed:{period}:2026-11-26T09:37:15.120000+00:00",
+    ]
+    assert [
+        dedup_key(
+            EventType.SUBSCRIPTION_ACTIVATED,
+            user_id=user,
+            kind="plan_changed",
+            period_id=period,
+            changed_at=at,
+        )
+        for at in (AT, later)
+    ] == keys
+    async with rolled_back(pg_dsn) as conn:
+        made = [
+            await emit(conn, EventType.SUBSCRIPTION_ACTIVATED, user, None, payload, dedup_key=key)
+            for key in keys
+        ]
+        again = await emit(
+            conn, EventType.SUBSCRIPTION_ACTIVATED, user, None, payload, dedup_key=keys[0]
+        )
+        assert None not in made and made[0] != made[1] and again is None
+        for event_id, key in zip(made, keys, strict=True):
+            [row] = await events_with(conn, key)
+            assert (row["id"], json.loads(row["payload"])) == (event_id, payload)
+            assert list(await jobs_of(conn, event_id)) == [f"notify:email:{event_id}"]
 
 
 async def test_the_arithmetic_event_has_no_node(pg_dsn: str) -> None:
